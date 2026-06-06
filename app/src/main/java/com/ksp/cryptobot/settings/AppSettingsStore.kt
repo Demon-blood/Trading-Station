@@ -4,6 +4,7 @@ import android.content.Context
 import com.ksp.cryptobot.core.BotMode
 import com.ksp.cryptobot.core.BotSettings
 import com.ksp.cryptobot.core.StrategyMode
+import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.core.OrderManagementMode
 import com.ksp.cryptobot.security.SecureSettingsStore
 import java.math.BigDecimal
@@ -59,7 +60,9 @@ class AppSettingsStore(context: Context) {
             orderManagementMode = OrderManagementMode.valueOf(prefs.getString("order_management_mode", OrderManagementMode.SPLIT_TAKE_PROFIT.name) ?: OrderManagementMode.SPLIT_TAKE_PROFIT.name),
             enableNewsSeverityFilter = prefs.getBoolean("enable_news_severity_filter", true),
             highSeverityNewsBlockHours = prefs.getInt("high_severity_news_block_hours", 12),
-            enableAutoSafeMode = prefs.getBoolean("enable_auto_safe_mode", true)
+            enableAutoSafeMode = prefs.getBoolean("enable_auto_safe_mode", true),
+            exchangeProvider = ExchangeProvider.valueOf(prefs.getString("exchange_provider", ExchangeProvider.PAPER.name) ?: ExchangeProvider.PAPER.name),
+            manualExecutionMode = prefs.getBoolean("manual_execution_mode", true)
         )
     }
 
@@ -111,16 +114,28 @@ class AppSettingsStore(context: Context) {
             .putBoolean("enable_news_severity_filter", settings.enableNewsSeverityFilter)
             .putInt("high_severity_news_block_hours", settings.highSeverityNewsBlockHours)
             .putBoolean("enable_auto_safe_mode", settings.enableAutoSafeMode)
+            .putString("exchange_provider", settings.exchangeProvider.name)
+            .putBoolean("manual_execution_mode", settings.manualExecutionMode)
             .apply()
     }
 
     fun saveBinanceKeys(apiKey: String, secretKey: String) {
-        secure.saveEncryptedString("binance_api_key", apiKey.trim())
-        secure.saveEncryptedString("binance_secret_key", secretKey.trim())
+        saveExchangeKeys(ExchangeProvider.BINANCE_READ_ONLY, apiKey, secretKey)
     }
 
-    fun binanceApiKey(): String? = secure.readEncryptedString("binance_api_key")?.takeIf { it.isNotBlank() }
-    fun binanceSecretKey(): String? = secure.readEncryptedString("binance_secret_key")?.takeIf { it.isNotBlank() }
+    fun saveExchangeKeys(provider: ExchangeProvider, apiKey: String, secretKey: String) {
+        secure.saveEncryptedString("${provider.name.lowercase()}_api_key", apiKey.trim())
+        secure.saveEncryptedString("${provider.name.lowercase()}_secret_key", secretKey.trim())
+    }
+
+    fun exchangeApiKey(provider: ExchangeProvider): String? =
+        secure.readEncryptedString("${provider.name.lowercase()}_api_key")?.takeIf { it.isNotBlank() }
+
+    fun exchangeSecretKey(provider: ExchangeProvider): String? =
+        secure.readEncryptedString("${provider.name.lowercase()}_secret_key")?.takeIf { it.isNotBlank() }
+
+    fun binanceApiKey(): String? = exchangeApiKey(ExchangeProvider.BINANCE_READ_ONLY)
+    fun binanceSecretKey(): String? = exchangeSecretKey(ExchangeProvider.BINANCE_READ_ONLY)
 
     fun saveNewsApiKey(apiKey: String) = secure.saveEncryptedString("news_api_key", apiKey.trim())
     fun newsApiKey(): String? = secure.readEncryptedString("news_api_key")?.takeIf { it.isNotBlank() }

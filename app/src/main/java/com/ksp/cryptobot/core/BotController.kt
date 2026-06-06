@@ -3,8 +3,13 @@ package com.ksp.cryptobot.core
 import android.content.Context
 import com.ksp.cryptobot.data.*
 import com.ksp.cryptobot.automation.AdvancedAutomationEngine
-import com.ksp.cryptobot.exchange.BinanceSpotClient
+import com.ksp.cryptobot.exchange.BinanceReadOnlyClient
+import com.ksp.cryptobot.exchange.BitvavoClient
+import com.ksp.cryptobot.exchange.CoinbaseAdvancedClient
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
+import com.ksp.cryptobot.exchange.ExchangeCapabilityChecker
+import com.ksp.cryptobot.exchange.KrakenSpotClient
+import com.ksp.cryptobot.exchange.ManualExecutionClient
 import com.ksp.cryptobot.exchange.PaperExchangeClient
 import com.ksp.cryptobot.execution.ExecutionGuard
 import com.ksp.cryptobot.execution.AdvancedRiskManager
@@ -89,8 +94,13 @@ class BotController(
         ticker: MarketTicker,
         decision: AiDecision
     ) {
-        if (settings.mode != BotMode.PAPER && (settingsStore.binanceApiKey().isNullOrBlank() || settingsStore.binanceSecretKey().isNullOrBlank())) {
-            _status.value = "Trade blocked: missing Binance API keys."
+        val capability = ExchangeCapabilityChecker.capability(settings.exchangeProvider)
+        if (settings.manualExecutionMode || capability.manualOnly || !capability.liveTrading) {
+            _status.value = "Manual/read-only mode: signal saved, no automatic order sent. ${capability.warning}"
+            return
+        }
+        if (settings.mode != BotMode.PAPER && (settingsStore.exchangeApiKey(settings.exchangeProvider).isNullOrBlank() || settingsStore.exchangeSecretKey(settings.exchangeProvider).isNullOrBlank())) {
+            _status.value = "Trade blocked: missing ${capability.displayName} API credentials."
             return
         }
         val allowed = guard.canExecute(settings, decision)
@@ -136,13 +146,16 @@ class BotController(
     }
 
     private fun createExchange(settings: BotSettings): CryptoExchangeClient {
-        if (settings.mode == BotMode.PAPER) return PaperExchangeClient()
-        val apiKey = settingsStore.binanceApiKey()
-        val secret = settingsStore.binanceSecretKey()
-        return if (!apiKey.isNullOrBlank() && !secret.isNullOrBlank()) {
-            BinanceSpotClient(apiKey, secret)
-        } else {
-            BinanceSpotClient("", "")
+        if (settings.mode == BotMode.PAPER || settings.exchangeProvider == ExchangeProvider.PAPER) return PaperExchangeClient()
+        val apiKey = settingsStore.exchangeApiKey(settings.exchangeProvider).orEmpty()
+        val secret = settingsStore.exchangeSecretKey(settings.exchangeProvider).orEmpty()
+        return when (settings.exchangeProvider) {
+            ExchangeProvider.PAPER -> PaperExchangeClient()
+            ExchangeProvider.BINANCE_READ_ONLY -> BinanceReadOnlyClient()
+            ExchangeProvider.KRAKEN -> KrakenSpotClient(apiKey, secret)
+            ExchangeProvider.COINBASE_ADVANCED -> CoinbaseAdvancedClient(apiKey, secret)
+            ExchangeProvider.BITVAVO -> BitvavoClient(apiKey, secret)
+            ExchangeProvider.MANUAL -> ManualExecutionClient()
         }
     }
 

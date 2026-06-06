@@ -67,6 +67,7 @@ import com.ksp.cryptobot.core.BotMode
 import com.ksp.cryptobot.core.BotSettings
 import com.ksp.cryptobot.core.SignalAction
 import com.ksp.cryptobot.core.StrategyMode
+import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.core.OrderManagementMode
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
@@ -273,14 +274,16 @@ private fun AdvancedBotApp(
                     onSecretKey = { secretKey = it },
                     onNewsKey = { newsKey = it },
                     settings = settings,
+                    onExchangeProvider = { provider -> persistSettings(settings.copy(exchangeProvider = provider, manualExecutionMode = provider == ExchangeProvider.MANUAL || provider == ExchangeProvider.BINANCE_READ_ONLY)) },
+                    onManualMode = { persistSettings(settings.copy(manualExecutionMode = it)) },
                     onNewsAi = { persistSettings(settings.copy(useNewsAi = it)) },
                     onMemoryAi = { persistSettings(settings.copy(useTradeMemoryAi = it)) },
                     onSaveKeys = {
                         if (apiKey.isNotBlank() && secretKey.isNotBlank()) {
-                            store.saveBinanceKeys(apiKey, secretKey)
+                            store.saveExchangeKeys(settings.exchangeProvider, apiKey, secretKey)
                         }
                         if (newsKey.isNotBlank()) store.saveNewsApiKey(newsKey)
-                        status = "Secrets saved locally"
+                        status = "${settings.exchangeProvider.name.replace('_', ' ')} secrets saved locally"
                     }
                 )
             }
@@ -294,7 +297,7 @@ private fun HeaderBar(status: String, mode: BotMode) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("KSP Crypto AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-                Text("Android-only automated trading command center", color = Muted)
+                Text("Android-only multi-exchange Belgium mode", color = Muted)
             }
             StatusPill(text = mode.name.replace('_', ' '), color = modeColor(mode))
         }
@@ -304,7 +307,7 @@ private fun HeaderBar(status: String, mode: BotMode) {
                 StatusDot(modeColor(mode))
                 Spacer(Modifier.width(10.dp))
                 Text(status, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text("v0.7", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v0.8", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -409,7 +412,7 @@ private fun BotControlScreen(
         }
         item {
             GlassCard {
-                SectionTitle("Market Universe", "Comma-separated Binance Spot symbols.")
+                SectionTitle("Market Universe", "Comma-separated symbols for the selected exchange. Binance-style symbols like BTCEUR/ETHEUR are still accepted for paper and read-only scans.")
                 OutlinedTextField(value = symbols, onValueChange = onSymbolsChange, label = { Text("Symbols") }, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -736,6 +739,8 @@ private fun SettingsScreen(
     onSecretKey: (String) -> Unit,
     onNewsKey: (String) -> Unit,
     settings: BotSettings,
+    onExchangeProvider: (ExchangeProvider) -> Unit,
+    onManualMode: (Boolean) -> Unit,
     onNewsAi: (Boolean) -> Unit,
     onMemoryAi: (Boolean) -> Unit,
     onSaveKeys: () -> Unit
@@ -745,11 +750,28 @@ private fun SettingsScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Settings", "Secrets, AI modules and app behavior.") }
+        item { SectionTitle("Settings", "Multi-exchange Belgium mode, secure keys, AI modules and app behavior.") }
         item {
             GlassCard {
-                OutlinedTextField(value = apiKey, onValueChange = onApiKey, label = { Text("Binance API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
-                OutlinedTextField(value = secretKey, onValueChange = onSecretKey, label = { Text("Binance secret key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                SectionTitle("Exchange Provider", "Choose a legal connector. Binance is read-only in Belgium mode.")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(ExchangeProvider.values().toList()) { provider ->
+                        FilterChip(
+                            selected = settings.exchangeProvider == provider,
+                            onClick = { onExchangeProvider(provider) },
+                            label = { Text(provider.name.replace('_', ' ')) }
+                        )
+                    }
+                }
+                ToggleRow("Manual execution mode / signal-only", settings.manualExecutionMode, onManualMode)
+                Text(exchangeProviderWarning(settings.exchangeProvider), color = Amber)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Secure API Credentials", "Stored locally through Android Keystore-backed encrypted storage.")
+                OutlinedTextField(value = apiKey, onValueChange = onApiKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = secretKey, onValueChange = onSecretKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} secret key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI key optional") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 Button(onClick = onSaveKeys, modifier = Modifier.fillMaxWidth()) { Text("Save Secure Keys") }
             }
@@ -760,7 +782,17 @@ private fun SettingsScreen(
                 ToggleRow("Previous-trade memory AI", settings.useTradeMemoryAi, onMemoryAi)
             }
         }
+        item { WarningCard("Do not use VPNs, false residency, borrowed accounts or other bypass methods. Use a provider that legally supports your Belgian account, or keep the app in manual/paper mode.") }
     }
+}
+
+private fun exchangeProviderWarning(provider: ExchangeProvider): String = when (provider) {
+    ExchangeProvider.PAPER -> "Paper trading only. No real orders are sent."
+    ExchangeProvider.BINANCE_READ_ONLY -> "Belgium mode: Binance trading remains disabled. Signals and read-only market data only."
+    ExchangeProvider.KRAKEN -> "Verify Kraken API spot trading is available for your Belgian account before enabling LIVE_AUTO."
+    ExchangeProvider.COINBASE_ADVANCED -> "Verify Coinbase Advanced API spot trading is available for your Belgian account before enabling LIVE_AUTO."
+    ExchangeProvider.BITVAVO -> "Verify Bitvavo API spot trading is available for your Belgian account before enabling LIVE_AUTO."
+    ExchangeProvider.MANUAL -> "Manual mode creates trade plans. You place the order yourself in a compliant app."
 }
 
 @Composable

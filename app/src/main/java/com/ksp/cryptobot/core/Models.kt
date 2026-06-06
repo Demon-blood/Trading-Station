@@ -4,6 +4,7 @@ import java.math.BigDecimal
 import java.time.Instant
 
 enum class BotMode { PAPER, LIVE_CONFIRM, LIVE_AUTO }
+enum class ExchangeProvider { PAPER, BINANCE_READ_ONLY, KRAKEN, COINBASE_ADVANCED, BITVAVO, MANUAL }
 enum class SignalAction { STRONG_AVOID, AVOID, WAIT, WATCH, SMALL_BUY, BUY, SELL }
 enum class OrderSide { BUY, SELL }
 enum class DecisionSource { TECHNICAL, NEWS, TRADE_MEMORY, COMBINED_AI }
@@ -69,7 +70,9 @@ data class BotSettings(
     val orderManagementMode: OrderManagementMode = OrderManagementMode.SPLIT_TAKE_PROFIT,
     val enableNewsSeverityFilter: Boolean = true,
     val highSeverityNewsBlockHours: Int = 12,
-    val enableAutoSafeMode: Boolean = true
+    val enableAutoSafeMode: Boolean = true,
+    val exchangeProvider: ExchangeProvider = ExchangeProvider.PAPER,
+    val manualExecutionMode: Boolean = true
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
 }

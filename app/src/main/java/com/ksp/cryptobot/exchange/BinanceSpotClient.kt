@@ -72,6 +72,7 @@ class BinanceSpotClient(
     }
 
     override suspend fun placeOrder(request: OrderRequest): OrderResult = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) error("Binance live order blocked: missing API credentials or read-only mode selected.")
         val price = request.limitPrice ?: error("Live order requires a limit price. Market orders are intentionally disabled.")
         val timestamp = System.currentTimeMillis()
         val query = listOf(
