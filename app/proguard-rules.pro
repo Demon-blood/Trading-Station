@@ -1,0 +1,2 @@
+-keep class com.squareup.moshi.** { *; }
+-keep class com.ksp.cryptobot.**JsonAdapter { *; }
