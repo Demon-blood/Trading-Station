@@ -45,3 +45,8 @@ Only use API keys with withdrawals disabled. Start with small sizes and inspect 
 - Kraken WebSocket ticker feed added.
 - Strategy optimizer, shadow comparison, remote notifier, watchdog, and Belgian tax CSV exporter added.
 - Impossible/refused items remain documented: no guaranteed profits, no regulatory bypass, no withdrawal automation.
+
+
+## v1.6.5 Editable Advanced Settings
+
+The Android UI now includes an **Advanced Settings** tab. This exposes the controls that were previously internal only: AI score threshold, timeframe agreement, symbol rotation size, quote assets, max trades, reserve guards, spread guards, cooldowns, market-order controls, and quick configuration profiles.

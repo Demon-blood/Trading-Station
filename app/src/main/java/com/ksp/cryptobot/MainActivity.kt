@@ -214,6 +214,7 @@ private enum class AppTab(val label: String) {
     RISK("Risk Center"),
     HISTORY("History"),
     SETTINGS("Settings"),
+    ADVANCED_SETTINGS("Advanced Settings"),
     SYMBOLS("Symbol Scanner")
 }
 
@@ -470,6 +471,18 @@ private fun AdvancedBotApp(
                         )
                     }
                 )
+                AppTab.ADVANCED_SETTINGS -> AdvancedSettingsScreen(
+                    settings = settings,
+                    onApply = { updated ->
+                        persistSettings(updated)
+                        maxPosition = updated.maxPositionEur.toPlainString()
+                        maxLoss = updated.maxDailyLossEur.toPlainString()
+                        maxTrades = updated.maxTradesPerDay.toString()
+                        maxSpread = updated.maxSpreadPercent.toPlainString()
+                        statusStore.write("Advanced editable settings saved from UI.")
+                        status = "Advanced settings saved"
+                    }
+                )
                 AppTab.SETTINGS -> SettingsScreen(
                     apiKey = apiKey,
                     secretKey = secretKey,
@@ -515,7 +528,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.6.4 Compile Fix", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.6.5 Editable Settings", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -542,6 +555,7 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
             AppTab.PORTFOLIO,
             AppTab.TAX,
             AppTab.RISK,
+            AppTab.ADVANCED_SETTINGS,
             AppTab.SETTINGS
         )
         liveTabs.forEach { tab ->
@@ -1413,6 +1427,145 @@ private fun ProSystemsScreen(settings: BotSettings) {
             }
         }
         item { WarningCard("v1.1 makes the bot more automatic, but it cannot guarantee maximum possible profits. It uses profit-locking, exits, risk gates and explanations to improve process quality and reduce uncontrolled live-trading behavior.") }
+    }
+}
+
+
+@Composable
+private fun AdvancedSettingsScreen(
+    settings: BotSettings,
+    onApply: (BotSettings) -> Unit
+) {
+    var minAiScore by remember(settings) { mutableStateOf(settings.minStrategyScoreToBuy.toString()) }
+    var timeframeAgreement by remember(settings) { mutableStateOf(settings.minTrendAgreement.toString()) }
+    var allowedQuotes by remember(settings) { mutableStateOf(settings.allowedQuoteAssetsCsv) }
+    var candidateLimit by remember(settings) { mutableStateOf(settings.autoSymbolCandidateLimit.toString()) }
+    var activeLimit by remember(settings) { mutableStateOf(settings.autoSymbolActiveLimit.toString()) }
+    var maxNewTrades by remember(settings) { mutableStateOf(settings.maxNewTradesPerScan.toString()) }
+    var maxTradesHour by remember(settings) { mutableStateOf(settings.maxTradesPerHour.toString()) }
+    var maxLivePositions by remember(settings) { mutableStateOf(settings.maxSimultaneousLivePositions.toString()) }
+    var maxPosition by remember(settings) { mutableStateOf(settings.maxPositionEur.toPlainString()) }
+    var minReserveAmount by remember(settings) { mutableStateOf(settings.minimumQuoteReserveAmount.toPlainString()) }
+    var minReservePercent by remember(settings) { mutableStateOf(settings.minimumQuoteReservePercent.toPlainString()) }
+    var maxLimitSpread by remember(settings) { mutableStateOf(settings.maxSpreadPercent.toPlainString()) }
+    var maxMarketSpread by remember(settings) { mutableStateOf(settings.marketOrderSlippageWarningPercent.toPlainString()) }
+    var buyCooldown by remember(settings) { mutableStateOf(settings.cooldownAfterBuyMinutes.toString()) }
+    var sellCooldown by remember(settings) { mutableStateOf(settings.cooldownAfterSellMinutes.toString()) }
+    var lossCooldown by remember(settings) { mutableStateOf(settings.cooldownAfterLossMinutes.toString()) }
+    var autoDiscovery by remember(settings) { mutableStateOf(settings.autoSymbolDiscoveryEnabled) }
+    var multiSymbol by remember(settings) { mutableStateOf(settings.autoTradeMultipleSymbolsPerScan) }
+    var marketOrders by remember(settings) { mutableStateOf(settings.enableMarketOrders) }
+    var fallbackToLimit by remember(settings) { mutableStateOf(settings.fallbackToLimitWhenMarketBlocked) }
+    var nonEurBuys by remember(settings) { mutableStateOf(settings.nonEurQuoteBuyEnabled) }
+    var liquidityBlacklist by remember(settings) { mutableStateOf(settings.liquidityBlacklistEnabled) }
+
+    fun editedSettings(): BotSettings = settings.copy(
+        minStrategyScoreToBuy = minAiScore.toIntOrNull()?.coerceIn(1, 100) ?: settings.minStrategyScoreToBuy,
+        minTrendAgreement = timeframeAgreement.toIntOrNull()?.coerceIn(1, 3) ?: settings.minTrendAgreement,
+        allowedQuoteAssetsCsv = allowedQuotes.uppercase().replace(" ", ""),
+        autoSymbolCandidateLimit = candidateLimit.toIntOrNull()?.coerceIn(1, 1000) ?: settings.autoSymbolCandidateLimit,
+        autoSymbolActiveLimit = activeLimit.toIntOrNull()?.coerceIn(1, 100) ?: settings.autoSymbolActiveLimit,
+        maxNewTradesPerScan = maxNewTrades.toIntOrNull()?.coerceIn(1, 20) ?: settings.maxNewTradesPerScan,
+        maxTradesPerHour = maxTradesHour.toIntOrNull()?.coerceIn(1, 100) ?: settings.maxTradesPerHour,
+        maxSimultaneousLivePositions = maxLivePositions.toIntOrNull()?.coerceIn(1, 50) ?: settings.maxSimultaneousLivePositions,
+        maxPositionEur = maxPosition.toBigDecimalOrNull() ?: settings.maxPositionEur,
+        minimumQuoteReserveAmount = minReserveAmount.toBigDecimalOrNull() ?: settings.minimumQuoteReserveAmount,
+        minimumQuoteReservePercent = minReservePercent.toBigDecimalOrNull() ?: settings.minimumQuoteReservePercent,
+        maxSpreadPercent = maxLimitSpread.toBigDecimalOrNull() ?: settings.maxSpreadPercent,
+        marketOrderSlippageWarningPercent = maxMarketSpread.toBigDecimalOrNull() ?: settings.marketOrderSlippageWarningPercent,
+        cooldownAfterBuyMinutes = buyCooldown.toIntOrNull()?.coerceAtLeast(0) ?: settings.cooldownAfterBuyMinutes,
+        cooldownAfterSellMinutes = sellCooldown.toIntOrNull()?.coerceAtLeast(0) ?: settings.cooldownAfterSellMinutes,
+        cooldownAfterLossMinutes = lossCooldown.toIntOrNull()?.coerceAtLeast(0) ?: settings.cooldownAfterLossMinutes,
+        autoSymbolDiscoveryEnabled = autoDiscovery,
+        autoTradeMultipleSymbolsPerScan = multiSymbol,
+        enableMarketOrders = marketOrders,
+        fallbackToLimitWhenMarketBlocked = fallbackToLimit,
+        nonEurQuoteBuyEnabled = nonEurBuys,
+        liquidityBlacklistEnabled = liquidityBlacklist
+    )
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Advanced Editable Settings", "These are the controls that were previously hidden inside the bot logic. Save after changing values.") }
+        item {
+            GlassCard {
+                SectionTitle("Quick Profiles", "Use these to fill the fields, then press Save Advanced Settings.")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    item { Button(onClick = {
+                        minAiScore = "68"; timeframeAgreement = "2"; allowedQuotes = "EUR"; candidateLimit = "250"; activeLimit = "15"
+                        maxNewTrades = "1"; maxTradesHour = "3"; maxLivePositions = "3"; maxPosition = "5"
+                        minReserveAmount = "3"; minReservePercent = "5"; maxLimitSpread = "0.50"; maxMarketSpread = "0.25"
+                        buyCooldown = "15"; sellCooldown = "30"; lossCooldown = "120"
+                        autoDiscovery = true; multiSymbol = true; marketOrders = true; fallbackToLimit = true; nonEurBuys = false; liquidityBlacklist = true
+                    }) { Text("Small Balance Active") } }
+                    item { OutlinedButton(onClick = {
+                        minAiScore = "72"; timeframeAgreement = "2"; allowedQuotes = "EUR,USD,USDT,USDC"; candidateLimit = "250"; activeLimit = "20"
+                        maxNewTrades = "2"; maxTradesHour = "3"; maxLivePositions = "3"; maxPosition = "10"
+                        minReserveAmount = "10"; minReservePercent = "20"; maxLimitSpread = "0.35"; maxMarketSpread = "0.25"
+                        buyCooldown = "15"; sellCooldown = "30"; lossCooldown = "120"
+                        autoDiscovery = true; multiSymbol = true; marketOrders = true; fallbackToLimit = true; nonEurBuys = false; liquidityBlacklist = true
+                    }) { Text("Balanced Safe") } }
+                    item { OutlinedButton(onClick = {
+                        minAiScore = "63"; timeframeAgreement = "2"; allowedQuotes = "ALL"; candidateLimit = "350"; activeLimit = "30"
+                        maxNewTrades = "3"; maxTradesHour = "6"; maxLivePositions = "5"; maxPosition = "10"
+                        minReserveAmount = "2"; minReservePercent = "3"; maxLimitSpread = "0.75"; maxMarketSpread = "0.35"
+                        buyCooldown = "5"; sellCooldown = "10"; lossCooldown = "60"
+                        autoDiscovery = true; multiSymbol = true; marketOrders = true; fallbackToLimit = true; nonEurBuys = false; liquidityBlacklist = true
+                    }) { Text("Aggressive") } }
+                }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Signal Confidence", "Lower score = more trades. Higher score = fewer but stricter trades.")
+                OutlinedTextField(value = minAiScore, onValueChange = { minAiScore = it }, label = { Text("Minimum AI / strategy score") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = timeframeAgreement, onValueChange = { timeframeAgreement = it }, label = { Text("Required timeframe agreement, 1-3") }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Auto Symbol Discovery", "Controls how many Kraken pairs are discovered, ranked and used in rotation.")
+                ToggleRow("Auto Symbol Discovery", autoDiscovery) { autoDiscovery = it }
+                ToggleRow("Trade multiple symbols per scan", multiSymbol) { multiSymbol = it }
+                OutlinedTextField(value = allowedQuotes, onValueChange = { allowedQuotes = it }, label = { Text("Allowed quote assets, e.g. EUR or EUR,USD,USDT") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = candidateLimit, onValueChange = { candidateLimit = it }, label = { Text("Candidate scan limit") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = activeLimit, onValueChange = { activeLimit = it }, label = { Text("Active rotation size") }, modifier = Modifier.fillMaxWidth())
+                ToggleRow("Allow non-EUR quote buys", nonEurBuys) { nonEurBuys = it }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Position, Reserve and Trade Limits", "Prevents the bot from spending too much or opening too many trades.")
+                OutlinedTextField(value = maxPosition, onValueChange = { maxPosition = it }, label = { Text("Max position size") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxNewTrades, onValueChange = { maxNewTrades = it }, label = { Text("Max new trades per scan") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxTradesHour, onValueChange = { maxTradesHour = it }, label = { Text("Max trades per hour") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxLivePositions, onValueChange = { maxLivePositions = it }, label = { Text("Max simultaneous live positions") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = minReserveAmount, onValueChange = { minReserveAmount = it }, label = { Text("Minimum quote reserve amount") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = minReservePercent, onValueChange = { minReservePercent = it }, label = { Text("Minimum quote reserve percent") }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Spread, Market Orders and Cooldowns", "Controls execution strictness.")
+                ToggleRow("Allow market orders", marketOrders) { marketOrders = it }
+                ToggleRow("Fallback to limit when market is unsafe", fallbackToLimit) { fallbackToLimit = it }
+                ToggleRow("Liquidity blacklist", liquidityBlacklist) { liquidityBlacklist = it }
+                OutlinedTextField(value = maxMarketSpread, onValueChange = { maxMarketSpread = it }, label = { Text("Max market spread %") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxLimitSpread, onValueChange = { maxLimitSpread = it }, label = { Text("Max limit spread %") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = buyCooldown, onValueChange = { buyCooldown = it }, label = { Text("Buy cooldown minutes") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = sellCooldown, onValueChange = { sellCooldown = it }, label = { Text("Sell cooldown minutes") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = lossCooldown, onValueChange = { lossCooldown = it }, label = { Text("Loss cooldown minutes") }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        item {
+            Button(onClick = { onApply(editedSettings()) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Save Advanced Settings")
+            }
+        }
+        item { WarningCard("Use EUR-only and small position sizes until the Live Status tab confirms that the bot has free quote balance and is submitting orders as expected.") }
     }
 }
 
