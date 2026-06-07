@@ -119,7 +119,24 @@ data class BotSettings(
     val discordRemoteControlEnabled: Boolean = false,
     val localMlScoringEnabled: Boolean = true,
     val dryRunMirrorModeEnabled: Boolean = true,
-    val bearishAutoSellScore: Int = 45
+    val bearishAutoSellScore: Int = 45,
+
+    // v1.2 autonomous intelligence pack. These make the bot more self-directing while
+    // keeping all live orders behind the existing exchange, balance and risk guards.
+    val autonomousStrategyPerSymbolEnabled: Boolean = true,
+    val selfOptimizationEnabled: Boolean = true,
+    val autoDisableBadSymbolsEnabled: Boolean = true,
+    val shadowPaperComparisonEnabled: Boolean = true,
+    val tradeReplayEnabled: Boolean = true,
+    val remoteCommandParserEnabled: Boolean = true,
+    val belgianTaxExportEnabled: Boolean = true,
+    val portfolioReserveManagerV12Enabled: Boolean = true,
+    val crashRecoveryWatchdogV12Enabled: Boolean = true,
+    val badSymbolDisableHours: Int = 48,
+    val minSymbolWinRatePercent: Int = 40,
+    val minSymbolProfitFactor: BigDecimal = BigDecimal("0.90"),
+    val optimizerLookbackTrades: Int = 30,
+    val taxExportYear: Int = 2026
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
 }
@@ -302,6 +319,40 @@ data class BalanceInfo(
     val free: BigDecimal,
     val holdTrade: BigDecimal = BigDecimal.ZERO,
     val eurValue: BigDecimal = BigDecimal.ZERO
+)
+
+
+
+data class AutonomousSymbolAssessment(
+    val symbol: String,
+    val allowed: Boolean,
+    val selectedStrategy: StrategyMode,
+    val winRatePercent: BigDecimal,
+    val profitFactor: BigDecimal,
+    val disableReason: String,
+    val optimizerHint: String
+)
+
+data class TradeReplaySnapshot(
+    val symbol: String,
+    val action: SignalAction,
+    val score: Int,
+    val reason: String,
+    val mirrorExitComparison: String,
+    val createdAt: Instant = Instant.now()
+)
+
+data class RemoteCommandResult(
+    val accepted: Boolean,
+    val command: String,
+    val message: String
+)
+
+data class TaxExportSummary(
+    val year: Int,
+    val rowCount: Int,
+    val realizedGainEur: BigDecimal,
+    val csv: String
 )
 
 data class PortfolioSnapshot(

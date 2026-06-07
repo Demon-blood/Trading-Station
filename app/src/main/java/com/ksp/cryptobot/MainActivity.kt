@@ -71,6 +71,8 @@ import com.ksp.cryptobot.core.StrategyMode
 import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.core.OrderManagementMode
 import com.ksp.cryptobot.core.PortfolioSnapshot
+import com.ksp.cryptobot.core.TaxExportSummary
+import com.ksp.cryptobot.core.RemoteCommandResult
 import com.ksp.cryptobot.core.LiveOrderInfo
 import com.ksp.cryptobot.core.LifecycleSnapshot
 import com.ksp.cryptobot.pro.ProAutomationSuite
@@ -153,6 +155,14 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 controller.validateConfiguredSymbols(settings)
                             }
+                        },
+                        onExportTax = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.exportBelgianTaxCsv(settings))
+                            }
+                        },
+                        onRemoteCommand = { settings, command, callback ->
+                            callback(controller.parseRemoteCommand(command, settings))
                         }
                     )
                 }
@@ -190,6 +200,7 @@ private enum class AppTab(val label: String) {
     REGIME("Regime"),
     ORDERS("Orders"),
     POSITIONS("Positions"),
+    AUTONOMOUS("Autonomous"),
     PRO("Pro Systems"),
     PORTFOLIO("Portfolio"),
     NEWS("News Intel"),
@@ -210,7 +221,9 @@ private fun AdvancedBotApp(
     onLoadOrders: (BotSettings, (List<LiveOrderInfo>) -> Unit) -> Unit,
     onLoadLifecycle: (BotSettings, (LifecycleSnapshot) -> Unit) -> Unit,
     onCancelOrder: (BotSettings, String, (Boolean) -> Unit) -> Unit,
-    onValidateSymbols: (BotSettings) -> Unit
+    onValidateSymbols: (BotSettings) -> Unit,
+    onExportTax: (BotSettings, (TaxExportSummary) -> Unit) -> Unit,
+    onRemoteCommand: (BotSettings, String, (RemoteCommandResult) -> Unit) -> Unit
 ) {
     var settings by remember { mutableStateOf(store.load()) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
@@ -221,6 +234,9 @@ private fun AdvancedBotApp(
     var portfolioSnapshot by remember { mutableStateOf<PortfolioSnapshot?>(null) }
     var liveOrders by remember { mutableStateOf<List<LiveOrderInfo>>(emptyList()) }
     var lifecycleSnapshot by remember { mutableStateOf<LifecycleSnapshot?>(null) }
+    var taxExportSummary by remember { mutableStateOf<TaxExportSummary?>(null) }
+    var remoteCommand by remember { mutableStateOf("/status") }
+    var remoteResult by remember { mutableStateOf<RemoteCommandResult?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -357,6 +373,27 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
+                AppTab.AUTONOMOUS -> AutonomousScreen(
+                    settings = settings,
+                    taxExportSummary = taxExportSummary,
+                    remoteCommand = remoteCommand,
+                    remoteResult = remoteResult,
+                    onRemoteCommandChange = { remoteCommand = it },
+                    onExportTax = {
+                        onExportTax(settings) { summary ->
+                            taxExportSummary = summary
+                            statusStore.write("Tax export generated from Autonomous tab. rows=${summary.rowCount}")
+                            status = "Tax export ready: ${summary.rowCount} rows"
+                        }
+                    },
+                    onRunRemoteCommand = {
+                        onRemoteCommand(settings, remoteCommand) { result ->
+                            remoteResult = result
+                            statusStore.write("Remote command preview: ${result.message}")
+                            status = result.message
+                        }
+                    }
+                )
                 AppTab.PRO -> ProSystemsScreen(settings = settings)
                 AppTab.PORTFOLIO -> PortfolioScreen(
                     settings = settings,
@@ -441,7 +478,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.1.0", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.2.0", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1094,6 +1131,89 @@ private fun RiskScreen(
 }
 
 
+
+@Composable
+private fun AutonomousScreen(
+    settings: BotSettings,
+    taxExportSummary: TaxExportSummary?,
+    remoteCommand: String,
+    remoteResult: RemoteCommandResult?,
+    onRemoteCommandChange: (String) -> Unit,
+    onExportTax: () -> Unit,
+    onRunRemoteCommand: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("v1.2 Autonomous Intelligence", "Self-selection, self-optimization, bad-symbol lockout, shadow paper comparison, trade replay, remote command parsing, tax export and Android watchdog controls.") }
+        item {
+            HeroCard(
+                title = "Autonomous Pack ${if (settings.selfOptimizationEnabled) "ON" else "OFF"}",
+                subtitle = "The bot automatically chooses symbol strategy, penalizes weak symbols, records trade replay context and keeps all live execution behind Kraken/risk/balance guards.",
+                primaryButton = "Export Tax CSV",
+                secondaryButton = "Parse Command",
+                onPrimary = onExportTax,
+                onSecondary = onRunRemoteCommand
+            )
+        }
+        item {
+            GlassCard {
+                SectionTitle("Self-Optimization", "Automatic strategy and symbol behavior.")
+                ToggleInfo("Per-symbol strategy selector", settings.autonomousStrategyPerSymbolEnabled)
+                ToggleInfo("Self-optimization engine", settings.selfOptimizationEnabled)
+                ToggleInfo("Auto-disable bad symbols", settings.autoDisableBadSymbolsEnabled)
+                Text("Bad symbols: disable logic ${settings.badSymbolDisableHours}h when win rate < ${settings.minSymbolWinRatePercent}% or profit factor < ${settings.minSymbolProfitFactor}.", color = Muted)
+                Text("Optimizer lookback: ${settings.optimizerLookbackTrades} trades per symbol.", color = Muted)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Paper/Live Learning", "The bot records alternative outcomes to improve future behavior.")
+                ToggleInfo("Shadow paper comparison", settings.shadowPaperComparisonEnabled)
+                ToggleInfo("Trade replay snapshots", settings.tradeReplayEnabled)
+                ToggleInfo("Dry-run mirror mode", settings.dryRunMirrorModeEnabled)
+                Text("Each decision stores a replay explanation so you can see why a trade was taken or skipped and compare live exits against alternative paper exits.", color = Muted)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Autonomous Safety", "Stops automation from becoming uncontrolled.")
+                ToggleInfo("Portfolio reserve manager", settings.portfolioReserveManagerV12Enabled)
+                ToggleInfo("Crash recovery watchdog", settings.crashRecoveryWatchdogV12Enabled)
+                ToggleInfo("Remote command parser", settings.remoteCommandParserEnabled)
+                Text("Target EUR reserve: ${settings.minimumEurReservePercent}% • Battery pause threshold: ${settings.pauseBelowBatteryPercent}%", color = Muted)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Remote Command Preview", "Local parser for future Telegram/Discord bridge commands.")
+                OutlinedTextField(value = remoteCommand, onValueChange = onRemoteCommandChange, label = { Text("Command") }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = onRunRemoteCommand, modifier = Modifier.fillMaxWidth()) { Text("Parse Command") }
+                remoteResult?.let { result ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(result.message, color = if (result.accepted) Mint else Amber)
+                }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Belgian Tax Export", "Generates CSV rows from lifecycle tax rows or fallback trade history.")
+                Button(onClick = onExportTax, modifier = Modifier.fillMaxWidth()) { Text("Generate ${settings.taxExportYear} Tax CSV") }
+                taxExportSummary?.let { summary ->
+                    Spacer(Modifier.height(8.dp))
+                    Text("Rows: ${summary.rowCount}", color = Muted)
+                    Text("Estimated realized gain: €${summary.realizedGainEur.setScale(2, java.math.RoundingMode.HALF_UP)}", color = Mint)
+                    Text(summary.csv.take(600), color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item { WarningCard("v1.2 makes the bot more automatic, but it still cannot guarantee maximum profit. It improves process quality by choosing strategies, disabling weak symbols, tracking replay context and exporting records.") }
+    }
+}
+
 @Composable
 private fun ProSystemsScreen(settings: BotSettings) {
     val pro = remember { ProAutomationSuite() }
@@ -1103,7 +1223,7 @@ private fun ProSystemsScreen(settings: BotSettings) {
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("v1.1 Pro Systems", "Closed-loop automation modules that make the live bot more observable, adaptive and protective.") }
+        item { SectionTitle("v1.1/v1.2 Pro Systems", "Closed-loop automation modules that make the live bot more observable, adaptive and protective.") }
         item {
             GlassCard {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

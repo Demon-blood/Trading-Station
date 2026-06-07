@@ -81,7 +81,42 @@ class AppSettingsStore(context: Context) {
             syncKrakenHistory = prefs.getBoolean("sync_kraken_history", true),
             exportTaxReportEnabled = prefs.getBoolean("export_tax_report_enabled", true),
             useCoinGeckoIntelligence = prefs.getBoolean("use_coingecko_intelligence", false),
-            coinGeckoVsKrakenDeviationBlockPercent = prefs.getString("coingecko_deviation_block_percent", "1.75")!!.toBigDecimalOrNull() ?: BigDecimal("1.75")
+            coinGeckoVsKrakenDeviationBlockPercent = prefs.getString("coingecko_deviation_block_percent", "1.75")!!.toBigDecimalOrNull() ?: BigDecimal("1.75"),
+            enableKrakenWebSocketFeed = prefs.getBoolean("enable_kraken_websocket_feed", true),
+            smartProfitLockEnabled = prefs.getBoolean("smart_profit_lock_enabled", true),
+            smartProfitLockActivationPercent = prefs.getString("smart_profit_lock_activation_percent", "1.0")!!.toBigDecimalOrNull() ?: BigDecimal("1.0"),
+            smartProfitLockTrailingDistancePercent = prefs.getString("smart_profit_lock_trailing_distance_percent", "0.75")!!.toBigDecimalOrNull() ?: BigDecimal("0.75"),
+            smartProfitLockPartialTakeProfitPercent = prefs.getString("smart_profit_lock_partial_take_profit_percent", "2.0")!!.toBigDecimalOrNull() ?: BigDecimal("2.0"),
+            smartProfitLockPartialExitPercent = prefs.getString("smart_profit_lock_partial_exit_percent", "30.0")!!.toBigDecimalOrNull() ?: BigDecimal("30.0"),
+            autoCompoundingEnabled = prefs.getBoolean("auto_compounding_enabled", true),
+            autoCompoundingMaxIncreasePercent = prefs.getString("auto_compounding_max_increase_percent", "10.0")!!.toBigDecimalOrNull() ?: BigDecimal("10.0"),
+            enableNetProfitFilter = prefs.getBoolean("enable_net_profit_filter", true),
+            saveWhyTradedExplanations = prefs.getBoolean("save_why_traded_explanations", true),
+            strategyOptimizerEnabled = prefs.getBoolean("strategy_optimizer_enabled", true),
+            portfolioBalancerEnabled = prefs.getBoolean("portfolio_balancer_enabled", true),
+            minimumEurReservePercent = prefs.getString("minimum_eur_reserve_percent", "15.0")!!.toBigDecimalOrNull() ?: BigDecimal("15.0"),
+            maxSingleAssetAllocationPercent = prefs.getString("max_single_asset_allocation_percent", "45.0")!!.toBigDecimalOrNull() ?: BigDecimal("45.0"),
+            watchdogEnabled = prefs.getBoolean("watchdog_enabled", true),
+            pauseBelowBatteryPercent = prefs.getInt("pause_below_battery_percent", 15),
+            telegramRemoteControlEnabled = prefs.getBoolean("telegram_remote_control_enabled", false),
+            discordRemoteControlEnabled = prefs.getBoolean("discord_remote_control_enabled", false),
+            localMlScoringEnabled = prefs.getBoolean("local_ml_scoring_enabled", true),
+            dryRunMirrorModeEnabled = prefs.getBoolean("dry_run_mirror_mode_enabled", true),
+            bearishAutoSellScore = prefs.getInt("bearish_auto_sell_score", 45),
+            autonomousStrategyPerSymbolEnabled = prefs.getBoolean("autonomous_strategy_per_symbol_enabled", true),
+            selfOptimizationEnabled = prefs.getBoolean("self_optimization_enabled", true),
+            autoDisableBadSymbolsEnabled = prefs.getBoolean("auto_disable_bad_symbols_enabled", true),
+            shadowPaperComparisonEnabled = prefs.getBoolean("shadow_paper_comparison_enabled", true),
+            tradeReplayEnabled = prefs.getBoolean("trade_replay_enabled", true),
+            remoteCommandParserEnabled = prefs.getBoolean("remote_command_parser_enabled", true),
+            belgianTaxExportEnabled = prefs.getBoolean("belgian_tax_export_enabled", true),
+            portfolioReserveManagerV12Enabled = prefs.getBoolean("portfolio_reserve_manager_v12_enabled", true),
+            crashRecoveryWatchdogV12Enabled = prefs.getBoolean("crash_recovery_watchdog_v12_enabled", true),
+            badSymbolDisableHours = prefs.getInt("bad_symbol_disable_hours", 48),
+            minSymbolWinRatePercent = prefs.getInt("min_symbol_win_rate_percent", 40),
+            minSymbolProfitFactor = prefs.getString("min_symbol_profit_factor", "0.90")!!.toBigDecimalOrNull() ?: BigDecimal("0.90"),
+            optimizerLookbackTrades = prefs.getInt("optimizer_lookback_trades", 30),
+            taxExportYear = prefs.getInt("tax_export_year", 2026)
         )
     }
 
@@ -154,6 +189,41 @@ class AppSettingsStore(context: Context) {
             .putBoolean("export_tax_report_enabled", settings.exportTaxReportEnabled)
             .putBoolean("use_coingecko_intelligence", settings.useCoinGeckoIntelligence)
             .putString("coingecko_deviation_block_percent", settings.coinGeckoVsKrakenDeviationBlockPercent.toPlainString())
+            .putBoolean("enable_kraken_websocket_feed", settings.enableKrakenWebSocketFeed)
+            .putBoolean("smart_profit_lock_enabled", settings.smartProfitLockEnabled)
+            .putString("smart_profit_lock_activation_percent", settings.smartProfitLockActivationPercent.toPlainString())
+            .putString("smart_profit_lock_trailing_distance_percent", settings.smartProfitLockTrailingDistancePercent.toPlainString())
+            .putString("smart_profit_lock_partial_take_profit_percent", settings.smartProfitLockPartialTakeProfitPercent.toPlainString())
+            .putString("smart_profit_lock_partial_exit_percent", settings.smartProfitLockPartialExitPercent.toPlainString())
+            .putBoolean("auto_compounding_enabled", settings.autoCompoundingEnabled)
+            .putString("auto_compounding_max_increase_percent", settings.autoCompoundingMaxIncreasePercent.toPlainString())
+            .putBoolean("enable_net_profit_filter", settings.enableNetProfitFilter)
+            .putBoolean("save_why_traded_explanations", settings.saveWhyTradedExplanations)
+            .putBoolean("strategy_optimizer_enabled", settings.strategyOptimizerEnabled)
+            .putBoolean("portfolio_balancer_enabled", settings.portfolioBalancerEnabled)
+            .putString("minimum_eur_reserve_percent", settings.minimumEurReservePercent.toPlainString())
+            .putString("max_single_asset_allocation_percent", settings.maxSingleAssetAllocationPercent.toPlainString())
+            .putBoolean("watchdog_enabled", settings.watchdogEnabled)
+            .putInt("pause_below_battery_percent", settings.pauseBelowBatteryPercent)
+            .putBoolean("telegram_remote_control_enabled", settings.telegramRemoteControlEnabled)
+            .putBoolean("discord_remote_control_enabled", settings.discordRemoteControlEnabled)
+            .putBoolean("local_ml_scoring_enabled", settings.localMlScoringEnabled)
+            .putBoolean("dry_run_mirror_mode_enabled", settings.dryRunMirrorModeEnabled)
+            .putInt("bearish_auto_sell_score", settings.bearishAutoSellScore)
+            .putBoolean("autonomous_strategy_per_symbol_enabled", settings.autonomousStrategyPerSymbolEnabled)
+            .putBoolean("self_optimization_enabled", settings.selfOptimizationEnabled)
+            .putBoolean("auto_disable_bad_symbols_enabled", settings.autoDisableBadSymbolsEnabled)
+            .putBoolean("shadow_paper_comparison_enabled", settings.shadowPaperComparisonEnabled)
+            .putBoolean("trade_replay_enabled", settings.tradeReplayEnabled)
+            .putBoolean("remote_command_parser_enabled", settings.remoteCommandParserEnabled)
+            .putBoolean("belgian_tax_export_enabled", settings.belgianTaxExportEnabled)
+            .putBoolean("portfolio_reserve_manager_v12_enabled", settings.portfolioReserveManagerV12Enabled)
+            .putBoolean("crash_recovery_watchdog_v12_enabled", settings.crashRecoveryWatchdogV12Enabled)
+            .putInt("bad_symbol_disable_hours", settings.badSymbolDisableHours)
+            .putInt("min_symbol_win_rate_percent", settings.minSymbolWinRatePercent)
+            .putString("min_symbol_profit_factor", settings.minSymbolProfitFactor.toPlainString())
+            .putInt("optimizer_lookback_trades", settings.optimizerLookbackTrades)
+            .putInt("tax_export_year", settings.taxExportYear)
             .apply()
     }
 

@@ -22,6 +22,7 @@ import com.ksp.cryptobot.status.BotStatusStore
 import com.ksp.cryptobot.lifecycle.TradeLifecycleManager
 import com.ksp.cryptobot.strategy.RecommendationEngine
 import com.ksp.cryptobot.pro.ProAutomationSuite
+import com.ksp.cryptobot.autonomous.AutonomousIntelligencePack
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.math.BigDecimal
@@ -41,6 +42,7 @@ class BotController(
     private val advancedAutomationEngine = AdvancedAutomationEngine()
     private val lifecycleManager = TradeLifecycleManager(dao, statusStore)
     private val proAutomationSuite = ProAutomationSuite(appContext)
+    private val autonomousPack = AutonomousIntelligencePack(appContext)
     private val _status = MutableStateFlow("Stopped")
     val status: StateFlow<String> = _status
 
@@ -56,6 +58,7 @@ class BotController(
         updateStatus(if (execute) "Scan started with execution enabled. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}" else "Scan started. Provider=${settings.exchangeProvider}, mode=${settings.mode}")
         val proReadiness = proAutomationSuite.readiness(settings)
         proReadiness.lines.take(12).forEach { updateStatus("Pro readiness: $it", if (it.startsWith("BLOCK")) "WARN" else "INFO") }
+        autonomousPack.watchdogLines(settings).take(6).forEach { updateStatus("Autonomous watchdog: $it", if (it.startsWith("BLOCK")) "WARN" else "INFO") }
         if (execute && !proReadiness.allowed && settings.mode != BotMode.PAPER) {
             updateStatus("Execution blocked by v1.1 pro readiness gate: ${proReadiness.level}", "WARN")
             return emptyList()
@@ -89,7 +92,12 @@ class BotController(
         val recentTrades = dao.recentTradesSnapshot(100)
         val configuredSymbols = if (settings.tradeOnlyBtcEth) settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") } else settings.symbols()
         val symbols = configuredSymbols.mapNotNull { rawSymbol ->
-            if (settings.exchangeProvider == ExchangeProvider.KRAKEN && settings.mode != BotMode.PAPER) {
+            val autonomousAssessment = autonomousPack.assessSymbol(rawSymbol, recentTrades, settings)
+            updateStatus("[$rawSymbol] v1.2 assessment: strategy=${autonomousAssessment.selectedStrategy}, allowed=${autonomousAssessment.allowed}, winRate=${autonomousAssessment.winRatePercent}%, pf=${autonomousAssessment.profitFactor}. ${autonomousAssessment.optimizerHint}", if (autonomousAssessment.allowed) "INFO" else "WARN")
+            if (!autonomousAssessment.allowed) {
+                updateStatus("[$rawSymbol] Auto-disabled before scan: ${autonomousAssessment.disableReason}", "WARN")
+                null
+            } else if (settings.exchangeProvider == ExchangeProvider.KRAKEN && settings.mode != BotMode.PAPER) {
                 runCatching { exchange.validateSymbol(rawSymbol) }
                     .onSuccess { info ->
                         if (info.tradable) {
@@ -124,7 +132,7 @@ class BotController(
                 val baseDecision = aiDecisionEngine.decide(rec, news, recentTrades, settings)
                 val riskState = advancedRiskManager.riskState(settings)
                 val autoDecision = advancedAutomationEngine.decide(ticker, candlesByTimeframe, news, recentTrades, settings, riskState)
-                val decision = baseDecision.copy(
+                val rawDecision = baseDecision.copy(
                     finalAction = autoDecision.finalAction,
                     finalScore = autoDecision.finalScore,
                     confidencePercent = autoDecision.finalScore.coerceIn(0, 100),
@@ -132,11 +140,15 @@ class BotController(
                     allowedToTrade = autoDecision.allowed,
                     explanation = autoDecision.explanation
                 )
+                val autonomousAssessment = autonomousPack.assessSymbol(symbol, recentTrades, settings)
+                val decision = autonomousPack.enrichDecision(rawDecision, ticker, settings, autonomousAssessment)
+                val replay = autonomousPack.buildTradeReplay(decision, ticker, settings)
                 val netCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
                 val whyLine = proAutomationSuite.explainTrade(ticker, decision, symbolRank, netCheck)
-                dao.insertAiDecision(decision.copy(explanation = decision.explanation + " | " + whyLine).toEntity())
+                dao.insertAiDecision(decision.copy(explanation = decision.explanation + " | " + whyLine + " | replay=" + replay.mirrorExitComparison).toEntity())
                 updateStatus("[$symbol] Decision=${decision.finalAction}, score=${decision.finalScore}, allowed=${decision.allowedToTrade}. ${decision.explanation.take(180)}")
                 updateStatus("[$symbol] Why/edge: ${whyLine.take(240)}", if (netCheck.allowed) "INFO" else "WARN")
+                if (settings.tradeReplayEnabled) updateStatus("[$symbol] Trade replay snapshot: ${replay.mirrorExitComparison}", "INFO")
                 if (execute) {
                     val reserved = executeDecisionIfAllowed(settings, exchange, ticker, decision, liveBalances, reservedEurThisScan)
                     if (reserved > BigDecimal.ZERO) {
@@ -321,6 +333,21 @@ class BotController(
         return if (!key.isNullOrBlank()) NewsApiClient(key) else NoopNewsClient()
     }
 
+
+    suspend fun exportBelgianTaxCsv(settings: BotSettings = settingsStore.load()): TaxExportSummary {
+        updateStatus("Belgian tax export requested for year ${settings.taxExportYear}.", "INFO")
+        val rows = dao.taxReportRowsSnapshot()
+        val trades = dao.allTradesSnapshot()
+        val summary = autonomousPack.exportBelgianTaxCsv(settings.taxExportYear, rows, trades)
+        updateStatus("Belgian tax export ready: rows=${summary.rowCount}, realized≈€${summary.realizedGainEur.setScale(2, RoundingMode.HALF_UP)}", "INFO")
+        return summary
+    }
+
+    fun parseRemoteCommand(command: String, settings: BotSettings = settingsStore.load()): RemoteCommandResult {
+        val result = autonomousPack.parseRemoteCommand(command, settings)
+        updateStatus("Remote command parsed: ${result.command} → ${result.message}", if (result.accepted) "INFO" else "WARN")
+        return result
+    }
 
     private suspend fun manageExistingLiveOrders(settings: BotSettings, exchange: CryptoExchangeClient) {
         if (!settings.smartLimitRequote && settings.orderManagementMode == OrderManagementMode.SIMPLE_LIMIT) return
