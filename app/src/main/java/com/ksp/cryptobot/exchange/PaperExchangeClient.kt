@@ -30,7 +30,7 @@ class PaperExchangeClient(
      * disabled to avoid recursion and keep a deterministic local fallback available.
      */
     private val krakenPublicMarketData: KrakenSpotClient? by lazy {
-        if (useKrakenPublicMarketData) KrakenSpotClient(apiKey = "", secret = "") else null
+        if (useKrakenPublicMarketData) KrakenSpotClient(apiKey = "", secretKey = "") else null
     }
 
     init {

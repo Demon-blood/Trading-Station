@@ -47,7 +47,7 @@ Only use API keys with withdrawals disabled. Start with small sizes and inspect 
 - Impossible/refused items remain documented: no guaranteed profits, no regulatory bypass, no withdrawal automation.
 
 
-## v1.6.7 Paper Live Kraken Data
+## v1.6.8 Paper Live Kraken Data
 
 - PAPER mode now uses Kraken public AssetPairs/Ticker/OHLC data for analysis and symbol discovery.
 - PAPER mode still uses a fake local wallet and never sends private Kraken orders.

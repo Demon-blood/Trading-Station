@@ -534,7 +534,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.6.7 Paper Live Data", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.6.8 Paper Live Data", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
