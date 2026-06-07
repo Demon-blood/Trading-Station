@@ -102,7 +102,7 @@ class BotController(
         var submittedOrdersThisScan = 0
         val newsClient = createNewsClient(settings)
         val recentTrades = dao.recentTradesSnapshot(100)
-        val configuredSymbols = selectSymbolUniverse(settings, exchange)
+        val configuredSymbols = selectSymbolUniverse(settings, exchange, liveBalances)
         val symbols = configuredSymbols.mapNotNull { rawSymbol ->
             val autonomousAssessment = autonomousPack.assessSymbol(rawSymbol, recentTrades, settings)
             updateStatus("[$rawSymbol] v1.2 assessment: strategy=${autonomousAssessment.selectedStrategy}, allowed=${autonomousAssessment.allowed}, winRate=${autonomousAssessment.winRatePercent}%, pf=${autonomousAssessment.profitFactor}. ${autonomousAssessment.optimizerHint}", if (autonomousAssessment.allowed) "INFO" else "WARN")
@@ -200,11 +200,15 @@ class BotController(
             updateStatus("Lifecycle manager complete: positions=${lifecycle.positions.size}, openOrders=${lifecycle.openOrders.size}, trades=${lifecycle.performance.totalTrades}", "INFO")
         }
         val reservedSummary = reservedByQuoteThisScan.entries.joinToString(", ") { "${it.key}=${it.value.setScale(2, RoundingMode.UP)}" }.ifBlank { "none" }
+        if (execute && submittedOrdersThisScan == 0) {
+            val tradableSignals = decisions.count { it.allowedToTrade && (it.finalAction == SignalAction.BUY || it.finalAction == SignalAction.SMALL_BUY || it.finalAction == SignalAction.SELL) }
+            updateStatus("No orders submitted this scan. TradableSignals=$tradableSignals/${decisions.size}. Check the preceding WARN lines for exact blockers: quote balance/reserve, cooldown, max trades/hour, confidence, net-profit filter, spread, or minimum order size.", "WARN")
+        }
         updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. OrdersSubmittedThisScan=$submittedOrdersThisScan. ReservedByQuoteThisScan=$reservedSummary")
         return decisions
     }
 
-    private suspend fun selectSymbolUniverse(settings: BotSettings, exchange: CryptoExchangeClient): List<String> {
+    private suspend fun selectSymbolUniverse(settings: BotSettings, exchange: CryptoExchangeClient, liveBalances: Map<String, BigDecimal> = emptyMap()): List<String> {
         val fallback = if (settings.tradeOnlyBtcEth) {
             settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") }
         } else settings.symbols()
@@ -213,14 +217,41 @@ class BotController(
             return fallback
         }
         val discovered = discoverAutoSymbols(settings, exchange)
-        val selected = discovered
-            .filter { it.enabledForRotation }
+        val enabledCandidates = discovered.filter { it.enabledForRotation }
+        val balanceAwareCandidates = if (settings.mode == BotMode.PAPER || liveBalances.isEmpty()) {
+            enabledCandidates
+        } else {
+            enabledCandidates.filter { candidate ->
+                val quoteFree = freeBalanceForAsset(liveBalances, candidate.quoteAsset)
+                val baseFree = freeBalanceForAsset(liveBalances, candidate.baseAsset)
+                val quoteSpendable = quoteFree
+                    .subtract(quoteReserveAmount(settings, quoteFree))
+                    .max(BigDecimal.ZERO)
+                val canBuyWithQuote = candidate.quoteAsset.uppercase() in settings.allowedQuoteAssets() && quoteSpendable >= BigDecimal("5.00")
+                val canSellHeldBase = candidate.lastPrice > BigDecimal.ZERO && baseFree.multiply(candidate.lastPrice) >= BigDecimal("5.00")
+                canBuyWithQuote || canSellHeldBase
+            }
+        }
+        if (settings.mode != BotMode.PAPER && liveBalances.isNotEmpty()) {
+            val skippedForBalance = enabledCandidates.size - balanceAwareCandidates.size
+            updateStatus(
+                "Balance-aware rotation filter: ${balanceAwareCandidates.size}/${enabledCandidates.size} enabled symbols have usable quote cash or sellable base balance. SkippedForBalance=$skippedForBalance.",
+                if (balanceAwareCandidates.isEmpty()) "WARN" else "INFO"
+            )
+            balanceAwareCandidates.take(20).forEach { candidate ->
+                val q = freeBalanceForAsset(liveBalances, candidate.quoteAsset)
+                val b = freeBalanceForAsset(liveBalances, candidate.baseAsset)
+                updateStatus("Rotation candidate ${candidate.symbol}: free ${candidate.quoteAsset}=${q.stripTrailingZeros().toPlainString()}, free ${candidate.baseAsset}=${b.stripTrailingZeros().toPlainString()}, score=${candidate.score}", "INFO")
+            }
+        }
+        val rotationSource = if (balanceAwareCandidates.isNotEmpty()) balanceAwareCandidates else enabledCandidates
+        val selected = rotationSource
             .map { it.symbol }
             .distinct()
             .let { list -> if (settings.tradeOnlyBtcEth) list.filter { it.startsWith("BTC") || it.startsWith("ETH") } else list }
             .take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
         if (selected.isEmpty()) {
-            updateStatus("Auto symbol discovery produced no enabled candidates. Falling back to configured symbols: ${fallback.joinToString(",")}", "WARN")
+            updateStatus("Auto symbol discovery produced no tradable/balance-usable candidates. Falling back to configured symbols: ${fallback.joinToString(",")}", "WARN")
             return fallback
         }
         updateStatus("Auto symbol rotation active: ${selected.size} symbols selected from full Kraken universe: ${selected.joinToString(",")}", "LIVE")
@@ -472,6 +503,15 @@ class BotController(
         updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
         val reservedAmount = if (side == OrderSide.BUY) targetNotional.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
         return ExecutionAttemptResult(true, quoteAsset, reservedAmount)
+    }
+
+    private fun freeBalanceForAsset(balances: Map<String, BigDecimal>, asset: String): BigDecimal {
+        val key = asset.uppercase()
+        return balances[key]
+            ?: if (key == "EUR") balances["ZEUR"] else null
+            ?: if (key == "BTC") balances["XXBT"] ?: balances["XBT"] else null
+            ?: if (key == "ETH") balances["XETH"] else null
+            ?: BigDecimal.ZERO
     }
 
     private fun quoteReserveAmount(settings: BotSettings, freeQuote: BigDecimal): BigDecimal {
