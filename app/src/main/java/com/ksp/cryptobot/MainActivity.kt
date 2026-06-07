@@ -73,6 +73,7 @@ import com.ksp.cryptobot.core.OrderManagementMode
 import com.ksp.cryptobot.core.PortfolioSnapshot
 import com.ksp.cryptobot.core.LiveOrderInfo
 import com.ksp.cryptobot.core.LifecycleSnapshot
+import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
@@ -189,6 +190,7 @@ private enum class AppTab(val label: String) {
     REGIME("Regime"),
     ORDERS("Orders"),
     POSITIONS("Positions"),
+    PRO("Pro Systems"),
     PORTFOLIO("Portfolio"),
     NEWS("News Intel"),
     TAX("Belgium Tax"),
@@ -355,6 +357,7 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
+                AppTab.PRO -> ProSystemsScreen(settings = settings)
                 AppTab.PORTFOLIO -> PortfolioScreen(
                     settings = settings,
                     snapshot = portfolioSnapshot,
@@ -438,7 +441,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.0.0", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.1.0", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1090,6 +1093,66 @@ private fun RiskScreen(
     }
 }
 
+
+@Composable
+private fun ProSystemsScreen(settings: BotSettings) {
+    val pro = remember { ProAutomationSuite() }
+    val readiness = remember(settings) { pro.readiness(settings) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("v1.1 Pro Systems", "Closed-loop automation modules that make the live bot more observable, adaptive and protective.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(if (readiness.allowed) Mint else Amber)
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Automation readiness", color = Muted)
+                        Text(readiness.level, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = if (readiness.allowed) Mint else Amber)
+                    }
+                    StatusPill(readiness.level, if (readiness.allowed) Mint else Amber)
+                }
+                readiness.lines.forEach { line -> ToggleInfo(line, line.startsWith("OK")) }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Live Intelligence", "These modules run through the service, controller or diagnostics layer.")
+                ToggleInfo("Kraken WebSocket-ready ticker monitor", settings.enableKrakenWebSocketFeed)
+                ToggleInfo("Smart profit-lock engine", settings.smartProfitLockEnabled)
+                ToggleInfo("Fee/spread net-profit filter", settings.enableNetProfitFilter)
+                ToggleInfo("Why traded / why skipped explanations", settings.saveWhyTradedExplanations)
+                ToggleInfo("Strategy optimizer", settings.strategyOptimizerEnabled)
+                ToggleInfo("Portfolio balancer", settings.portfolioBalancerEnabled)
+                ToggleInfo("Android watchdog", settings.watchdogEnabled)
+                ToggleInfo("Dry-run mirror exits", settings.dryRunMirrorModeEnabled)
+                ToggleInfo("Local explainable ML score", settings.localMlScoringEnabled)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Smart Profit Lock", "Designed to capture more upside without pretending to know the exact market top.")
+                Text("Activation: +${settings.smartProfitLockActivationPercent}%", color = Muted)
+                Text("Trailing distance: ${settings.smartProfitLockTrailingDistancePercent}%", color = Muted)
+                Text("Partial TP trigger: +${settings.smartProfitLockPartialTakeProfitPercent}%", color = Muted)
+                Text("Partial exit size: ${settings.smartProfitLockPartialExitPercent}%", color = Muted)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Portfolio Rules", "The bot can automatically avoid overexposure before opening new buys.")
+                Text("Minimum EUR reserve: ${settings.minimumEurReservePercent}%", color = Muted)
+                Text("Max single-asset allocation: ${settings.maxSingleAssetAllocationPercent}%", color = Muted)
+                Text("Auto-compounding: ${if (settings.autoCompoundingEnabled) "enabled" else "disabled"}", color = Muted)
+            }
+        }
+        item { WarningCard("v1.1 makes the bot more automatic, but it cannot guarantee maximum possible profits. It uses profit-locking, exits, risk gates and explanations to improve process quality and reduce uncontrolled live-trading behavior.") }
+    }
+}
+
 @Composable
 private fun SettingsScreen(
     apiKey: String,
@@ -1147,7 +1210,7 @@ private fun SettingsScreen(
         }
         item {
             GlassCard {
-                SectionTitle("v1.0 Full Automation", "These live systems are enabled by default in this build.")
+                SectionTitle("v1.1 Full Pro Automation", "These live systems are enabled by default in this build.")
                 ToggleInfo("Live trade lifecycle manager", settings.liveLifecycleManagerEnabled)
                 ToggleInfo("Auto exit manager", settings.autoExitManagerEnabled)
                 ToggleInfo("Automatic take-profit", settings.autoTakeProfitEnabled)
@@ -1155,7 +1218,7 @@ private fun SettingsScreen(
                 ToggleInfo("Profit maximizer / trailing exits", settings.profitMaximizerEnabled)
                 ToggleInfo("Sell on bearish AI signal", settings.forceSellOnBearishSignal)
                 ToggleInfo("Closed-order sync", settings.syncKrakenHistory)
-                Text("No bot can guarantee maximum possible profit. This build attempts to maximize captured profit through TP/SL, trailing exits, AI sell signals and risk controls.", color = Amber)
+                Text("No bot can guarantee maximum possible profit. This build attempts to maximize captured profit with smart profit-locking, multi-stage exits, fee-aware filtering, WebSocket-ready diagnostics, portfolio balancing, watchdog checks and strategy optimization.", color = Amber)
             }
         }
         item { WarningCard("Do not use VPNs, false residency, borrowed accounts or other bypass methods. Use a provider that legally supports your Belgian account, or keep the app in manual/paper mode.") }

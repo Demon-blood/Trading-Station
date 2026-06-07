@@ -96,7 +96,30 @@ data class BotSettings(
     val syncKrakenHistory: Boolean = true,
     val exportTaxReportEnabled: Boolean = true,
     val useCoinGeckoIntelligence: Boolean = false,
-    val coinGeckoVsKrakenDeviationBlockPercent: BigDecimal = BigDecimal("1.75")
+    val coinGeckoVsKrakenDeviationBlockPercent: BigDecimal = BigDecimal("1.75"),
+
+    // v1.1 full pro automation modules. Defaults are conservative and explainable.
+    val enableKrakenWebSocketFeed: Boolean = true,
+    val smartProfitLockEnabled: Boolean = true,
+    val smartProfitLockActivationPercent: BigDecimal = BigDecimal("1.0"),
+    val smartProfitLockTrailingDistancePercent: BigDecimal = BigDecimal("0.75"),
+    val smartProfitLockPartialTakeProfitPercent: BigDecimal = BigDecimal("2.0"),
+    val smartProfitLockPartialExitPercent: BigDecimal = BigDecimal("30.0"),
+    val autoCompoundingEnabled: Boolean = true,
+    val autoCompoundingMaxIncreasePercent: BigDecimal = BigDecimal("10.0"),
+    val enableNetProfitFilter: Boolean = true,
+    val saveWhyTradedExplanations: Boolean = true,
+    val strategyOptimizerEnabled: Boolean = true,
+    val portfolioBalancerEnabled: Boolean = true,
+    val minimumEurReservePercent: BigDecimal = BigDecimal("15.0"),
+    val maxSingleAssetAllocationPercent: BigDecimal = BigDecimal("45.0"),
+    val watchdogEnabled: Boolean = true,
+    val pauseBelowBatteryPercent: Int = 15,
+    val telegramRemoteControlEnabled: Boolean = false,
+    val discordRemoteControlEnabled: Boolean = false,
+    val localMlScoringEnabled: Boolean = true,
+    val dryRunMirrorModeEnabled: Boolean = true,
+    val bearishAutoSellScore: Int = 45
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
 }

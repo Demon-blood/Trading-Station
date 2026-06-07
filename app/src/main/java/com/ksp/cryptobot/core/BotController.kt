@@ -21,6 +21,7 @@ import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import com.ksp.cryptobot.lifecycle.TradeLifecycleManager
 import com.ksp.cryptobot.strategy.RecommendationEngine
+import com.ksp.cryptobot.pro.ProAutomationSuite
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.math.BigDecimal
@@ -39,6 +40,7 @@ class BotController(
     private val advancedRiskManager = AdvancedRiskManager(dao)
     private val advancedAutomationEngine = AdvancedAutomationEngine()
     private val lifecycleManager = TradeLifecycleManager(dao, statusStore)
+    private val proAutomationSuite = ProAutomationSuite(appContext)
     private val _status = MutableStateFlow("Stopped")
     val status: StateFlow<String> = _status
 
@@ -52,6 +54,12 @@ class BotController(
 
     suspend fun scanOnce(settings: BotSettings = settingsStore.load(), execute: Boolean = false): List<AiDecision> {
         updateStatus(if (execute) "Scan started with execution enabled. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}" else "Scan started. Provider=${settings.exchangeProvider}, mode=${settings.mode}")
+        val proReadiness = proAutomationSuite.readiness(settings)
+        proReadiness.lines.take(12).forEach { updateStatus("Pro readiness: $it", if (it.startsWith("BLOCK")) "WARN" else "INFO") }
+        if (execute && !proReadiness.allowed && settings.mode != BotMode.PAPER) {
+            updateStatus("Execution blocked by v1.1 pro readiness gate: ${proReadiness.level}", "WARN")
+            return emptyList()
+        }
         val exchange = createExchange(settings)
         val liveAutoExecution = execute && settings.mode == BotMode.LIVE_AUTO && settings.exchangeProvider != ExchangeProvider.PAPER
         if (liveAutoExecution) {
@@ -103,6 +111,8 @@ class BotController(
                 updateStatus("[$symbol] Fetching ticker from ${settings.exchangeProvider}...")
                 val ticker = exchange.getTicker(symbol)
                 updateStatus("[$symbol] Ticker OK. Bid=${ticker.bid}, Ask=${ticker.ask}, Last=${ticker.lastPrice}, 24hVolEUR=${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)}")
+                val symbolRank = proAutomationSuite.rankSymbol(ticker, recentTrades)
+                updateStatus("[$symbol] Smart rotation score=${symbolRank.score}. ${symbolRank.reason}", if (symbolRank.score < 45) "WARN" else "INFO")
                 val candlesByTimeframe = if (settings.recoveredScalpingStrategyEnabled) {
                     updateStatus("[$symbol] Fetching multi-timeframe candles...")
                     Timeframe.values().associateWith { timeframe -> exchange.getCandles(symbol, timeframe, 140) }
@@ -122,8 +132,11 @@ class BotController(
                     allowedToTrade = autoDecision.allowed,
                     explanation = autoDecision.explanation
                 )
-                dao.insertAiDecision(decision.toEntity())
+                val netCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
+                val whyLine = proAutomationSuite.explainTrade(ticker, decision, symbolRank, netCheck)
+                dao.insertAiDecision(decision.copy(explanation = decision.explanation + " | " + whyLine).toEntity())
                 updateStatus("[$symbol] Decision=${decision.finalAction}, score=${decision.finalScore}, allowed=${decision.allowedToTrade}. ${decision.explanation.take(180)}")
+                updateStatus("[$symbol] Why/edge: ${whyLine.take(240)}", if (netCheck.allowed) "INFO" else "WARN")
                 if (execute) {
                     val reserved = executeDecisionIfAllowed(settings, exchange, ticker, decision, liveBalances, reservedEurThisScan)
                     if (reserved > BigDecimal.ZERO) {
@@ -176,6 +189,11 @@ class BotController(
         val allowed = guard.canExecute(settings, decision)
         if (!allowed.first) {
             updateStatus("Trade blocked: ${allowed.second}", "WARN")
+            return BigDecimal.ZERO
+        }
+        val proNetCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
+        updateStatus("[${ticker.symbol}] v1.1 fee/spread net-profit check: ${proNetCheck.reason}", if (proNetCheck.allowed) "INFO" else "WARN")
+        if (!proNetCheck.allowed) {
             return BigDecimal.ZERO
         }
         if (settings.mode == BotMode.LIVE_CONFIRM) {
@@ -396,7 +414,9 @@ class BotController(
             "Portfolio has value, but free EUR is below Kraken's practical minimum for BUY orders. The bot can SELL held crypto on SELL signals, but cannot BUY until free EUR is available."
         } else "Live portfolio loaded from ${settings.exchangeProvider}."
         updateStatus("Portfolio refresh complete. Total≈€${total.toPlainString()}, freeEUR=${freeEur.setScale(2, RoundingMode.DOWN)}", "INFO")
-        return PortfolioSnapshot(settings.exchangeProvider, total, freeEur, priced, warning = warning)
+        val snapshot = PortfolioSnapshot(settings.exchangeProvider, total, freeEur, priced, warning = warning)
+        proAutomationSuite.portfolioGuard(snapshot, settings).take(10).forEach { line -> updateStatus("Portfolio balancer: $line", if (line.contains("blocks", ignoreCase = true) || line.contains("exceeds", ignoreCase = true)) "WARN" else "INFO") }
+        return snapshot
     }
 
 
