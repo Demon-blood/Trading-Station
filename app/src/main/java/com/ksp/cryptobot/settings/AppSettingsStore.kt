@@ -23,7 +23,7 @@ class AppSettingsStore(context: Context) {
             minVolume24hEur = prefs.getString("min_volume_24h_eur", "1000000")!!.toBigDecimalOrNull() ?: BigDecimal("1000000"),
             scanIntervalSeconds = prefs.getLong("scan_interval_seconds", 60L),
             taxOptimization = prefs.getBoolean("tax_optimization", true),
-            tradeOnlyBtcEth = prefs.getBoolean("trade_only_btc_eth", true),
+            tradeOnlyBtcEth = prefs.getBoolean("trade_only_btc_eth", false),
             liveTradingAcknowledged = prefs.getBoolean("live_ack", false),
             useNewsAi = prefs.getBoolean("use_news_ai", true),
             useTradeMemoryAi = prefs.getBoolean("use_trade_memory_ai", true),
@@ -65,7 +65,23 @@ class AppSettingsStore(context: Context) {
             manualExecutionMode = prefs.getBoolean("manual_execution_mode", false),
             enableMarketOrders = prefs.getBoolean("enable_market_orders", false),
             maxMarketOrderEur = prefs.getString("max_market_order_eur", "25.00")!!.toBigDecimalOrNull() ?: BigDecimal("25.00"),
-            marketOrderSlippageWarningPercent = prefs.getString("market_order_slippage_warning_percent", "0.75")!!.toBigDecimalOrNull() ?: BigDecimal("0.75")
+            marketOrderSlippageWarningPercent = prefs.getString("market_order_slippage_warning_percent", "0.75")!!.toBigDecimalOrNull() ?: BigDecimal("0.75"),
+            liveLifecycleManagerEnabled = prefs.getBoolean("live_lifecycle_manager_enabled", true),
+            autoExitManagerEnabled = prefs.getBoolean("auto_exit_manager_enabled", true),
+            autoTakeProfitEnabled = prefs.getBoolean("auto_take_profit_enabled", true),
+            autoStopLossEnabled = prefs.getBoolean("auto_stop_loss_enabled", true),
+            profitMaximizerEnabled = prefs.getBoolean("profit_maximizer_enabled", true),
+            forceSellOnBearishSignal = prefs.getBoolean("force_sell_on_bearish_signal", true),
+            takeProfitPercent = prefs.getString("take_profit_percent", "2.0")!!.toBigDecimalOrNull() ?: BigDecimal("2.0"),
+            stopLossPercent = prefs.getString("stop_loss_percent", "1.2")!!.toBigDecimalOrNull() ?: BigDecimal("1.2"),
+            trailingActivationPercent = prefs.getString("trailing_activation_percent", "1.0")!!.toBigDecimalOrNull() ?: BigDecimal("1.0"),
+            trailingDistancePercent = prefs.getString("trailing_distance_percent", "0.8")!!.toBigDecimalOrNull() ?: BigDecimal("0.8"),
+            partialExitPercent = prefs.getString("partial_exit_percent", "50.0")!!.toBigDecimalOrNull() ?: BigDecimal("50.0"),
+            emergencySellAllOnRiskOff = prefs.getBoolean("emergency_sell_all_on_risk_off", false),
+            syncKrakenHistory = prefs.getBoolean("sync_kraken_history", true),
+            exportTaxReportEnabled = prefs.getBoolean("export_tax_report_enabled", true),
+            useCoinGeckoIntelligence = prefs.getBoolean("use_coingecko_intelligence", false),
+            coinGeckoVsKrakenDeviationBlockPercent = prefs.getString("coingecko_deviation_block_percent", "1.75")!!.toBigDecimalOrNull() ?: BigDecimal("1.75")
         )
     }
 
@@ -122,6 +138,22 @@ class AppSettingsStore(context: Context) {
             .putBoolean("enable_market_orders", settings.enableMarketOrders)
             .putString("max_market_order_eur", settings.maxMarketOrderEur.toPlainString())
             .putString("market_order_slippage_warning_percent", settings.marketOrderSlippageWarningPercent.toPlainString())
+            .putBoolean("live_lifecycle_manager_enabled", settings.liveLifecycleManagerEnabled)
+            .putBoolean("auto_exit_manager_enabled", settings.autoExitManagerEnabled)
+            .putBoolean("auto_take_profit_enabled", settings.autoTakeProfitEnabled)
+            .putBoolean("auto_stop_loss_enabled", settings.autoStopLossEnabled)
+            .putBoolean("profit_maximizer_enabled", settings.profitMaximizerEnabled)
+            .putBoolean("force_sell_on_bearish_signal", settings.forceSellOnBearishSignal)
+            .putString("take_profit_percent", settings.takeProfitPercent.toPlainString())
+            .putString("stop_loss_percent", settings.stopLossPercent.toPlainString())
+            .putString("trailing_activation_percent", settings.trailingActivationPercent.toPlainString())
+            .putString("trailing_distance_percent", settings.trailingDistancePercent.toPlainString())
+            .putString("partial_exit_percent", settings.partialExitPercent.toPlainString())
+            .putBoolean("emergency_sell_all_on_risk_off", settings.emergencySellAllOnRiskOff)
+            .putBoolean("sync_kraken_history", settings.syncKrakenHistory)
+            .putBoolean("export_tax_report_enabled", settings.exportTaxReportEnabled)
+            .putBoolean("use_coingecko_intelligence", settings.useCoinGeckoIntelligence)
+            .putString("coingecko_deviation_block_percent", settings.coinGeckoVsKrakenDeviationBlockPercent.toPlainString())
             .apply()
     }
 

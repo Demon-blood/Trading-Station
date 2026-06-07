@@ -19,6 +19,7 @@ import com.ksp.cryptobot.news.NewsClient
 import com.ksp.cryptobot.news.NoopNewsClient
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
+import com.ksp.cryptobot.lifecycle.TradeLifecycleManager
 import com.ksp.cryptobot.strategy.RecommendationEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +38,7 @@ class BotController(
     private val guard = ExecutionGuard(dao)
     private val advancedRiskManager = AdvancedRiskManager(dao)
     private val advancedAutomationEngine = AdvancedAutomationEngine()
+    private val lifecycleManager = TradeLifecycleManager(dao, statusStore)
     private val _status = MutableStateFlow("Stopped")
     val status: StateFlow<String> = _status
 
@@ -52,6 +54,10 @@ class BotController(
         updateStatus(if (execute) "Scan started with execution enabled. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}" else "Scan started. Provider=${settings.exchangeProvider}, mode=${settings.mode}")
         val exchange = createExchange(settings)
         val liveAutoExecution = execute && settings.mode == BotMode.LIVE_AUTO && settings.exchangeProvider != ExchangeProvider.PAPER
+        if (liveAutoExecution) {
+            manageExistingLiveOrders(settings, exchange)
+            lifecycleManager.runPreScanMaintenance(settings, exchange)
+        }
         val liveBalances = if (liveAutoExecution) {
             runCatching { exchange.getAvailableBalances() }
                 .onSuccess { balances ->
@@ -73,7 +79,25 @@ class BotController(
         var reservedEurThisScan = BigDecimal.ZERO
         val newsClient = createNewsClient(settings)
         val recentTrades = dao.recentTradesSnapshot(100)
-        val symbols = if (settings.tradeOnlyBtcEth) settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") } else settings.symbols()
+        val configuredSymbols = if (settings.tradeOnlyBtcEth) settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") } else settings.symbols()
+        val symbols = configuredSymbols.mapNotNull { rawSymbol ->
+            if (settings.exchangeProvider == ExchangeProvider.KRAKEN && settings.mode != BotMode.PAPER) {
+                runCatching { exchange.validateSymbol(rawSymbol) }
+                    .onSuccess { info ->
+                        if (info.tradable) {
+                            updateStatus("[$rawSymbol] Symbol valid: ${info.normalizedSymbol} → Kraken pair ${info.exchangePair}, min=${info.minOrderSize}, priceDecimals=${info.priceDecimals}, qtyDecimals=${info.quantityDecimals}", "INFO")
+                        } else {
+                            updateStatus("[$rawSymbol] Symbol skipped: not tradable. ${info.reason}", "WARN")
+                        }
+                    }
+                    .getOrElse { error ->
+                        updateStatus("[$rawSymbol] Symbol validation failed: ${error.message}", "ERROR")
+                        null
+                    }
+                    ?.takeIf { it.tradable }
+                    ?.normalizedSymbol
+            } else rawSymbol
+        }.distinct()
         val decisions = symbols.mapNotNull { symbol ->
             runCatching {
                 updateStatus("[$symbol] Fetching ticker from ${settings.exchangeProvider}...")
@@ -122,6 +146,11 @@ class BotController(
                     explanation = "Scan failed: ${error.message}"
                 )
             }
+        }
+        if (liveAutoExecution && settings.liveLifecycleManagerEnabled) {
+            val lifecycle = lifecycleManager.runPostDecisionManagement(settings, exchange, decisions)
+            lifecycle.messages.take(10).forEach { updateStatus(it, if (it.contains("submitted", ignoreCase = true)) "LIVE" else "INFO") }
+            updateStatus("Lifecycle manager complete: positions=${lifecycle.positions.size}, openOrders=${lifecycle.openOrders.size}, trades=${lifecycle.performance.totalTrades}", "INFO")
         }
         updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. ReservedEURThisScan=${reservedEurThisScan.setScale(2, RoundingMode.UP)}")
         return decisions
@@ -275,6 +304,63 @@ class BotController(
     }
 
 
+    private suspend fun manageExistingLiveOrders(settings: BotSettings, exchange: CryptoExchangeClient) {
+        if (!settings.smartLimitRequote && settings.orderManagementMode == OrderManagementMode.SIMPLE_LIMIT) return
+        val orders = runCatching { exchange.getOpenOrders() }
+            .onFailure { updateStatus("Open-order sync failed: ${it.message}", "WARN") }
+            .getOrElse { emptyList() }
+        if (orders.isEmpty()) {
+            updateStatus("Open-order sync: no live open orders found.", "INFO")
+            return
+        }
+        updateStatus("Open-order sync: ${orders.size} live order(s) currently open.", "INFO")
+        val nowSec = System.currentTimeMillis() / 1000L
+        orders.take(8).forEach { order ->
+            val age = (nowSec - order.openedAtEpochSeconds).coerceAtLeast(0L)
+            updateStatus("Open order: ${order.side} ${order.symbol} ${order.orderType} remaining=${order.remainingQuantity.stripTrailingZeros().toPlainString()} price=${order.price.stripTrailingZeros().toPlainString()} age=${age}s status=${order.status}", "INFO")
+            if (settings.smartLimitRequote && order.orderType == OrderType.LIMIT && age >= settings.staleOrderTimeoutSeconds) {
+                val cancelled = runCatching { exchange.cancelOrder(order.exchangeOrderId) }.getOrDefault(false)
+                if (cancelled) {
+                    updateStatus("Stale order cancelled for requote: ${order.exchangeOrderId} ${order.symbol} age=${age}s", "LIVE")
+                } else {
+                    updateStatus("Stale order cancel failed or not supported: ${order.exchangeOrderId}", "WARN")
+                }
+            }
+        }
+    }
+
+    suspend fun loadOpenOrdersSnapshot(settings: BotSettings = settingsStore.load()): List<LiveOrderInfo> {
+        updateStatus("Live open-order refresh started. Provider=${settings.exchangeProvider}")
+        val exchange = createExchange(settings)
+        return runCatching { exchange.getOpenOrders() }
+            .onSuccess { updateStatus("Live open-order refresh complete. count=${it.size}", "INFO") }
+            .onFailure { updateStatus("Live open-order refresh failed: ${it.message}", "ERROR") }
+            .getOrElse { emptyList() }
+    }
+
+    suspend fun cancelLiveOrder(orderId: String, settings: BotSettings = settingsStore.load()): Boolean {
+        updateStatus("Cancel requested for live order $orderId", "WARN")
+        val exchange = createExchange(settings)
+        return runCatching { exchange.cancelOrder(orderId) }
+            .onSuccess { updateStatus("Cancel result for $orderId: $it", if (it) "LIVE" else "WARN") }
+            .onFailure { updateStatus("Cancel failed for $orderId: ${it.message}", "ERROR") }
+            .getOrDefault(false)
+    }
+
+    suspend fun validateConfiguredSymbols(settings: BotSettings = settingsStore.load()): List<ExchangeSymbolInfo> {
+        updateStatus("Symbol validation started for ${settings.symbols().size} configured symbol(s).")
+        val exchange = createExchange(settings)
+        return settings.symbols().map { symbol ->
+            runCatching { exchange.validateSymbol(symbol) }
+                .onSuccess { info -> updateStatus("Symbol ${info.requestedSymbol}: ${if (info.tradable) "VALID" else "BLOCKED"} → ${info.exchangePair}. ${info.reason}", if (info.tradable) "INFO" else "WARN") }
+                .getOrElse { error ->
+                    updateStatus("Symbol $symbol validation failed: ${error.message}", "ERROR")
+                    ExchangeSymbolInfo(symbol, symbol.uppercase(), symbol.uppercase(), symbol.uppercase(), symbol.removeSuffix("EUR"), "EUR", BigDecimal.ZERO, 8, 8, false, error.message ?: "Validation failed")
+                }
+        }
+    }
+
+
     suspend fun loadPortfolioSnapshot(settings: BotSettings = settingsStore.load()): PortfolioSnapshot {
         updateStatus("Portfolio refresh started. Provider=${settings.exchangeProvider}")
         val exchange = createExchange(settings)
@@ -311,6 +397,16 @@ class BotController(
         } else "Live portfolio loaded from ${settings.exchangeProvider}."
         updateStatus("Portfolio refresh complete. Total≈€${total.toPlainString()}, freeEUR=${freeEur.setScale(2, RoundingMode.DOWN)}", "INFO")
         return PortfolioSnapshot(settings.exchangeProvider, total, freeEur, priced, warning = warning)
+    }
+
+
+    suspend fun loadLifecycleSnapshot(settings: BotSettings = settingsStore.load()): LifecycleSnapshot {
+        updateStatus("Lifecycle snapshot refresh started. Provider=${settings.exchangeProvider}")
+        val exchange = createExchange(settings)
+        return runCatching { lifecycleManager.snapshot(settings, exchange) }
+            .onSuccess { updateStatus("Lifecycle snapshot loaded. positions=${it.positions.size}, openOrders=${it.openOrders.size}", "INFO") }
+            .onFailure { updateStatus("Lifecycle snapshot failed: ${it.message}", "ERROR") }
+            .getOrElse { LifecycleSnapshot(emptyList(), emptyList(), PerformanceSummary(0,0,0,BigDecimal.ZERO,BigDecimal.ZERO,BigDecimal.ZERO,BigDecimal.ZERO,"n/a","n/a"), listOf(it.message ?: "Lifecycle snapshot failed")) }
     }
 
     fun start() {

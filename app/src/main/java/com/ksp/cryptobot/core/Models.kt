@@ -7,7 +7,7 @@ enum class BotMode { PAPER, LIVE_CONFIRM, LIVE_AUTO }
 enum class ExchangeProvider { PAPER, BINANCE_READ_ONLY, KRAKEN, COINBASE_ADVANCED, BITVAVO, MANUAL }
 enum class SignalAction { STRONG_AVOID, AVOID, WAIT, WATCH, SMALL_BUY, BUY, SELL }
 enum class OrderSide { BUY, SELL }
-enum class OrderType { LIMIT, MARKET }
+enum class OrderType { LIMIT, MARKET, STOP_LOSS, TAKE_PROFIT }
 enum class DecisionSource { TECHNICAL, NEWS, TRADE_MEMORY, COMBINED_AI }
 enum class Timeframe(val binanceInterval: String) { M1("1m"), M5("5m"), M15("15m"), H1("1h"), H4("4h") }
 enum class StrategyMode { AUTO, SCALPING, TREND, BREAKOUT, REVERSAL, NEWS_MOMENTUM }
@@ -34,7 +34,7 @@ data class BotSettings(
     val minVolume24hEur: BigDecimal = BigDecimal("1000000"),
     val scanIntervalSeconds: Long = 60,
     val taxOptimization: Boolean = true,
-    val tradeOnlyBtcEth: Boolean = true,
+    val tradeOnlyBtcEth: Boolean = false,
     val liveTradingAcknowledged: Boolean = false,
     val useNewsAi: Boolean = true,
     val useTradeMemoryAi: Boolean = true,
@@ -80,7 +80,23 @@ data class BotSettings(
      */
     val enableMarketOrders: Boolean = false,
     val maxMarketOrderEur: BigDecimal = BigDecimal("25.00"),
-    val marketOrderSlippageWarningPercent: BigDecimal = BigDecimal("0.75")
+    val marketOrderSlippageWarningPercent: BigDecimal = BigDecimal("0.75"),
+    val liveLifecycleManagerEnabled: Boolean = true,
+    val autoExitManagerEnabled: Boolean = true,
+    val autoTakeProfitEnabled: Boolean = true,
+    val autoStopLossEnabled: Boolean = true,
+    val profitMaximizerEnabled: Boolean = true,
+    val forceSellOnBearishSignal: Boolean = true,
+    val takeProfitPercent: BigDecimal = BigDecimal("2.0"),
+    val stopLossPercent: BigDecimal = BigDecimal("1.2"),
+    val trailingActivationPercent: BigDecimal = BigDecimal("1.0"),
+    val trailingDistancePercent: BigDecimal = BigDecimal("0.8"),
+    val partialExitPercent: BigDecimal = BigDecimal("50.0"),
+    val emergencySellAllOnRiskOff: Boolean = false,
+    val syncKrakenHistory: Boolean = true,
+    val exportTaxReportEnabled: Boolean = true,
+    val useCoinGeckoIntelligence: Boolean = false,
+    val coinGeckoVsKrakenDeviationBlockPercent: BigDecimal = BigDecimal("1.75")
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
 }
@@ -123,7 +139,9 @@ data class OrderRequest(
     val quantity: BigDecimal,
     val limitPrice: BigDecimal? = null,
     val orderType: OrderType = OrderType.LIMIT,
-    val clientOrderId: String = "ksp-${System.currentTimeMillis()}"
+    val clientOrderId: String = "ksp-${System.currentTimeMillis()}",
+    val reduceOnly: Boolean = false,
+    val purpose: String = "ENTRY"
 )
 
 data class OrderResult(
@@ -270,4 +288,95 @@ data class PortfolioSnapshot(
     val assets: List<BalanceInfo>,
     val refreshedAt: Instant = Instant.now(),
     val warning: String = ""
+)
+
+
+data class ExchangeSymbolInfo(
+    val requestedSymbol: String,
+    val normalizedSymbol: String,
+    val exchangePair: String,
+    val altName: String,
+    val baseAsset: String,
+    val quoteAsset: String,
+    val minOrderSize: BigDecimal,
+    val priceDecimals: Int,
+    val quantityDecimals: Int,
+    val tradable: Boolean,
+    val reason: String = ""
+)
+
+data class LiveOrderInfo(
+    val exchangeOrderId: String,
+    val symbol: String,
+    val side: OrderSide,
+    val orderType: OrderType,
+    val price: BigDecimal,
+    val quantity: BigDecimal,
+    val executedQuantity: BigDecimal,
+    val remainingQuantity: BigDecimal,
+    val status: String,
+    val openedAtEpochSeconds: Long,
+    val description: String = ""
+)
+
+
+data class ClosedOrderInfo(
+    val exchangeOrderId: String,
+    val symbol: String,
+    val side: OrderSide,
+    val orderType: OrderType,
+    val price: BigDecimal,
+    val quantity: BigDecimal,
+    val executedQuantity: BigDecimal,
+    val fee: BigDecimal,
+    val closedAtEpochSeconds: Long,
+    val status: String,
+    val description: String = ""
+)
+
+data class PositionInfo(
+    val symbol: String,
+    val baseAsset: String,
+    val quantity: BigDecimal,
+    val freeQuantity: BigDecimal,
+    val entryPrice: BigDecimal,
+    val currentPrice: BigDecimal,
+    val highestPrice: BigDecimal,
+    val unrealizedPnlEur: BigDecimal,
+    val unrealizedPnlPercent: BigDecimal,
+    val stopPrice: BigDecimal,
+    val takeProfitPrice: BigDecimal,
+    val trailingStopPrice: BigDecimal,
+    val managed: Boolean,
+    val reason: String
+)
+
+data class PerformanceSummary(
+    val totalTrades: Int,
+    val winningTrades: Int,
+    val losingTrades: Int,
+    val winRatePercent: BigDecimal,
+    val realizedPnlEur: BigDecimal,
+    val estimatedFeesEur: BigDecimal,
+    val profitFactor: BigDecimal,
+    val bestSymbol: String,
+    val worstSymbol: String
+)
+
+data class LifecycleSnapshot(
+    val positions: List<PositionInfo>,
+    val openOrders: List<LiveOrderInfo>,
+    val performance: PerformanceSummary,
+    val messages: List<String>
+)
+
+data class TaxReportRow(
+    val timestampEpochMs: Long,
+    val symbol: String,
+    val side: OrderSide,
+    val quantity: BigDecimal,
+    val priceEur: BigDecimal,
+    val feeEur: BigDecimal,
+    val realizedGainEur: BigDecimal,
+    val note: String
 )

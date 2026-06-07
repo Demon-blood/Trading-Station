@@ -2,6 +2,7 @@ package com.ksp.cryptobot.data
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
@@ -11,6 +12,8 @@ interface AppDao {
     @Insert suspend fun insertSignal(signal: SignalEntity)
     @Insert suspend fun insertAiDecision(decision: AiDecisionEntity)
     @Insert suspend fun insertTaxLot(lot: TaxLotEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPosition(position: PositionEntity)
+    @Insert suspend fun insertTaxReportRow(row: TaxReportEntity)
 
     @Query("SELECT * FROM trades ORDER BY timestampEpochMs DESC LIMIT 100")
     fun recentTrades(): Flow<List<TradeEntity>>
@@ -35,4 +38,19 @@ interface AppDao {
 
     @Query("SELECT COALESCE(SUM(CAST(realizedGainEur AS REAL)), 0) FROM tax_lots WHERE closedAtEpochMs BETWEEN :yearStartMs AND :yearEndMs")
     suspend fun realizedGainForYear(yearStartMs: Long, yearEndMs: Long): Double
+
+    @Query("SELECT * FROM positions WHERE status = 'OPEN' ORDER BY updatedAtEpochMs DESC")
+    suspend fun openPositionsSnapshot(): List<PositionEntity>
+
+    @Query("SELECT * FROM positions WHERE symbol = :symbol LIMIT 1")
+    suspend fun positionForSymbol(symbol: String): PositionEntity?
+
+    @Query("UPDATE positions SET status = :status, updatedAtEpochMs = :updatedAt WHERE symbol = :symbol")
+    suspend fun updatePositionStatus(symbol: String, status: String, updatedAt: Long)
+
+    @Query("SELECT * FROM tax_report_rows ORDER BY timestampEpochMs DESC")
+    suspend fun taxReportRowsSnapshot(): List<TaxReportEntity>
+
+    @Query("SELECT * FROM trades ORDER BY timestampEpochMs DESC")
+    suspend fun allTradesSnapshot(): List<TradeEntity>
 }

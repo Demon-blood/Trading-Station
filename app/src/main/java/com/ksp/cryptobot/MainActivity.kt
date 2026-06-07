@@ -71,6 +71,8 @@ import com.ksp.cryptobot.core.StrategyMode
 import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.core.OrderManagementMode
 import com.ksp.cryptobot.core.PortfolioSnapshot
+import com.ksp.cryptobot.core.LiveOrderInfo
+import com.ksp.cryptobot.core.LifecycleSnapshot
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
@@ -130,6 +132,26 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 callback(controller.loadPortfolioSnapshot(settings))
                             }
+                        },
+                        onLoadOrders = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.loadOpenOrdersSnapshot(settings))
+                            }
+                        },
+                        onLoadLifecycle = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.loadLifecycleSnapshot(settings))
+                            }
+                        },
+                        onCancelOrder = { settings, orderId, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.cancelLiveOrder(orderId, settings))
+                            }
+                        },
+                        onValidateSymbols = { settings ->
+                            lifecycleScope.launch {
+                                controller.validateConfiguredSymbols(settings)
+                            }
                         }
                     )
                 }
@@ -166,6 +188,7 @@ private enum class AppTab(val label: String) {
     BACKTEST("Backtest Lab"),
     REGIME("Regime"),
     ORDERS("Orders"),
+    POSITIONS("Positions"),
     PORTFOLIO("Portfolio"),
     NEWS("News Intel"),
     TAX("Belgium Tax"),
@@ -181,7 +204,11 @@ private fun AdvancedBotApp(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onScan: (BotSettings, Boolean, (List<AiDecision>) -> Unit) -> Unit,
-    onLoadPortfolio: (BotSettings, (PortfolioSnapshot) -> Unit) -> Unit
+    onLoadPortfolio: (BotSettings, (PortfolioSnapshot) -> Unit) -> Unit,
+    onLoadOrders: (BotSettings, (List<LiveOrderInfo>) -> Unit) -> Unit,
+    onLoadLifecycle: (BotSettings, (LifecycleSnapshot) -> Unit) -> Unit,
+    onCancelOrder: (BotSettings, String, (Boolean) -> Unit) -> Unit,
+    onValidateSymbols: (BotSettings) -> Unit
 ) {
     var settings by remember { mutableStateOf(store.load()) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
@@ -190,6 +217,8 @@ private fun AdvancedBotApp(
     var statusHistory by remember { mutableStateOf(statusStore.recentLines()) }
     var decisions by remember { mutableStateOf(sampleDecisions()) }
     var portfolioSnapshot by remember { mutableStateOf<PortfolioSnapshot?>(null) }
+    var liveOrders by remember { mutableStateOf<List<LiveOrderInfo>>(emptyList()) }
+    var lifecycleSnapshot by remember { mutableStateOf<LifecycleSnapshot?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -206,6 +235,20 @@ private fun AdvancedBotApp(
                 portfolioSnapshot = result
                 statusStore.write("Portfolio auto-refresh complete. Total≈€${result.totalValueEur}")
                 status = "Portfolio loaded: €${result.totalValueEur}"
+            }
+        }
+        if (currentTab == AppTab.ORDERS) {
+            onLoadOrders(settings) { result ->
+                liveOrders = result
+                statusStore.write("Open orders auto-refresh complete. Count=${result.size}")
+                status = "Open orders loaded: ${result.size}"
+            }
+        }
+        if (currentTab == AppTab.POSITIONS) {
+            onLoadLifecycle(settings) { result ->
+                lifecycleSnapshot = result
+                statusStore.write("Lifecycle auto-refresh complete. Positions=${result.positions.size}")
+                status = "Lifecycle loaded: ${result.positions.size} position(s)"
             }
         }
     }
@@ -284,7 +327,34 @@ private fun AdvancedBotApp(
                 AppTab.STRATEGY -> StrategyScreen(settings = settings, onToggleStrategy = { persistSettings(settings.copy(recoveredScalpingStrategyEnabled = it)) })
                 AppTab.BACKTEST -> BacktestLabScreen(settings = settings)
                 AppTab.REGIME -> RegimeScreen(settings = settings)
-                AppTab.ORDERS -> OrdersScreen(settings = settings)
+                AppTab.ORDERS -> OrdersScreen(
+                    settings = settings,
+                    orders = liveOrders,
+                    onRefresh = {
+                        statusStore.write("Open-order refresh requested from UI.")
+                        onLoadOrders(settings) { result ->
+                            liveOrders = result
+                            status = "Open orders loaded: ${result.size}"
+                        }
+                    },
+                    onCancel = { orderId ->
+                        onCancelOrder(settings, orderId) { cancelled ->
+                            status = if (cancelled) "Order cancelled" else "Cancel failed or unsupported"
+                            onLoadOrders(settings) { result -> liveOrders = result }
+                        }
+                    }
+                )
+                AppTab.POSITIONS -> PositionsScreen(
+                    settings = settings,
+                    snapshot = lifecycleSnapshot,
+                    onRefresh = {
+                        statusStore.write("Lifecycle refresh requested from UI.")
+                        onLoadLifecycle(settings) { result ->
+                            lifecycleSnapshot = result
+                            status = "Lifecycle loaded: ${result.positions.size} position(s)"
+                        }
+                    }
+                )
                 AppTab.PORTFOLIO -> PortfolioScreen(
                     settings = settings,
                     snapshot = portfolioSnapshot,
@@ -368,7 +438,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v0.8.9", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.0.0", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -688,29 +758,141 @@ private fun RegimeScreen(settings: BotSettings) {
 }
 
 @Composable
-private fun OrdersScreen(settings: BotSettings) {
+private fun OrdersScreen(
+    settings: BotSettings,
+    orders: List<LiveOrderInfo>,
+    onRefresh: () -> Unit,
+    onCancel: (String) -> Unit
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Smart Orders", "Spread-aware limit entries, stale-order cancellation, partial TP and trailing stops.") }
+        item { SectionTitle("Live Orders", "Fully live Kraken order monitor: open orders, stale cancel/requote, market/limit mode and manual cancel.") }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                item { MetricCard("Order Mode", settings.orderManagementMode.name.replace('_', ' '), "Execution style", Electric) }
+                item { MetricCard("Open Orders", orders.size.toString(), "Live exchange count", Electric) }
+                item { MetricCard("Order Mode", settings.orderManagementMode.name.replace('_', ' '), "Execution style", Mint) }
                 item { MetricCard("Stale Cancel", "${settings.staleOrderTimeoutSeconds}s", "Auto-cancel timeout", Amber) }
-                item { MetricCard("Partial TP", "${settings.partialTakeProfitPercent}%", "First target size", Mint) }
+                item { MetricCard("Market Orders", if (settings.enableMarketOrders) "ON" else "OFF", "Kraken toggle", if (settings.enableMarketOrders) Danger else Muted) }
             }
         }
         item {
             GlassCard {
-                ToggleInfo("Trailing stop", settings.enableTrailingStop)
-                ToggleInfo("Break-even stop", settings.enableBreakEvenStop)
-                ToggleInfo("Partial take-profit", settings.enablePartialTakeProfit)
+                ToggleInfo("Trailing stop setting", settings.enableTrailingStop)
+                ToggleInfo("Break-even stop setting", settings.enableBreakEvenStop)
+                ToggleInfo("Partial take-profit setting", settings.enablePartialTakeProfit)
                 ToggleInfo("Smart requote", settings.smartLimitRequote)
-                Text("Market orders remain disabled by design. The bot uses guarded limit order planning.", color = Muted)
+                Text("The foreground service now syncs open orders every scan and cancels stale limit orders when smart requote is enabled.", color = Muted)
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Refresh Live Open Orders") }
             }
         }
+        if (orders.isEmpty()) {
+            item { WarningCard("No live open orders returned by ${settings.exchangeProvider}. If the bot placed market orders, they may fill immediately and not appear here.") }
+        } else {
+            items(orders) { order ->
+                LiveOrderCard(order = order, onCancel = { onCancel(order.exchangeOrderId) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveOrderCard(order: LiveOrderInfo, onCancel: () -> Unit) {
+    GlassCard {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("${order.side} ${order.symbol}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text("${order.orderType} • ${order.status} • id=${order.exchangeOrderId.take(10)}…", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            StatusPill(order.side.name, if (order.side.name == "BUY") Mint else Danger)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("price=${order.price.stripTrailingZeros().toPlainString()} • qty=${order.quantity.stripTrailingZeros().toPlainString()} • remaining=${order.remainingQuantity.stripTrailingZeros().toPlainString()}", color = Muted)
+        if (order.description.isNotBlank()) Text(order.description, color = Muted, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel Order") }
+    }
+}
+
+
+@Composable
+private fun PositionsScreen(
+    settings: BotSettings,
+    snapshot: LifecycleSnapshot?,
+    onRefresh: () -> Unit
+) {
+    val positions = snapshot?.positions.orEmpty()
+    val performance = snapshot?.performance
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Live Positions + Profit Maximizer", "Automatic lifecycle manager tracks held crypto, high-water marks, TP/SL, trailing exits and bearish AI exits.") }
+        item {
+            HeroCard(
+                title = "Lifecycle Manager ${if (settings.liveLifecycleManagerEnabled) "ON" else "OFF"}",
+                subtitle = "TP=${settings.takeProfitPercent}% • SL=${settings.stopLossPercent}% • trailing after ${settings.trailingActivationPercent}% with ${settings.trailingDistancePercent}% distance.",
+                primaryButton = "Refresh Positions",
+                secondaryButton = "Auto Exit ${if (settings.autoExitManagerEnabled) "ON" else "OFF"}",
+                onPrimary = onRefresh,
+                onSecondary = {}
+            )
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Positions", positions.size.toString(), "Live held assets", Mint) }
+                item { MetricCard("Trades", (performance?.totalTrades ?: 0).toString(), "Synced/local trades", Electric) }
+                item { MetricCard("Win Rate", "${performance?.winRatePercent ?: BigDecimal.ZERO}%", "Closed P/L rows", Amber) }
+                item { MetricCard("Realized P/L", "€${performance?.realizedPnlEur ?: BigDecimal.ZERO}", "Estimated local", if ((performance?.realizedPnlEur ?: BigDecimal.ZERO) >= BigDecimal.ZERO) Mint else Danger) }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Automatic Exit Rules", "The bot tries to capture profits without assuming it can know the absolute top.")
+                ToggleInfo("Auto take-profit", settings.autoTakeProfitEnabled)
+                ToggleInfo("Auto stop-loss", settings.autoStopLossEnabled)
+                ToggleInfo("Profit maximizer / trailing exits", settings.profitMaximizerEnabled)
+                ToggleInfo("Sell on bearish AI signal", settings.forceSellOnBearishSignal)
+                ToggleInfo("Sync Kraken closed orders", settings.syncKrakenHistory)
+            }
+        }
+        if (snapshot == null) {
+            item { WarningCard("Press Refresh Positions after selecting Kraken and saving API keys. The lifecycle manager uses live portfolio balances and local/Kraken trade history.") }
+        } else if (positions.isEmpty()) {
+            item { WarningCard("No live crypto positions were detected. Free EUR can be used for BUY orders; held crypto appears here once available through Kraken's portfolio API.") }
+        } else {
+            items(positions) { position -> PositionCard(position) }
+        }
+        snapshot?.messages?.takeIf { it.isNotEmpty() }?.let { messages ->
+            item {
+                GlassCard {
+                    SectionTitle("Lifecycle Messages", "Latest automatic-management notes.")
+                    messages.forEach { Text(it, color = Muted) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PositionCard(position: com.ksp.cryptobot.core.PositionInfo) {
+    val pnlColor = if (position.unrealizedPnlEur >= BigDecimal.ZERO) Mint else Danger
+    GlassCard {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(position.symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text("qty=${position.quantity.stripTrailingZeros().toPlainString()} • free=${position.freeQuantity.stripTrailingZeros().toPlainString()}", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            StatusPill("${position.unrealizedPnlPercent.setScale(2, java.math.RoundingMode.HALF_UP)}%", pnlColor)
+        }
+        LinearProgressIndicator(progress = { (position.unrealizedPnlPercent.abs().min(BigDecimal("10")).divide(BigDecimal("10"), 2, java.math.RoundingMode.HALF_UP).toFloat()).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp), color = pnlColor, trackColor = Stroke)
+        Text("entry=${position.entryPrice.setScale(4, java.math.RoundingMode.DOWN)} • now=${position.currentPrice.setScale(4, java.math.RoundingMode.DOWN)} • high=${position.highestPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
+        Text("TP=${position.takeProfitPrice.setScale(4, java.math.RoundingMode.DOWN)} • SL=${position.stopPrice.setScale(4, java.math.RoundingMode.DOWN)} • trail=${position.trailingStopPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
+        Text("P/L≈€${position.unrealizedPnlEur.setScale(2, java.math.RoundingMode.HALF_UP)} • ${position.reason}", color = pnlColor)
     }
 }
 
@@ -961,6 +1143,19 @@ private fun SettingsScreen(
             GlassCard {
                 ToggleRow("News AI", settings.useNewsAi, onNewsAi)
                 ToggleRow("Previous-trade memory AI", settings.useTradeMemoryAi, onMemoryAi)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("v1.0 Full Automation", "These live systems are enabled by default in this build.")
+                ToggleInfo("Live trade lifecycle manager", settings.liveLifecycleManagerEnabled)
+                ToggleInfo("Auto exit manager", settings.autoExitManagerEnabled)
+                ToggleInfo("Automatic take-profit", settings.autoTakeProfitEnabled)
+                ToggleInfo("Automatic stop-loss", settings.autoStopLossEnabled)
+                ToggleInfo("Profit maximizer / trailing exits", settings.profitMaximizerEnabled)
+                ToggleInfo("Sell on bearish AI signal", settings.forceSellOnBearishSignal)
+                ToggleInfo("Closed-order sync", settings.syncKrakenHistory)
+                Text("No bot can guarantee maximum possible profit. This build attempts to maximize captured profit through TP/SL, trailing exits, AI sell signals and risk controls.", color = Amber)
             }
         }
         item { WarningCard("Do not use VPNs, false residency, borrowed accounts or other bypass methods. Use a provider that legally supports your Belgian account, or keep the app in manual/paper mode.") }
