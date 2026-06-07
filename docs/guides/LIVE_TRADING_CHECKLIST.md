@@ -20,7 +20,7 @@ Before using real funds:
 - [ ] Manual Execution Mode is OFF.
 - [ ] Live Trading Acknowledgement is ON.
 - [ ] Max Position EUR is small for first test.
-- [ ] Symbols are valid Kraken EUR pairs.
+- [ ] Symbols are valid Kraken spot pairs.
 - [ ] Market orders are OFF until limit orders are confirmed.
 
 ## First live test

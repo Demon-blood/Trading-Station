@@ -23,10 +23,14 @@ import com.ksp.cryptobot.lifecycle.TradeLifecycleManager
 import com.ksp.cryptobot.strategy.RecommendationEngine
 import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.autonomous.AutonomousIntelligencePack
+import com.ksp.cryptobot.completion.LiveVerificationEngine
+import com.ksp.cryptobot.completion.LiveVerificationResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
+import java.time.ZoneId
 
 class BotController(
     context: Context,
@@ -43,8 +47,15 @@ class BotController(
     private val lifecycleManager = TradeLifecycleManager(dao, statusStore)
     private val proAutomationSuite = ProAutomationSuite(appContext)
     private val autonomousPack = AutonomousIntelligencePack(appContext)
+    private val liveVerificationEngine = LiveVerificationEngine()
     private val _status = MutableStateFlow("Stopped")
     val status: StateFlow<String> = _status
+
+    private data class ExecutionAttemptResult(
+        val submitted: Boolean,
+        val quoteAsset: String = "EUR",
+        val reservedAmount: BigDecimal = BigDecimal.ZERO
+    )
 
     @Volatile var running: Boolean = false
         private set
@@ -87,7 +98,8 @@ class BotController(
                 .onFailure { error -> updateStatus("Live balance check failed: ${error.message}. Orders may be blocked before submit.", "ERROR") }
                 .getOrDefault(emptyMap())
         } else emptyMap()
-        var reservedEurThisScan = BigDecimal.ZERO
+        val reservedByQuoteThisScan = mutableMapOf<String, BigDecimal>()
+        var submittedOrdersThisScan = 0
         val newsClient = createNewsClient(settings)
         val recentTrades = dao.recentTradesSnapshot(100)
         val configuredSymbols = selectSymbolUniverse(settings, exchange)
@@ -150,10 +162,20 @@ class BotController(
                 updateStatus("[$symbol] Why/edge: ${whyLine.take(240)}", if (netCheck.allowed) "INFO" else "WARN")
                 if (settings.tradeReplayEnabled) updateStatus("[$symbol] Trade replay snapshot: ${replay.mirrorExitComparison}", "INFO")
                 if (execute) {
-                    val reserved = executeDecisionIfAllowed(settings, exchange, ticker, decision, liveBalances, reservedEurThisScan)
-                    if (reserved > BigDecimal.ZERO) {
-                        reservedEurThisScan = reservedEurThisScan.add(reserved)
-                        updateStatus("[$symbol] Reserved EUR this scan now ${reservedEurThisScan.setScale(2, RoundingMode.UP)}", "INFO")
+                    if (settings.autoTradeMultipleSymbolsPerScan && submittedOrdersThisScan >= settings.maxNewTradesPerScan.coerceAtLeast(1)) {
+                        updateStatus("[$symbol] Execution skipped: max new trades per scan reached (${submittedOrdersThisScan}/${settings.maxNewTradesPerScan}). Signal saved only.", "WARN")
+                    } else if (!settings.autoTradeMultipleSymbolsPerScan && submittedOrdersThisScan >= 1) {
+                        updateStatus("[$symbol] Execution skipped: multi-symbol execution disabled and one order was already submitted this scan.", "WARN")
+                    } else {
+                        val result = executeDecisionIfAllowed(settings, exchange, ticker, decision, liveBalances, reservedByQuoteThisScan.toMap())
+                        if (result.submitted) {
+                            submittedOrdersThisScan += 1
+                        }
+                        if (result.reservedAmount > BigDecimal.ZERO) {
+                            val current = reservedByQuoteThisScan[result.quoteAsset] ?: BigDecimal.ZERO
+                            reservedByQuoteThisScan[result.quoteAsset] = current.add(result.reservedAmount)
+                            updateStatus("[$symbol] Reserved ${result.quoteAsset} this scan now ${reservedByQuoteThisScan[result.quoteAsset]?.setScale(2, RoundingMode.UP)}", "INFO")
+                        }
                     }
                 }
                 decision
@@ -177,7 +199,8 @@ class BotController(
             lifecycle.messages.take(10).forEach { updateStatus(it, if (it.contains("submitted", ignoreCase = true)) "LIVE" else "INFO") }
             updateStatus("Lifecycle manager complete: positions=${lifecycle.positions.size}, openOrders=${lifecycle.openOrders.size}, trades=${lifecycle.performance.totalTrades}", "INFO")
         }
-        updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. ReservedEURThisScan=${reservedEurThisScan.setScale(2, RoundingMode.UP)}")
+        val reservedSummary = reservedByQuoteThisScan.entries.joinToString(", ") { "${it.key}=${it.value.setScale(2, RoundingMode.UP)}" }.ifBlank { "none" }
+        updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. OrdersSubmittedThisScan=$submittedOrdersThisScan. ReservedByQuoteThisScan=$reservedSummary")
         return decisions
     }
 
@@ -193,13 +216,14 @@ class BotController(
         val selected = discovered
             .filter { it.enabledForRotation }
             .map { it.symbol }
+            .distinct()
             .let { list -> if (settings.tradeOnlyBtcEth) list.filter { it.startsWith("BTC") || it.startsWith("ETH") } else list }
             .take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
         if (selected.isEmpty()) {
             updateStatus("Auto symbol discovery produced no enabled candidates. Falling back to configured symbols: ${fallback.joinToString(",")}", "WARN")
             return fallback
         }
-        updateStatus("Auto symbol rotation active: ${selected.joinToString(",")}", "LIVE")
+        updateStatus("Auto symbol rotation active: ${selected.size} symbols selected from full Kraken universe: ${selected.joinToString(",")}", "LIVE")
         return selected
     }
 
@@ -208,8 +232,9 @@ class BotController(
     }
 
     private suspend fun discoverAutoSymbols(settings: BotSettings, exchange: CryptoExchangeClient): List<SymbolDiscoveryCandidate> {
-        updateStatus("Auto symbol discovery started. provider=${settings.exchangeProvider}, quote=EUR, candidates=${settings.autoSymbolCandidateLimit}", "INFO")
-        val raw = runCatching { exchange.discoverTradableSymbols("EUR", settings.autoSymbolCandidateLimit.coerceAtLeast(5)) }
+        val quoteUniverse = settings.autoSymbolQuoteAsset.uppercase().ifBlank { "ALL" }
+        updateStatus("Auto symbol discovery started. provider=${settings.exchangeProvider}, quoteUniverse=$quoteUniverse, candidates=${settings.autoSymbolCandidateLimit}", "INFO")
+        val raw = runCatching { exchange.discoverTradableSymbols(quoteUniverse, settings.autoSymbolCandidateLimit.coerceAtLeast(5)) }
             .onFailure { updateStatus("Auto symbol discovery failed: ${it.message}", "ERROR") }
             .getOrElse { emptyList() }
         if (raw.isEmpty()) {
@@ -242,11 +267,20 @@ class BotController(
                     else -> -12
                 }
                 val majorBoost = if (candidate.symbol.startsWith("BTC") || candidate.symbol.startsWith("ETH")) 8 else 0
-                val score = (50 + volumeScore + spreadScore + momentumScore + majorBoost).coerceIn(0, 100)
+                val quoteBoost = when (candidate.quoteAsset.uppercase()) {
+                    "EUR" -> 8
+                    "USD", "USDT", "USDC" -> 5
+                    "BTC", "ETH" -> 2
+                    else -> 0
+                }
+                val quoteAllowed = settings.autoSymbolQuoteAsset.equals("ALL", ignoreCase = true) || candidate.quoteAsset.uppercase() in settings.allowedQuoteAssets()
+                val quoteTradabilityPenalty = if (!quoteAllowed) -35 else if (candidate.quoteAsset.uppercase() != "EUR" && !settings.nonEurQuoteBuyEnabled) -4 else 0
+                val liquidityBlocked = settings.liquidityBlacklistEnabled && (spreadPercent > settings.autoSymbolMaxSpreadPercent || ticker.volume24h < settings.autoSymbolMinVolume24hEur)
+                val score = (50 + volumeScore + spreadScore + momentumScore + majorBoost + quoteBoost + quoteTradabilityPenalty).coerceIn(0, 100)
                 val enabled = candidate.tradable &&
-                    spreadPercent <= settings.autoSymbolMaxSpreadPercent &&
-                    ticker.volume24h >= settings.autoSymbolMinVolume24hEur &&
-                    score >= 55
+                    quoteAllowed &&
+                    !liquidityBlocked &&
+                    score >= 50
                 candidate.copy(
                     lastPrice = ticker.lastPrice,
                     bid = ticker.bid,
@@ -257,9 +291,11 @@ class BotController(
                     score = score,
                     enabledForRotation = enabled,
                     reason = if (enabled) {
-                        "Enabled: spread=${spreadPercent.setScale(3, RoundingMode.HALF_UP)}%, volume≈€${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)}, 24h=${ticker.priceChangePercent24h.setScale(2, RoundingMode.HALF_UP)}%."
+                        "Enabled: quote=${candidate.quoteAsset}, spread=${spreadPercent.setScale(3, RoundingMode.HALF_UP)}%, 24h quote-volume≈${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)} ${candidate.quoteAsset}, 24h=${ticker.priceChangePercent24h.setScale(2, RoundingMode.HALF_UP)}%."
                     } else {
-                        "Skipped: spread=${spreadPercent.setScale(3, RoundingMode.HALF_UP)}%, volume≈€${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)}, score=$score. Limits spread<=${settings.autoSymbolMaxSpreadPercent}%, volume>=€${settings.autoSymbolMinVolume24hEur}."
+                        val quoteMessage = if (!quoteAllowed) " quote not allowed by settings (${settings.allowedQuoteAssetsCsv})." else ""
+                        val liquidityMessage = if (liquidityBlocked) " liquidity/spread blacklist active." else ""
+                        "Skipped: quote=${candidate.quoteAsset}, spread=${spreadPercent.setScale(3, RoundingMode.HALF_UP)}%, 24h quote-volume≈${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)} ${candidate.quoteAsset}, score=$score. Limits spread<=${settings.autoSymbolMaxSpreadPercent}%, volume>=${settings.autoSymbolMinVolume24hEur}.$quoteMessage$liquidityMessage"
                     }
                 )
             }.getOrElse { error ->
@@ -269,7 +305,7 @@ class BotController(
         }.sortedWith(compareByDescending<SymbolDiscoveryCandidate> { it.enabledForRotation }.thenByDescending { it.score }.thenBy { it.spreadPercent })
         val selected = enriched.filter { it.enabledForRotation }.take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
         updateStatus("Auto symbol discovery complete. candidates=${enriched.size}, enabled=${selected.size}, selected=${selected.joinToString(",") { it.symbol }}", "INFO")
-        enriched.take(12).forEach { c -> updateStatus("Symbol scanner: ${c.symbol} score=${c.score}, enabled=${c.enabledForRotation}, spread=${c.spreadPercent}%, vol≈€${c.volume24hEur}. ${c.reason.take(140)}", if (c.enabledForRotation) "INFO" else "WARN") }
+        enriched.take(24).forEach { c -> updateStatus("Symbol scanner: ${c.symbol} quote=${c.quoteAsset} score=${c.score}, enabled=${c.enabledForRotation}, spread=${c.spreadPercent}%, vol≈${c.volume24hEur} ${c.quoteAsset}. ${c.reason.take(140)}", if (c.enabledForRotation) "INFO" else "WARN") }
         return enriched
     }
 
@@ -279,87 +315,130 @@ class BotController(
         ticker: MarketTicker,
         decision: AiDecision,
         liveBalances: Map<String, BigDecimal> = emptyMap(),
-        reservedEurThisScan: BigDecimal = BigDecimal.ZERO
-    ): BigDecimal {
+        reservedByQuoteThisScan: Map<String, BigDecimal> = emptyMap()
+    ): ExecutionAttemptResult {
         val capability = ExchangeCapabilityChecker.capability(settings.exchangeProvider)
         if (settings.manualExecutionMode || capability.manualOnly || !capability.liveTrading) {
             updateStatus("Manual/read-only mode: signal saved, no automatic order sent. ${capability.warning}", "WARN")
-            return BigDecimal.ZERO
+            return ExecutionAttemptResult(false)
         }
         if (settings.mode != BotMode.PAPER && (settingsStore.exchangeApiKey(settings.exchangeProvider).isNullOrBlank() || settingsStore.exchangeSecretKey(settings.exchangeProvider).isNullOrBlank())) {
             updateStatus("Trade blocked: missing ${capability.displayName} API credentials.", "ERROR")
-            return BigDecimal.ZERO
+            return ExecutionAttemptResult(false)
         }
         val allowed = guard.canExecute(settings, decision)
         if (!allowed.first) {
             updateStatus("Trade blocked: ${allowed.second}", "WARN")
-            return BigDecimal.ZERO
+            return ExecutionAttemptResult(false)
         }
         val proNetCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
         updateStatus("[${ticker.symbol}] v1.1 fee/spread net-profit check: ${proNetCheck.reason}", if (proNetCheck.allowed) "INFO" else "WARN")
         if (!proNetCheck.allowed) {
-            return BigDecimal.ZERO
+            return ExecutionAttemptResult(false)
         }
         if (settings.mode == BotMode.LIVE_CONFIRM) {
             updateStatus("Live confirm mode: decision saved, no automatic order placed.", "WARN")
-            return BigDecimal.ZERO
+            return ExecutionAttemptResult(false)
         }
         val side = if (decision.finalAction == SignalAction.SELL) OrderSide.SELL else OrderSide.BUY
-        val price = if (side == OrderSide.BUY) ticker.ask else ticker.bid
-        val useMarketOrder = settings.enableMarketOrders && settings.mode == BotMode.LIVE_AUTO && settings.exchangeProvider == ExchangeProvider.KRAKEN
-        if (useMarketOrder) {
-            val spreadPct = if (ticker.lastPrice > BigDecimal.ZERO) ticker.ask.subtract(ticker.bid).divide(ticker.lastPrice, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")) else BigDecimal.ZERO
-            updateStatus("[${ticker.symbol}] MARKET order mode enabled. spread≈${spreadPct.setScale(3, RoundingMode.HALF_UP)}%, maxMarketOrder=€${settings.maxMarketOrderEur.setScale(2, RoundingMode.DOWN)}", "WARN")
-            if (spreadPct > settings.marketOrderSlippageWarningPercent) {
-                updateStatus("Trade blocked: market-order spread/slippage risk too high. spread=${spreadPct.setScale(3, RoundingMode.HALF_UP)}%, max=${settings.marketOrderSlippageWarningPercent}%", "WARN")
-                return BigDecimal.ZERO
+        val pairInfo = runCatching { exchange.validateSymbol(ticker.symbol) }.getOrNull()
+        val baseAsset = pairInfo?.baseAsset ?: baseAssetFromSymbol(ticker.symbol)
+        val quoteAsset = pairInfo?.quoteAsset ?: quoteAssetFromSymbol(ticker.symbol)
+        val availableQuote = liveBalances[quoteAsset] ?: if (quoteAsset == "EUR") liveBalances["ZEUR"] else null
+        val availableBase = liveBalances[baseAsset]
+        val quoteReserve = quoteReserveAmount(settings, availableQuote ?: BigDecimal.ZERO)
+        val quoteReservedThisScan = reservedByQuoteThisScan[quoteAsset] ?: BigDecimal.ZERO
+        val allowedQuotes = settings.allowedQuoteAssets()
+
+        if (side == OrderSide.BUY && quoteAsset !in allowedQuotes) {
+            updateStatus("Trade blocked: quote asset $quoteAsset is not enabled in Allowed Quote Assets (${settings.allowedQuoteAssetsCsv}). SELL remains available if you hold $baseAsset.", "WARN")
+            return ExecutionAttemptResult(false)
+        }
+        if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) {
+            val openPositions = runCatching { dao.openPositionsSnapshot().size }.getOrDefault(0)
+            if (openPositions >= settings.maxSimultaneousLivePositions) {
+                updateStatus("Trade blocked: max simultaneous live positions reached ($openPositions/${settings.maxSimultaneousLivePositions}).", "WARN")
+                return ExecutionAttemptResult(false)
             }
         }
+
+        var useMarketOrder = settings.enableMarketOrders && settings.mode == BotMode.LIVE_AUTO && settings.exchangeProvider == ExchangeProvider.KRAKEN
+        val spreadPct = if (ticker.lastPrice > BigDecimal.ZERO) ticker.ask.subtract(ticker.bid).divide(ticker.lastPrice, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")) else BigDecimal.ZERO
+        if (useMarketOrder) {
+            updateStatus("[${ticker.symbol}] MARKET order requested. spread≈${spreadPct.setScale(3, RoundingMode.HALF_UP)}%, maxMarketOrder=€${settings.maxMarketOrderEur.setScale(2, RoundingMode.DOWN)}", "WARN")
+            val marketBlockedReason = when {
+                spreadPct > settings.marketOrderSlippageWarningPercent -> "spread/slippage risk too high: ${spreadPct.setScale(3, RoundingMode.HALF_UP)}% > ${settings.marketOrderSlippageWarningPercent}%"
+                settings.marketOrderHighLiquidityOnly && ticker.volume24h < settings.autoSymbolMinVolume24hEur.multiply(BigDecimal("5")) -> "24h liquidity too low for market order: ${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)} < ${settings.autoSymbolMinVolume24hEur.multiply(BigDecimal("5"))}"
+                else -> null
+            }
+            if (marketBlockedReason != null) {
+                if (settings.fallbackToLimitWhenMarketBlocked) {
+                    updateStatus("Market order fallback: $marketBlockedReason. Using LIMIT instead.", "WARN")
+                    useMarketOrder = false
+                } else {
+                    updateStatus("Trade blocked: $marketBlockedReason", "WARN")
+                    return ExecutionAttemptResult(false)
+                }
+            }
+        }
+        val price = if (side == OrderSide.BUY) ticker.ask else ticker.bid
         val feeReserveMultiplier = BigDecimal("1.01")
-        val minimumOrderEur = BigDecimal("5.00")
-        val availableEur = liveBalances["EUR"] ?: liveBalances["ZEUR"]
-        val remainingEur = availableEur?.subtract(reservedEurThisScan)?.max(BigDecimal.ZERO)
-        val baseAsset = baseAssetFromSymbol(ticker.symbol)
-        val availableBase = liveBalances[baseAsset]
+        val minimumOrderNotional = BigDecimal("5.00")
 
         val perOrderCap = if (useMarketOrder) settings.maxPositionEur.min(settings.maxMarketOrderEur) else settings.maxPositionEur
-        val targetNotionalEur = if (side == OrderSide.BUY && remainingEur != null && settings.mode != BotMode.PAPER) {
-            val safeRemaining = remainingEur.divide(feeReserveMultiplier, 2, RoundingMode.DOWN)
-            perOrderCap.min(safeRemaining)
+        val targetNotional = if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) {
+            val freeQuote = availableQuote ?: BigDecimal.ZERO
+            val spendableAfterReserve = freeQuote
+                .subtract(quoteReserve)
+                .subtract(quoteReservedThisScan)
+                .max(BigDecimal.ZERO)
+                .divide(feeReserveMultiplier, 8, RoundingMode.DOWN)
+            when {
+                quoteAsset in setOf("EUR", "USD", "USDT", "USDC") -> perOrderCap.min(spendableAfterReserve)
+                settings.nonEurQuoteBuyEnabled -> {
+                    val cryptoQuoteCap = freeQuote.multiply(settings.maxNonEurQuoteSpendPercent).divide(BigDecimal("100"), 8, RoundingMode.DOWN)
+                    cryptoQuoteCap.min(spendableAfterReserve)
+                }
+                else -> BigDecimal.ZERO
+            }
         } else {
             perOrderCap
         }
 
         if (side == OrderSide.BUY) {
-            updateStatus("[${ticker.symbol}] EUR budget: freeAvailable=${availableEur?.setScale(2, RoundingMode.DOWN) ?: "unknown"}, reservedByBotThisScan=${reservedEurThisScan.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotionalEur.setScale(2, RoundingMode.DOWN)}", "INFO")
+            updateStatus("[${ticker.symbol}] Quote budget: base=$baseAsset, quote=$quoteAsset, freeQuote=${availableQuote?.stripTrailingZeros()?.toPlainString() ?: "unknown"}, reservedByBotThisScan=${quoteReservedThisScan.setScale(2, RoundingMode.DOWN)}, reserve=${quoteReserve.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotional.stripTrailingZeros().toPlainString()} $quoteAsset", "INFO")
             val heldBaseValue = (availableBase ?: BigDecimal.ZERO).multiply(price)
-            if (targetNotionalEur < minimumOrderEur) {
-                if (heldBaseValue >= minimumOrderEur) {
-                    updateStatus("Trade blocked: BUY signal but free EUR is too low. You already have ${baseAsset}≈€${heldBaseValue.setScale(2, RoundingMode.DOWN)} available; the bot will wait for a SELL signal or you must add free EUR.", "WARN")
+            if (quoteAsset != "EUR" && quoteAsset !in setOf("USD", "USDT", "USDC") && !settings.nonEurQuoteBuyEnabled) {
+                updateStatus("Trade blocked: ${ticker.symbol} uses quote asset $quoteAsset. The scanner analyzes it, but live BUY is disabled for non-fiat/non-stable quotes unless Non-EUR quote buys are enabled. SELL remains available when you hold $baseAsset.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+            if (targetNotional < minimumOrderNotional) {
+                if (heldBaseValue >= minimumOrderNotional) {
+                    updateStatus("Trade blocked: BUY signal but free $quoteAsset is too low. You already have ${baseAsset}≈${heldBaseValue.setScale(2, RoundingMode.DOWN)} $quoteAsset available; the bot will wait for a SELL signal or you must add free $quoteAsset.", "WARN")
                 } else {
-                    updateStatus("Trade blocked: not enough free EUR to buy. Kraken API reports free EUR=${availableEur?.setScale(2, RoundingMode.DOWN) ?: "unknown"}. If your app shows €46, it is likely crypto/portfolio value, not free EUR cash.", "WARN")
+                    updateStatus("Trade blocked: not enough free $quoteAsset to buy. API reports free $quoteAsset=${availableQuote?.stripTrailingZeros()?.toPlainString() ?: "unknown"}.", "WARN")
                 }
-                return BigDecimal.ZERO
+                return ExecutionAttemptResult(false)
             }
         }
 
         val quantity = if (side == OrderSide.SELL && settings.mode != BotMode.PAPER) {
-            val desiredQuantity = targetNotionalEur.divide(price, 8, RoundingMode.DOWN)
+            val desiredQuantity = targetNotional.divide(price, 8, RoundingMode.DOWN)
             val freeBase = availableBase ?: BigDecimal.ZERO
             val chosen = desiredQuantity.min(freeBase).setScale(8, RoundingMode.DOWN)
             val chosenValue = chosen.multiply(price)
-            updateStatus("[${ticker.symbol}] SELL budget: baseAsset=$baseAsset, freeBase=${freeBase.stripTrailingZeros().toPlainString()}, targetQty=${desiredQuantity.stripTrailingZeros().toPlainString()}, chosenQty=${chosen.stripTrailingZeros().toPlainString()}, estimatedValue=${chosenValue.setScale(2, RoundingMode.DOWN)}", "INFO")
-            if (chosenValue < minimumOrderEur) {
-                updateStatus("Trade blocked: SELL signal but free $baseAsset value is below Kraken minimum. Value=${chosenValue.setScale(2, RoundingMode.DOWN)}, minimum=$minimumOrderEur", "WARN")
-                return BigDecimal.ZERO
+            updateStatus("[${ticker.symbol}] SELL budget: baseAsset=$baseAsset, quoteAsset=$quoteAsset, freeBase=${freeBase.stripTrailingZeros().toPlainString()}, targetQty=${desiredQuantity.stripTrailingZeros().toPlainString()}, chosenQty=${chosen.stripTrailingZeros().toPlainString()}, estimatedValue=${chosenValue.setScale(2, RoundingMode.DOWN)} $quoteAsset", "INFO")
+            if (chosenValue < minimumOrderNotional) {
+                updateStatus("Trade blocked: SELL signal but free $baseAsset value is below minimum. Value=${chosenValue.setScale(2, RoundingMode.DOWN)} $quoteAsset, minimum=$minimumOrderNotional $quoteAsset", "WARN")
+                return ExecutionAttemptResult(false)
             }
             chosen
         } else {
-            targetNotionalEur.divide(price, 8, RoundingMode.DOWN)
+            targetNotional.divide(price, 8, RoundingMode.DOWN)
         }
         if (quantity <= BigDecimal.ZERO) {
             updateStatus("Trade blocked: calculated quantity is zero.", "ERROR")
-            return BigDecimal.ZERO
+            return ExecutionAttemptResult(false)
         }
         val request = OrderRequest(
             symbol = ticker.symbol,
@@ -370,7 +449,7 @@ class BotController(
             clientOrderId = "ksp-${ticker.symbol.lowercase()}-${System.currentTimeMillis()}"
         )
         val orderModeLabel = if (useMarketOrder) "MARKET" else "LIMIT"
-        updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${targetNotionalEur.setScale(2, RoundingMode.DOWN)}, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
+        updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${targetNotional.setScale(2, RoundingMode.DOWN)} $quoteAsset, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
             updateStatus("Order submit failed: ${error.message}", "ERROR")
             throw error
@@ -391,7 +470,14 @@ class BotController(
             )
         )
         updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
-        return if (side == OrderSide.BUY) targetNotionalEur.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
+        val reservedAmount = if (side == OrderSide.BUY) targetNotional.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
+        return ExecutionAttemptResult(true, quoteAsset, reservedAmount)
+    }
+
+    private fun quoteReserveAmount(settings: BotSettings, freeQuote: BigDecimal): BigDecimal {
+        if (freeQuote <= BigDecimal.ZERO) return BigDecimal.ZERO
+        val reserveByPercent = freeQuote.multiply(settings.minimumQuoteReservePercent).divide(BigDecimal("100"), 8, RoundingMode.DOWN)
+        return settings.minimumQuoteReserveAmount.max(reserveByPercent).min(freeQuote)
     }
 
     private fun baseAssetFromSymbol(symbol: String): String {
@@ -403,6 +489,12 @@ class BotController(
             upper.endsWith("BTC") && upper != "BTC" -> upper.removeSuffix("BTC")
             else -> upper.take(3)
         }
+    }
+
+    private fun quoteAssetFromSymbol(symbol: String): String {
+        val upper = symbol.uppercase().replace("/", "").replace("-", "")
+        val knownQuotes = listOf("USDT", "USDC", "EUR", "USD", "GBP", "CHF", "AUD", "CAD", "JPY", "BTC", "ETH")
+        return knownQuotes.firstOrNull { upper.endsWith(it) && upper.length > it.length } ?: "EUR"
     }
 
     private fun createExchange(settings: BotSettings): CryptoExchangeClient {
@@ -425,6 +517,18 @@ class BotController(
         return if (!key.isNullOrBlank()) NewsApiClient(key) else NoopNewsClient()
     }
 
+
+    suspend fun runLiveVerification(settings: BotSettings = settingsStore.load()): List<LiveVerificationResult> {
+        updateStatus("Live verification started. Provider=${settings.exchangeProvider}", "INFO")
+        val exchange = createExchange(settings)
+        val results = liveVerificationEngine.run(settings, exchange)
+        results.forEach { result ->
+            updateStatus("Verification ${if (result.passed) "PASS" else "FAIL"}: ${result.name} — ${result.detail}", if (result.passed) "INFO" else "ERROR")
+        }
+        val passed = results.count { it.passed }
+        updateStatus("Live verification complete: $passed/${results.size} checks passed.", if (passed == results.size) "LIVE" else "WARN")
+        return results
+    }
 
     suspend fun exportBelgianTaxCsv(settings: BotSettings = settingsStore.load()): TaxExportSummary {
         updateStatus("Belgian tax export requested for year ${settings.taxExportYear}.", "INFO")

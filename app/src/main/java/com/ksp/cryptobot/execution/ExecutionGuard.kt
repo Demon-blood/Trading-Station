@@ -15,11 +15,18 @@ class ExecutionGuard(private val dao: AppDao) {
         if (decision.confidencePercent < 65) return false to "AI confidence too low: ${decision.confidencePercent}%."
 
         val zone = ZoneId.systemDefault()
+        val now = System.currentTimeMillis()
         val start = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
         val end = LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
         val todaysTrades = dao.tradesBetween(start, end)
         if (todaysTrades.size >= settings.maxTradesPerDay) {
             return false to "Daily trade limit reached: ${todaysTrades.size}/${settings.maxTradesPerDay}."
+        }
+
+        val oneHourAgo = now - 60L * 60L * 1000L
+        val tradesLastHour = dao.tradesBetween(oneHourAgo, now)
+        if (tradesLastHour.size >= settings.maxTradesPerHour) {
+            return false to "Hourly trade limit reached: ${tradesLastHour.size}/${settings.maxTradesPerHour}."
         }
 
         val realizedLoss = todaysTrades.mapNotNull { it.realizedPnlEur.toBigDecimalOrNull() }
@@ -30,8 +37,15 @@ class ExecutionGuard(private val dao: AppDao) {
         }
 
         val last = dao.lastTradeForSymbol(decision.symbol)
-        if (last != null && abs(System.currentTimeMillis() - last.timestampEpochMs) < 60 * 60 * 1000) {
-            return false to "Duplicate-order guard: ${decision.symbol} traded less than 1 hour ago."
+        if (last != null) {
+            val ageMs = abs(now - last.timestampEpochMs)
+            val sideCooldownMinutes = if (last.side.equals("BUY", ignoreCase = true)) settings.cooldownAfterBuyMinutes else settings.cooldownAfterSellMinutes
+            val lossCooldownMinutes = if ((last.realizedPnlEur.toBigDecimalOrNull() ?: BigDecimal.ZERO) < BigDecimal.ZERO) settings.cooldownAfterLossMinutes else 0
+            val cooldownMinutes = maxOf(sideCooldownMinutes, lossCooldownMinutes)
+            if (cooldownMinutes > 0 && ageMs < cooldownMinutes * 60L * 1000L) {
+                val remaining = cooldownMinutes - (ageMs / 60000L)
+                return false to "Symbol cooldown active for ${decision.symbol}: ${remaining.coerceAtLeast(1)} minute(s) remaining after recent ${last.side}${if (lossCooldownMinutes > 0) " loss" else ""}."
+            }
         }
         return true to "Execution guards passed."
     }

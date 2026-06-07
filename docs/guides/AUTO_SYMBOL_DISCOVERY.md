@@ -1,6 +1,6 @@
 # Auto Symbol Discovery
 
-The bot can now automatically search Kraken EUR markets and build its own rotation list.
+The bot can now automatically search all Kraken spot markets and build its own rotation list.
 
 ## How it works
 

@@ -1,4 +1,4 @@
-# v1.6.0 Live Completion Audit
+# v1.6.2 Live Completion Audit
 
 This file separates what is implemented/live-capable from what is impossible or refused.
 
@@ -9,7 +9,7 @@ This file separates what is implemented/live-capable from what is impossible or 
 | Kraken live spot trading | Live-capable | Primary tested exchange path. |
 | Kraken balance/portfolio/open-order/order cancel | Live-capable | Used by Portfolio, Orders, Live Status and bot execution. |
 | Kraken limit/market buy/sell | Live-capable | Guarded by balances, risk, pair metadata and settings. |
-| Kraken EUR symbol discovery/rotation | Live-capable | Discovers, validates, scores and rotates EUR symbols. |
+| Kraken full-universe symbol discovery/rotation | Live-capable | Discovers, validates, scores and rotates Kraken spot symbols. |
 | Kraken WebSocket ticker feed | Implemented/live-capable | Public ticker stream wrapper is now implemented. |
 | Bitvavo REST trading | Implemented/live-capable | Requires Bitvavo account/API permissions. Test with small orders first. |
 | Coinbase Advanced trading | Implemented/live-capable | Requires compatible Coinbase Advanced/CDP API key and EC private key. Test carefully. |

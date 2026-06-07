@@ -51,8 +51,9 @@ interface CryptoExchangeClient {
     /**
      * Discover tradable symbols from the selected exchange. Live connectors should return
      * real pair metadata so the bot can build a market universe automatically.
+     * Pass quoteAsset = "ALL" to request the full spot universe instead of a single quote.
      */
-    suspend fun discoverTradableSymbols(quoteAsset: String = "EUR", limit: Int = 50): List<SymbolDiscoveryCandidate> = emptyList()
+    suspend fun discoverTradableSymbols(quoteAsset: String = "ALL", limit: Int = 50): List<SymbolDiscoveryCandidate> = emptyList()
 
     /** Open live orders as reported by the exchange. */
     suspend fun getOpenOrders(): List<LiveOrderInfo> = emptyList()

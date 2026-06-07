@@ -137,17 +137,47 @@ data class BotSettings(
     val minSymbolProfitFactor: BigDecimal = BigDecimal("0.90"),
     val optimizerLookbackTrades: Int = 30,
 
-    // v1.4 auto symbol discovery. When enabled, Kraken EUR markets are discovered,
-    // validated, scored, ranked and automatically used for trading rotation.
+    // v1.7 auto symbol discovery. When enabled, Kraken markets are discovered across
+    // every available quote asset, validated, scored, ranked and automatically used
+    // for rotation. Use ALL to scan every Kraken spot pair instead of EUR-only.
     val autoSymbolDiscoveryEnabled: Boolean = true,
-    val autoSymbolCandidateLimit: Int = 40,
-    val autoSymbolActiveLimit: Int = 8,
-    val autoSymbolMaxSpreadPercent: BigDecimal = BigDecimal("0.35"),
-    val autoSymbolMinVolume24hEur: BigDecimal = BigDecimal("1000000"),
+    val autoSymbolQuoteAsset: String = "ALL",
+    val autoSymbolCandidateLimit: Int = 250,
+    val autoSymbolActiveLimit: Int = 20,
+    val autoSymbolMaxSpreadPercent: BigDecimal = BigDecimal("1.00"),
+    val autoSymbolMinVolume24hEur: BigDecimal = BigDecimal("50000"),
     val autoSymbolRefreshMinutes: Int = 240,
+    val autoTradeMultipleSymbolsPerScan: Boolean = true,
+    val maxSymbolsTradedPerScan: Int = 6,
+
+    // v1.6.2 rotation safety controls. These keep full-universe scanning from
+    // opening too many positions or spending the wrong quote asset.
+    val allowedQuoteAssetsCsv: String = "EUR,USD,USDT,USDC",
+    val maxNewTradesPerScan: Int = 2,
+    val maxTradesPerHour: Int = 3,
+    val maxSimultaneousLivePositions: Int = 3,
+    val cooldownAfterBuyMinutes: Int = 15,
+    val cooldownAfterSellMinutes: Int = 30,
+    val cooldownAfterLossMinutes: Int = 120,
+    val cooldownAfterOrderFailureMinutes: Int = 60,
+    val minimumQuoteReserveAmount: BigDecimal = BigDecimal("10.00"),
+    val minimumQuoteReservePercent: BigDecimal = BigDecimal("20.0"),
+    val liquidityBlacklistEnabled: Boolean = true,
+    val marketOrderHighLiquidityOnly: Boolean = true,
+    val fallbackToLimitWhenMarketBlocked: Boolean = true,
+    val liveVerificationPanelEnabled: Boolean = true,
+
+    val nonEurQuoteBuyEnabled: Boolean = false,
+    val maxNonEurQuoteSpendPercent: BigDecimal = BigDecimal("5.0"),
     val taxExportYear: Int = 2026
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
+
+    fun allowedQuoteAssets(): Set<String> = allowedQuoteAssetsCsv
+        .split(',')
+        .map { it.trim().uppercase() }
+        .filter { it.isNotBlank() }
+        .toSet()
 }
 
 data class Recommendation(

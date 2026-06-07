@@ -117,11 +117,30 @@ class AppSettingsStore(context: Context) {
             minSymbolProfitFactor = prefs.getString("min_symbol_profit_factor", "0.90")!!.toBigDecimalOrNull() ?: BigDecimal("0.90"),
             optimizerLookbackTrades = prefs.getInt("optimizer_lookback_trades", 30),
             autoSymbolDiscoveryEnabled = prefs.getBoolean("auto_symbol_discovery_enabled", true),
-            autoSymbolCandidateLimit = prefs.getInt("auto_symbol_candidate_limit", 40),
-            autoSymbolActiveLimit = prefs.getInt("auto_symbol_active_limit", 8),
-            autoSymbolMaxSpreadPercent = prefs.getString("auto_symbol_max_spread_percent", "0.35")!!.toBigDecimalOrNull() ?: BigDecimal("0.35"),
-            autoSymbolMinVolume24hEur = prefs.getString("auto_symbol_min_volume_24h_eur", "1000000")!!.toBigDecimalOrNull() ?: BigDecimal("1000000"),
+            autoSymbolQuoteAsset = prefs.getString("auto_symbol_quote_asset", "ALL") ?: "ALL",
+            autoSymbolCandidateLimit = prefs.getInt("auto_symbol_candidate_limit", 250),
+            autoSymbolActiveLimit = prefs.getInt("auto_symbol_active_limit", 20),
+            autoSymbolMaxSpreadPercent = prefs.getString("auto_symbol_max_spread_percent", "1.00")!!.toBigDecimalOrNull() ?: BigDecimal("1.00"),
+            autoSymbolMinVolume24hEur = prefs.getString("auto_symbol_min_volume_24h_eur", "50000")!!.toBigDecimalOrNull() ?: BigDecimal("50000"),
             autoSymbolRefreshMinutes = prefs.getInt("auto_symbol_refresh_minutes", 240),
+            autoTradeMultipleSymbolsPerScan = prefs.getBoolean("auto_trade_multiple_symbols_per_scan", true),
+            maxSymbolsTradedPerScan = prefs.getInt("max_symbols_traded_per_scan", 6),
+            allowedQuoteAssetsCsv = prefs.getString("allowed_quote_assets_csv", "EUR,USD,USDT,USDC") ?: "EUR,USD,USDT,USDC",
+            maxNewTradesPerScan = prefs.getInt("max_new_trades_per_scan", 2),
+            maxTradesPerHour = prefs.getInt("max_trades_per_hour", 3),
+            maxSimultaneousLivePositions = prefs.getInt("max_simultaneous_live_positions", 3),
+            cooldownAfterBuyMinutes = prefs.getInt("cooldown_after_buy_minutes", 15),
+            cooldownAfterSellMinutes = prefs.getInt("cooldown_after_sell_minutes", 30),
+            cooldownAfterLossMinutes = prefs.getInt("cooldown_after_loss_minutes", 120),
+            cooldownAfterOrderFailureMinutes = prefs.getInt("cooldown_after_order_failure_minutes", 60),
+            minimumQuoteReserveAmount = prefs.getString("minimum_quote_reserve_amount", "10.00")!!.toBigDecimalOrNull() ?: BigDecimal("10.00"),
+            minimumQuoteReservePercent = prefs.getString("minimum_quote_reserve_percent", "20.0")!!.toBigDecimalOrNull() ?: BigDecimal("20.0"),
+            liquidityBlacklistEnabled = prefs.getBoolean("liquidity_blacklist_enabled", true),
+            marketOrderHighLiquidityOnly = prefs.getBoolean("market_order_high_liquidity_only", true),
+            fallbackToLimitWhenMarketBlocked = prefs.getBoolean("fallback_to_limit_when_market_blocked", true),
+            liveVerificationPanelEnabled = prefs.getBoolean("live_verification_panel_enabled", true),
+            nonEurQuoteBuyEnabled = prefs.getBoolean("non_eur_quote_buy_enabled", false),
+            maxNonEurQuoteSpendPercent = prefs.getString("max_non_eur_quote_spend_percent", "5.0")!!.toBigDecimalOrNull() ?: BigDecimal("5.0"),
             taxExportYear = prefs.getInt("tax_export_year", 2026)
         )
     }
@@ -230,11 +249,30 @@ class AppSettingsStore(context: Context) {
             .putString("min_symbol_profit_factor", settings.minSymbolProfitFactor.toPlainString())
             .putInt("optimizer_lookback_trades", settings.optimizerLookbackTrades)
             .putBoolean("auto_symbol_discovery_enabled", settings.autoSymbolDiscoveryEnabled)
+            .putString("auto_symbol_quote_asset", settings.autoSymbolQuoteAsset)
             .putInt("auto_symbol_candidate_limit", settings.autoSymbolCandidateLimit)
             .putInt("auto_symbol_active_limit", settings.autoSymbolActiveLimit)
             .putString("auto_symbol_max_spread_percent", settings.autoSymbolMaxSpreadPercent.toPlainString())
             .putString("auto_symbol_min_volume_24h_eur", settings.autoSymbolMinVolume24hEur.toPlainString())
             .putInt("auto_symbol_refresh_minutes", settings.autoSymbolRefreshMinutes)
+            .putBoolean("auto_trade_multiple_symbols_per_scan", settings.autoTradeMultipleSymbolsPerScan)
+            .putInt("max_symbols_traded_per_scan", settings.maxSymbolsTradedPerScan)
+            .putString("allowed_quote_assets_csv", settings.allowedQuoteAssetsCsv)
+            .putInt("max_new_trades_per_scan", settings.maxNewTradesPerScan)
+            .putInt("max_trades_per_hour", settings.maxTradesPerHour)
+            .putInt("max_simultaneous_live_positions", settings.maxSimultaneousLivePositions)
+            .putInt("cooldown_after_buy_minutes", settings.cooldownAfterBuyMinutes)
+            .putInt("cooldown_after_sell_minutes", settings.cooldownAfterSellMinutes)
+            .putInt("cooldown_after_loss_minutes", settings.cooldownAfterLossMinutes)
+            .putInt("cooldown_after_order_failure_minutes", settings.cooldownAfterOrderFailureMinutes)
+            .putString("minimum_quote_reserve_amount", settings.minimumQuoteReserveAmount.toPlainString())
+            .putString("minimum_quote_reserve_percent", settings.minimumQuoteReservePercent.toPlainString())
+            .putBoolean("liquidity_blacklist_enabled", settings.liquidityBlacklistEnabled)
+            .putBoolean("market_order_high_liquidity_only", settings.marketOrderHighLiquidityOnly)
+            .putBoolean("fallback_to_limit_when_market_blocked", settings.fallbackToLimitWhenMarketBlocked)
+            .putBoolean("live_verification_panel_enabled", settings.liveVerificationPanelEnabled)
+            .putBoolean("non_eur_quote_buy_enabled", settings.nonEurQuoteBuyEnabled)
+            .putString("max_non_eur_quote_spend_percent", settings.maxNonEurQuoteSpendPercent.toPlainString())
             .putInt("tax_export_year", settings.taxExportYear)
             .apply()
     }

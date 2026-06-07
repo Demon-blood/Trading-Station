@@ -99,12 +99,13 @@ class KrakenSpotClient(
 
 
     override suspend fun discoverTradableSymbols(quoteAsset: String, limit: Int): List<SymbolDiscoveryCandidate> = withContext(Dispatchers.IO) {
-        val quote = quoteAsset.uppercase()
+        val quote = quoteAsset.uppercase().ifBlank { "ALL" }
+        val allQuotes = quote == "ALL" || quote == "*" || quote == "ANY"
         ensurePairCache().values
-            .distinctBy { it.canonicalSymbol }
-            .filter { it.quoteAsset == quote && it.tradable }
-            .filterNot { it.baseAsset.contains(".") || it.baseAsset.contains("FEE") }
-            .sortedBy { it.canonicalSymbol }
+            .distinctBy { it.exchangePair }
+            .filter { (allQuotes || it.quoteAsset == quote) && it.tradable }
+            .filterNot { it.baseAsset.contains(".") || it.quoteAsset.contains(".") || it.baseAsset.contains("FEE") || it.quoteAsset.contains("FEE") }
+            .sortedWith(compareBy<KrakenPairRule>({ quotePriority(it.quoteAsset) }, { it.canonicalSymbol }))
             .take(limit.coerceAtLeast(1))
             .map { rule ->
                 SymbolDiscoveryCandidate(
@@ -114,7 +115,7 @@ class KrakenSpotClient(
                     quoteAsset = rule.quoteAsset,
                     tradable = rule.tradable,
                     minOrderSize = rule.minOrderSize,
-                    reason = "Discovered from Kraken AssetPairs. status=${rule.status}, min=${rule.minOrderSize}, pair=${rule.exchangePair}"
+                    reason = "Discovered from Kraken AssetPairs. quote=${rule.quoteAsset}, status=${rule.status}, min=${rule.minOrderSize}, pair=${rule.exchangePair}"
                 )
             }
     }
@@ -495,18 +496,31 @@ class KrakenSpotClient(
             "XRPEUR" -> "XXRPZEUR"
             else -> normalized.replace("BTC", "XBT")
         }
-        return KrakenPairRule(normalized, normalized, pair, normalized.replace("BTC", "XBT"), normalized.removeSuffix("EUR"), "EUR", BigDecimal.ZERO, 8, 8, true, "fallback")
+        val quote = inferQuoteAsset(normalized)
+        return KrakenPairRule(normalized, normalized, pair, normalized.replace("BTC", "XBT"), normalized.removeSuffix(quote), quote, BigDecimal.ZERO, 8, 8, true, "fallback")
+    }
+
+    private fun inferQuoteAsset(symbol: String): String {
+        val upper = symbol.uppercase().replace("/", "").replace("-", "")
+        val knownQuotes = listOf("USDT", "USDC", "EUR", "USD", "GBP", "CHF", "AUD", "CAD", "JPY", "BTC", "ETH")
+        return knownQuotes.firstOrNull { upper.endsWith(it) && upper.length > it.length } ?: "EUR"
+    }
+
+    private fun quotePriority(quote: String): Int = when (quote.uppercase()) {
+        "EUR" -> 0
+        "USD", "USDT", "USDC" -> 1
+        "BTC", "ETH" -> 2
+        else -> 3
     }
 
     private fun fromKrakenPair(pair: String): String {
         val normalized = pair.uppercase()
-        return when {
-            normalized.contains("XBT") -> "BTCEUR"
-            normalized.contains("ETH") -> "ETHEUR"
-            normalized.contains("XRP") -> "XRPEUR"
-            normalized.endsWith("EUR") -> normalized.replace("ZEUR", "EUR").replace("Z", "").replace("X", "")
-            else -> normalized
-        }
+        val cache = runCatching { ensurePairCache() }.getOrDefault(emptyMap())
+        val direct = cache[normalized.replace("XBT", "BTC")]
+        if (direct != null) return direct.canonicalSymbol
+        val byExchangePair = cache.values.firstOrNull { it.exchangePair.equals(pair, ignoreCase = true) }
+        if (byExchangePair != null) return byExchangePair.canonicalSymbol
+        return normalized.replace("ZEUR", "EUR").replace("ZUSD", "USD").replace("XBT", "BTC").replace("/", "")
     }
 
     private fun ensurePairCache(): Map<String, KrakenPairRule> {
@@ -528,8 +542,8 @@ class KrakenSpotClient(
                 val status = item.optString("status", "online")
                 val base = normalizeKrakenAsset(item.optString("base", alt.removeSuffix("EUR")))
                 val quote = normalizeKrakenAsset(item.optString("quote", if (alt.endsWith("EUR")) "ZEUR" else ""))
-                if (quote != "EUR") return@forEach
-                val canonical = "${base}EUR".replace("XBTEUR", "BTCEUR")
+                if (base.isBlank() || quote.isBlank()) return@forEach
+                val canonical = "${base}${quote}".replace("XBTEUR", "BTCEUR").replace("XBT", "BTC")
                 val rule = KrakenPairRule(
                     requestedSymbol = canonical,
                     canonicalSymbol = canonical,
@@ -544,6 +558,7 @@ class KrakenSpotClient(
                     status = status
                 )
                 loaded[canonical] = rule
+                loaded[pairId.uppercase().replace("XBT", "BTC")] = rule
                 loaded[alt.replace("XBT", "BTC")] = rule
                 if (ws.isNotBlank()) loaded[ws.replace("/", "").replace("XBT", "BTC")] = rule
             }

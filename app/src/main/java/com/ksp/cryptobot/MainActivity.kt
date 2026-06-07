@@ -515,7 +515,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.6.0 Completion", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.6.2 Rotation Safety", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -737,7 +737,7 @@ private fun SymbolScannerScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Auto Symbol Scanner", "Kraken EUR markets are discovered, validated, scored, ranked and automatically used for rotation.") }
+        item { SectionTitle("Auto Symbol Scanner", "All Kraken spot markets are discovered, validated, scored, ranked and used for multi-symbol rotation.") }
         item {
             GlassCard {
                 ToggleRow("Auto symbol discovery", settings.autoSymbolDiscoveryEnabled, onEnableAutoDiscovery)
@@ -745,7 +745,11 @@ private fun SymbolScannerScreen(
                 ToggleInfo("Provider must be Kraken", settings.exchangeProvider == ExchangeProvider.KRAKEN)
                 ToggleInfo("Candidates scanned", candidates.isNotEmpty())
                 ToggleInfo("Enabled symbols: ${candidates.count { it.enabledForRotation }}", candidates.any { it.enabledForRotation })
-                Text("Limits: max spread ${settings.autoSymbolMaxSpreadPercent}%, min 24h volume €${settings.autoSymbolMinVolume24hEur}, active limit ${settings.autoSymbolActiveLimit}", color = Muted)
+                Text("Universe: ${settings.autoSymbolQuoteAsset}. Allowed quotes: ${settings.allowedQuoteAssetsCsv}", color = Muted)
+                Text("Limits: spread ≤ ${settings.autoSymbolMaxSpreadPercent}%, min 24h quote-volume ${settings.autoSymbolMinVolume24hEur}, active limit ${settings.autoSymbolActiveLimit}", color = Muted)
+                Text("Rotation safety: max new trades/scan ${settings.maxNewTradesPerScan}, max trades/hour ${settings.maxTradesPerHour}, max positions ${settings.maxSimultaneousLivePositions}", color = Muted)
+                Text("Reserve guard: keep ${settings.minimumQuoteReserveAmount} or ${settings.minimumQuoteReservePercent}% of quote balance before BUY orders.", color = Muted)
+                Text("Cooldowns: buy ${settings.cooldownAfterBuyMinutes}m, sell ${settings.cooldownAfterSellMinutes}m, loss ${settings.cooldownAfterLossMinutes}m.", color = Muted)
                 Spacer(Modifier.height(12.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     item { Button(onClick = onRefresh) { Text("Scan Kraken Symbols") } }
@@ -758,7 +762,7 @@ private fun SymbolScannerScreen(
                 SectionTitle("Selected Rotation", "These are the symbols currently allowed by the scanner.")
                 val enabled = candidates.filter { it.enabledForRotation }.take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
                 if (enabled.isEmpty()) {
-                    Text("No enabled candidates yet. Tap Scan Kraken Symbols. If none pass, reduce min volume or max spread carefully.", color = Muted)
+                    Text("No enabled candidates yet. Tap Scan Kraken Symbols. If none pass, reduce min quote-volume or increase max spread carefully.", color = Muted)
                 } else {
                     Text(enabled.joinToString(",") { it.symbol }, color = Mint, fontWeight = FontWeight.Bold)
                 }
@@ -781,7 +785,7 @@ private fun SymbolCandidateCard(candidate: SymbolDiscoveryCandidate) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(candidate.symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Pair ${candidate.exchangePair} • ${candidate.baseAsset}/${candidate.quoteAsset}", color = Muted)
+                Text("Pair ${candidate.exchangePair} • ${candidate.baseAsset}/${candidate.quoteAsset} • ${candidate.quoteAsset} quote", color = Muted)
             }
             StatusPill(if (candidate.enabledForRotation) "ENABLED" else "SKIPPED", color)
         }
@@ -956,6 +960,9 @@ private fun OrdersScreen(
         }
         item {
             GlassCard {
+                ToggleInfo("Max trades/hour guard", settings.maxTradesPerHour > 0)
+                ToggleInfo("Symbol cooldowns", settings.cooldownAfterBuyMinutes > 0 || settings.cooldownAfterSellMinutes > 0)
+                ToggleInfo("Quote reserve guard", settings.minimumQuoteReserveAmount > BigDecimal.ZERO || settings.minimumQuoteReservePercent > BigDecimal.ZERO)
                 ToggleInfo("Trailing stop setting", settings.enableTrailingStop)
                 ToggleInfo("Break-even stop setting", settings.enableBreakEvenStop)
                 ToggleInfo("Partial take-profit setting", settings.enablePartialTakeProfit)
