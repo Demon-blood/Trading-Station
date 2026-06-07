@@ -1,4 +1,4 @@
-# v1.6.3 — Balance-Aware Rotation + Trade Unblock Diagnostics
+# v1.6.4 — Balance-Aware Rotation + Trade Unblock Diagnostics
 
 This release fixes a practical issue introduced by full Kraken-universe scanning: the scanner could select strong symbols whose quote asset had no usable free balance, causing the bot to analyze multiple symbols but submit no trades.
 
@@ -13,7 +13,7 @@ This release fixes a practical issue introduced by full Kraken-universe scanning
 
 ## Why this matters
 
-When scanning every Kraken pair, the best-ranked markets may be USD, USDT, BTC, ETH or other quote pairs. If your Kraken account only has EUR, those pairs are useful for analysis but cannot be bought automatically unless the matching quote balance exists. v1.6.3 filters the rotation by actual available balances before execution.
+When scanning every Kraken pair, the best-ranked markets may be USD, USDT, BTC, ETH or other quote pairs. If your Kraken account only has EUR, those pairs are useful for analysis but cannot be bought automatically unless the matching quote balance exists. v1.6.4 filters the rotation by actual available balances before execution.
 
 ## Recommended settings for small EUR accounts
 

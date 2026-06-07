@@ -507,11 +507,12 @@ class BotController(
 
     private fun freeBalanceForAsset(balances: Map<String, BigDecimal>, asset: String): BigDecimal {
         val key = asset.uppercase()
-        return balances[key]
-            ?: if (key == "EUR") balances["ZEUR"] else null
-            ?: if (key == "BTC") balances["XXBT"] ?: balances["XBT"] else null
-            ?: if (key == "ETH") balances["XETH"] else null
-            ?: BigDecimal.ZERO
+        return balances[key] ?: when (key) {
+            "EUR" -> balances["ZEUR"] ?: BigDecimal.ZERO
+            "BTC", "XBT" -> balances["XXBT"] ?: balances["XBT"] ?: BigDecimal.ZERO
+            "ETH" -> balances["XETH"] ?: BigDecimal.ZERO
+            else -> BigDecimal.ZERO
+        }
     }
 
     private fun quoteReserveAmount(settings: BotSettings, freeQuote: BigDecimal): BigDecimal {

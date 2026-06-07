@@ -1,4 +1,4 @@
-# KSP Crypto AI — v1.6.3 Balance-Aware Rotation
+# KSP Crypto AI — v1.6.4 Balance-Aware Rotation
 
 This is a truth-audited Kraken live build. It focuses on live Kraken trading, automatic symbol discovery, live portfolio/orders, diagnostics, and paper/manual modes. See `docs/live/FEATURE_COMPLETION_AUDIT.md` before assuming every advanced module is production-live.
 
@@ -37,7 +37,7 @@ No trading bot can guarantee profit or sell at the maximum possible top. This ap
 
 Only use API keys with withdrawals disabled. Start with small sizes and inspect the Live Status tab before leaving the bot running.
 
-## v1.6.3 trade-unblock highlights
+## v1.6.4 trade-unblock highlights
 
 - Kraken live trading remains the primary path.
 - Bitvavo REST live connector added.
