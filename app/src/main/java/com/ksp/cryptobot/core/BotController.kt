@@ -51,6 +51,17 @@ class BotController(
     suspend fun scanOnce(settings: BotSettings = settingsStore.load(), execute: Boolean = false): List<AiDecision> {
         updateStatus(if (execute) "Scan started with execution enabled. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}" else "Scan started. Provider=${settings.exchangeProvider}, mode=${settings.mode}")
         val exchange = createExchange(settings)
+        val liveAutoExecution = execute && settings.mode == BotMode.LIVE_AUTO && settings.exchangeProvider != ExchangeProvider.PAPER
+        val liveBalances = if (liveAutoExecution) {
+            runCatching { exchange.getAvailableBalances() }
+                .onSuccess { balances ->
+                    val eur = balances["EUR"] ?: balances["ZEUR"] ?: BigDecimal.ZERO
+                    updateStatus("Live balance check: available EUR=${eur.setScale(2, RoundingMode.DOWN)}. Funds will be reserved per submitted order.", "INFO")
+                }
+                .onFailure { error -> updateStatus("Live balance check failed: ${error.message}. Orders may be blocked before submit.", "ERROR") }
+                .getOrDefault(emptyMap())
+        } else emptyMap()
+        var reservedEurThisScan = BigDecimal.ZERO
         val newsClient = createNewsClient(settings)
         val recentTrades = dao.recentTradesSnapshot(100)
         val symbols = if (settings.tradeOnlyBtcEth) settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") } else settings.symbols()
@@ -80,7 +91,13 @@ class BotController(
                 )
                 dao.insertAiDecision(decision.toEntity())
                 updateStatus("[$symbol] Decision=${decision.finalAction}, score=${decision.finalScore}, allowed=${decision.allowedToTrade}. ${decision.explanation.take(180)}")
-                if (execute) executeDecisionIfAllowed(settings, exchange, ticker, decision)
+                if (execute) {
+                    val reserved = executeDecisionIfAllowed(settings, exchange, ticker, decision, liveBalances, reservedEurThisScan)
+                    if (reserved > BigDecimal.ZERO) {
+                        reservedEurThisScan = reservedEurThisScan.add(reserved)
+                        updateStatus("[$symbol] Reserved EUR this scan now ${reservedEurThisScan.setScale(2, RoundingMode.UP)}", "INFO")
+                    }
+                }
                 decision
             }.getOrElse { error ->
                 updateStatus("[$symbol] Scan failed: ${error.message}", "ERROR")
@@ -97,7 +114,7 @@ class BotController(
                 )
             }
         }
-        updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute")
+        updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. ReservedEUR=${reservedEurThisScan.setScale(2, RoundingMode.UP)}")
         return decisions
     }
 
@@ -105,32 +122,55 @@ class BotController(
         settings: BotSettings,
         exchange: CryptoExchangeClient,
         ticker: MarketTicker,
-        decision: AiDecision
-    ) {
+        decision: AiDecision,
+        liveBalances: Map<String, BigDecimal> = emptyMap(),
+        reservedEurThisScan: BigDecimal = BigDecimal.ZERO
+    ): BigDecimal {
         val capability = ExchangeCapabilityChecker.capability(settings.exchangeProvider)
         if (settings.manualExecutionMode || capability.manualOnly || !capability.liveTrading) {
             updateStatus("Manual/read-only mode: signal saved, no automatic order sent. ${capability.warning}", "WARN")
-            return
+            return BigDecimal.ZERO
         }
         if (settings.mode != BotMode.PAPER && (settingsStore.exchangeApiKey(settings.exchangeProvider).isNullOrBlank() || settingsStore.exchangeSecretKey(settings.exchangeProvider).isNullOrBlank())) {
             updateStatus("Trade blocked: missing ${capability.displayName} API credentials.", "ERROR")
-            return
+            return BigDecimal.ZERO
         }
         val allowed = guard.canExecute(settings, decision)
         if (!allowed.first) {
             updateStatus("Trade blocked: ${allowed.second}", "WARN")
-            return
+            return BigDecimal.ZERO
         }
         if (settings.mode == BotMode.LIVE_CONFIRM) {
             updateStatus("Live confirm mode: decision saved, no automatic order placed.", "WARN")
-            return
+            return BigDecimal.ZERO
         }
         val side = if (decision.finalAction == SignalAction.SELL) OrderSide.SELL else OrderSide.BUY
         val price = if (side == OrderSide.BUY) ticker.ask else ticker.bid
-        val quantity = settings.maxPositionEur.divide(price, 6, RoundingMode.DOWN)
+        val feeReserveMultiplier = BigDecimal("1.01")
+        val minimumOrderEur = BigDecimal("5.00")
+        val availableEur = liveBalances["EUR"] ?: liveBalances["ZEUR"]
+        val remainingEur = availableEur?.subtract(reservedEurThisScan)?.max(BigDecimal.ZERO)
+
+        val targetNotionalEur = if (side == OrderSide.BUY && remainingEur != null && settings.mode != BotMode.PAPER) {
+            val safeRemaining = remainingEur.divide(feeReserveMultiplier, 2, RoundingMode.DOWN)
+            settings.maxPositionEur.min(safeRemaining)
+        } else {
+            settings.maxPositionEur
+        }
+
+        if (side == OrderSide.BUY) {
+            updateStatus("[${ticker.symbol}] EUR budget: available=${availableEur?.setScale(2, RoundingMode.DOWN) ?: "unknown"}, reservedThisScan=${reservedEurThisScan.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotionalEur.setScale(2, RoundingMode.DOWN)}", "INFO")
+        }
+
+        if (side == OrderSide.BUY && targetNotionalEur < minimumOrderEur) {
+            updateStatus("Trade blocked: not enough free EUR after already reserved orders. Remaining=${remainingEur?.setScale(2, RoundingMode.DOWN) ?: "unknown"}, minimum=$minimumOrderEur", "WARN")
+            return BigDecimal.ZERO
+        }
+
+        val quantity = targetNotionalEur.divide(price, 8, RoundingMode.DOWN)
         if (quantity <= BigDecimal.ZERO) {
             updateStatus("Trade blocked: calculated quantity is zero.", "ERROR")
-            return
+            return BigDecimal.ZERO
         }
         val request = OrderRequest(
             symbol = ticker.symbol,
@@ -139,7 +179,7 @@ class BotController(
             limitPrice = price,
             clientOrderId = "ksp-${ticker.symbol.lowercase()}-${System.currentTimeMillis()}"
         )
-        updateStatus("Submitting ${settings.exchangeProvider} ${request.side} LIMIT order: ${request.symbol}, qty=${request.quantity}, price=${request.limitPrice}, id=${request.clientOrderId}", "LIVE")
+        updateStatus("Submitting ${settings.exchangeProvider} ${request.side} LIMIT order: ${request.symbol}, notional=${targetNotionalEur.setScale(2, RoundingMode.DOWN)}, qty=${request.quantity}, price=${request.limitPrice}, id=${request.clientOrderId}", "LIVE")
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
             updateStatus("Order submit failed: ${error.message}", "ERROR")
             throw error
@@ -160,6 +200,7 @@ class BotController(
             )
         )
         updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
+        return if (side == OrderSide.BUY) targetNotionalEur.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
     }
 
     private fun createExchange(settings: BotSettings): CryptoExchangeClient {

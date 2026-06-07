@@ -8,6 +8,7 @@ import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.math.BigDecimal
+import java.math.RoundingMode
 
 /**
  * v0.8 multi-exchange layer.
@@ -126,6 +127,37 @@ class KrakenSpotClient(
         }
     }
 
+    override suspend fun getAvailableBalances(): Map<String, BigDecimal> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken API key and private key are required to read balances.")
+
+        val balanceEx = runCatching { privateJson("/0/private/BalanceEx", emptyMap()) }.getOrNull()
+        if (balanceEx != null) {
+            val result = balanceEx.optJSONObject("result") ?: return@withContext emptyMap()
+            val out = linkedMapOf<String, BigDecimal>()
+            result.keys().forEach { asset ->
+                val item = result.optJSONObject(asset)
+                if (item != null) {
+                    val total = item.optString("balance", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                    val credit = item.optString("credit", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                    val creditUsed = item.optString("credit_used", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                    val heldTrade = item.optString("hold_trade", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                    val available = total.add(credit).subtract(creditUsed).subtract(heldTrade).max(BigDecimal.ZERO)
+                    putBalanceAliases(out, asset, available)
+                }
+            }
+            return@withContext out
+        }
+
+        val balance = privateJson("/0/private/Balance", emptyMap())
+        val result = balance.optJSONObject("result") ?: return@withContext emptyMap()
+        val out = linkedMapOf<String, BigDecimal>()
+        result.keys().forEach { asset ->
+            val value = result.optString(asset, "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            putBalanceAliases(out, asset, value)
+        }
+        out
+    }
+
     override suspend fun placeOrder(request: OrderRequest): OrderResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken API key and private key are required for live trading.")
         val limit = request.limitPrice ?: error("Kraken live trading only supports limit orders in this app build.")
@@ -170,6 +202,48 @@ class KrakenSpotClient(
                 fee = BigDecimal.ZERO,
                 paper = false
             )
+        }
+    }
+
+    private fun privateJson(path: String, parameters: Map<String, String>): org.json.JSONObject {
+        val nonce = System.currentTimeMillis().toString()
+        val form = linkedMapOf("nonce" to nonce)
+        form.putAll(parameters)
+        val encoded = form.entries.joinToString("&") { (k, v) ->
+            "${java.net.URLEncoder.encode(k, "UTF-8")}=${java.net.URLEncoder.encode(v, "UTF-8")}"
+        }
+        val signature = krakenSignature(path, nonce, encoded, secretKey)
+        val body = encoded.toRequestBody("application/x-www-form-urlencoded; charset=utf-8".toMediaType())
+        val req = Request.Builder()
+            .url("https://api.kraken.com$path")
+            .addHeader("API-Key", apiKey)
+            .addHeader("API-Sign", signature)
+            .post(body)
+            .build()
+        http.newCall(req).execute().use { res ->
+            val responseBody = res.body?.string().orEmpty()
+            if (!res.isSuccessful) error("Kraken ${path.substringAfterLast('/')} HTTP ${res.code}: $responseBody")
+            val root = org.json.JSONObject(responseBody)
+            val errors = root.optJSONArray("error")
+            if (errors != null && errors.length() > 0) error("Kraken ${path.substringAfterLast('/')} error: $errors")
+            return root
+        }
+    }
+
+    private fun putBalanceAliases(out: MutableMap<String, BigDecimal>, rawAsset: String, value: BigDecimal) {
+        val normalized = normalizeKrakenAsset(rawAsset)
+        out[rawAsset.uppercase()] = value
+        out[normalized] = value
+    }
+
+    private fun normalizeKrakenAsset(rawAsset: String): String {
+        val a = rawAsset.uppercase()
+        return when (a) {
+            "ZEUR", "EUR" -> "EUR"
+            "XXBT", "XBT", "BTC" -> "BTC"
+            "XETH", "ETH" -> "ETH"
+            "XXRP", "XRP" -> "XRP"
+            else -> a.removePrefix("X").removePrefix("Z")
         }
     }
 
