@@ -62,7 +62,7 @@ class AppSettingsStore(context: Context) {
             highSeverityNewsBlockHours = prefs.getInt("high_severity_news_block_hours", 12),
             enableAutoSafeMode = prefs.getBoolean("enable_auto_safe_mode", true),
             exchangeProvider = ExchangeProvider.valueOf(prefs.getString("exchange_provider", ExchangeProvider.PAPER.name) ?: ExchangeProvider.PAPER.name),
-            manualExecutionMode = prefs.getBoolean("manual_execution_mode", true)
+            manualExecutionMode = prefs.getBoolean("manual_execution_mode", false)
         )
     }
 

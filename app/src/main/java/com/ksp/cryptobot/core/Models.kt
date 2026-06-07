@@ -72,7 +72,7 @@ data class BotSettings(
     val highSeverityNewsBlockHours: Int = 12,
     val enableAutoSafeMode: Boolean = true,
     val exchangeProvider: ExchangeProvider = ExchangeProvider.PAPER,
-    val manualExecutionMode: Boolean = true
+    val manualExecutionMode: Boolean = false
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
 }
