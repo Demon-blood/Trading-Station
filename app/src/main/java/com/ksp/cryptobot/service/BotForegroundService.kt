@@ -10,17 +10,20 @@ import androidx.core.app.NotificationCompat
 import com.ksp.cryptobot.core.BotController
 import com.ksp.cryptobot.core.BotMode
 import com.ksp.cryptobot.settings.AppSettingsStore
+import com.ksp.cryptobot.status.BotStatusStore
 import kotlinx.coroutines.*
 
 class BotForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var controller: BotController
     private lateinit var settingsStore: AppSettingsStore
+    private lateinit var statusStore: BotStatusStore
 
     override fun onCreate() {
         super.onCreate()
         controller = BotController(applicationContext)
         settingsStore = AppSettingsStore(applicationContext)
+        statusStore = BotStatusStore(applicationContext)
         createChannel()
     }
 
@@ -33,28 +36,44 @@ class BotForegroundService : Service() {
     }
 
     private fun startBot() {
+        if (controller.running) {
+            val already = "Bot service is already running."
+            statusStore.write(already, "WARN")
+            updateNotification(already)
+            return
+        }
         val settings = settingsStore.load()
         val text = when (settings.mode) {
             BotMode.PAPER -> "Bot running in PAPER mode"
             BotMode.LIVE_CONFIRM -> "Bot scanning in LIVE_CONFIRM mode"
             BotMode.LIVE_AUTO -> "Bot running in LIVE_AUTO mode"
         }
+        statusStore.write("Foreground service starting. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}")
         startForeground(NOTIFICATION_ID, notification(text))
         controller.start()
         scope.launch {
             while (controller.running) {
                 val current = settingsStore.load()
+                val cycleStart = System.currentTimeMillis()
                 try {
+                    statusStore.write("Service cycle started. execute=${current.mode != BotMode.PAPER}, interval=${current.scanIntervalSeconds}s")
                     controller.scanOnce(current, execute = current.mode != BotMode.PAPER)
-                } catch (_: Exception) {
-                    // Keep service alive; failures are recorded in scan decisions when possible.
+                    updateNotification(statusStore.latestText())
+                } catch (error: Exception) {
+                    statusStore.write("Service cycle failed: ${error.message}", "ERROR")
+                    updateNotification("Bot error: ${error.message}")
                 }
-                delay((current.scanIntervalSeconds.coerceAtLeast(15L)) * 1000L)
+                val elapsed = System.currentTimeMillis() - cycleStart
+                val delayMs = (current.scanIntervalSeconds.coerceAtLeast(15L) * 1000L - elapsed).coerceAtLeast(5_000L)
+                statusStore.write("Next scan in ${delayMs / 1000L}s")
+                updateNotification(statusStore.latestText())
+                delay(delayMs)
             }
         }
     }
 
     private fun stopBot() {
+        statusStore.write("Stop requested. Foreground service shutting down.", "WARN")
         controller.stop()
         scope.coroutineContext.cancelChildren()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -63,10 +82,15 @@ class BotForegroundService : Service() {
 
     private fun notification(text: String): Notification = NotificationCompat.Builder(this, CHANNEL_ID)
         .setContentTitle("KSP Crypto Bot")
-        .setContentText(text)
+        .setContentText(text.take(90))
+        .setStyle(NotificationCompat.BigTextStyle().bigText(text))
         .setSmallIcon(android.R.drawable.stat_notify_sync)
         .setOngoing(true)
         .build()
+
+    private fun updateNotification(text: String) {
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
+    }
 
     private fun createChannel() {
         val channel = NotificationChannel(CHANNEL_ID, "Bot status", NotificationManager.IMPORTANCE_LOW)

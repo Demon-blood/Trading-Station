@@ -18,6 +18,7 @@ import com.ksp.cryptobot.news.NewsApiClient
 import com.ksp.cryptobot.news.NewsClient
 import com.ksp.cryptobot.news.NoopNewsClient
 import com.ksp.cryptobot.settings.AppSettingsStore
+import com.ksp.cryptobot.status.BotStatusStore
 import com.ksp.cryptobot.strategy.RecommendationEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,7 @@ class BotController(
     private val appContext = context.applicationContext
     private val dao = AppDatabase.get(appContext).dao()
     private val settingsStore = AppSettingsStore(appContext)
+    private val statusStore = BotStatusStore(appContext)
     private val guard = ExecutionGuard(dao)
     private val advancedRiskManager = AdvancedRiskManager(dao)
     private val advancedAutomationEngine = AdvancedAutomationEngine()
@@ -41,18 +43,27 @@ class BotController(
     @Volatile var running: Boolean = false
         private set
 
+    private fun updateStatus(message: String, level: String = "INFO") {
+        _status.value = message
+        statusStore.write(message, level)
+    }
+
     suspend fun scanOnce(settings: BotSettings = settingsStore.load(), execute: Boolean = false): List<AiDecision> {
-        _status.value = if (execute) "Scanning + executing" else "Scanning"
+        updateStatus(if (execute) "Scan started with execution enabled. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}" else "Scan started. Provider=${settings.exchangeProvider}, mode=${settings.mode}")
         val exchange = createExchange(settings)
         val newsClient = createNewsClient(settings)
         val recentTrades = dao.recentTradesSnapshot(100)
         val symbols = if (settings.tradeOnlyBtcEth) settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") } else settings.symbols()
         val decisions = symbols.mapNotNull { symbol ->
             runCatching {
+                updateStatus("[$symbol] Fetching ticker from ${settings.exchangeProvider}...")
                 val ticker = exchange.getTicker(symbol)
+                updateStatus("[$symbol] Ticker OK. Bid=${ticker.bid}, Ask=${ticker.ask}, Last=${ticker.lastPrice}, 24hVolEUR=${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)}")
                 val candlesByTimeframe = if (settings.recoveredScalpingStrategyEnabled) {
+                    updateStatus("[$symbol] Fetching multi-timeframe candles...")
                     Timeframe.values().associateWith { timeframe -> exchange.getCandles(symbol, timeframe, 140) }
                 } else emptyMap()
+                updateStatus("[$symbol] Running recommendation + AI automation engines...")
                 val rec = recommendationEngine.recommend(ticker, settings, candlesByTimeframe = candlesByTimeframe)
                 dao.insertSignal(rec.toEntity())
                 val news = newsClient.latestCryptoNews(symbol)
@@ -68,9 +79,11 @@ class BotController(
                     explanation = autoDecision.explanation
                 )
                 dao.insertAiDecision(decision.toEntity())
+                updateStatus("[$symbol] Decision=${decision.finalAction}, score=${decision.finalScore}, allowed=${decision.allowedToTrade}. ${decision.explanation.take(180)}")
                 if (execute) executeDecisionIfAllowed(settings, exchange, ticker, decision)
                 decision
             }.getOrElse { error ->
+                updateStatus("[$symbol] Scan failed: ${error.message}", "ERROR")
                 AiDecision(
                     symbol = symbol,
                     finalAction = SignalAction.WAIT,
@@ -84,7 +97,7 @@ class BotController(
                 )
             }
         }
-        _status.value = "Last scan: ${decisions.size} AI decisions"
+        updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute")
         return decisions
     }
 
@@ -96,27 +109,27 @@ class BotController(
     ) {
         val capability = ExchangeCapabilityChecker.capability(settings.exchangeProvider)
         if (settings.manualExecutionMode || capability.manualOnly || !capability.liveTrading) {
-            _status.value = "Manual/read-only mode: signal saved, no automatic order sent. ${capability.warning}"
+            updateStatus("Manual/read-only mode: signal saved, no automatic order sent. ${capability.warning}", "WARN")
             return
         }
         if (settings.mode != BotMode.PAPER && (settingsStore.exchangeApiKey(settings.exchangeProvider).isNullOrBlank() || settingsStore.exchangeSecretKey(settings.exchangeProvider).isNullOrBlank())) {
-            _status.value = "Trade blocked: missing ${capability.displayName} API credentials."
+            updateStatus("Trade blocked: missing ${capability.displayName} API credentials.", "ERROR")
             return
         }
         val allowed = guard.canExecute(settings, decision)
         if (!allowed.first) {
-            _status.value = "Trade blocked: ${allowed.second}"
+            updateStatus("Trade blocked: ${allowed.second}", "WARN")
             return
         }
         if (settings.mode == BotMode.LIVE_CONFIRM) {
-            _status.value = "Live confirm mode: decision saved, no automatic order placed."
+            updateStatus("Live confirm mode: decision saved, no automatic order placed.", "WARN")
             return
         }
         val side = if (decision.finalAction == SignalAction.SELL) OrderSide.SELL else OrderSide.BUY
         val price = if (side == OrderSide.BUY) ticker.ask else ticker.bid
         val quantity = settings.maxPositionEur.divide(price, 6, RoundingMode.DOWN)
         if (quantity <= BigDecimal.ZERO) {
-            _status.value = "Trade blocked: calculated quantity is zero."
+            updateStatus("Trade blocked: calculated quantity is zero.", "ERROR")
             return
         }
         val request = OrderRequest(
@@ -126,7 +139,11 @@ class BotController(
             limitPrice = price,
             clientOrderId = "ksp-${ticker.symbol.lowercase()}-${System.currentTimeMillis()}"
         )
-        val result = exchange.placeOrder(request)
+        updateStatus("Submitting ${settings.exchangeProvider} ${request.side} LIMIT order: ${request.symbol}, qty=${request.quantity}, price=${request.limitPrice}, id=${request.clientOrderId}", "LIVE")
+        val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
+            updateStatus("Order submit failed: ${error.message}", "ERROR")
+            throw error
+        }
         dao.insertTrade(
             TradeEntity(
                 symbol = result.symbol,
@@ -142,7 +159,7 @@ class BotController(
                 timestampEpochMs = result.timestamp.toEpochMilli()
             )
         )
-        _status.value = "Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}"
+        updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
     }
 
     private fun createExchange(settings: BotSettings): CryptoExchangeClient {
@@ -167,12 +184,12 @@ class BotController(
 
     fun start() {
         running = true
-        _status.value = "Running"
+        updateStatus("Bot controller running.")
     }
 
     fun stop() {
         running = false
-        _status.value = "Stopped"
+        updateStatus("Bot controller stopped.")
     }
 
     private fun Recommendation.toEntity(): SignalEntity = SignalEntity(

@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,7 +72,9 @@ import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.core.OrderManagementMode
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
+import com.ksp.cryptobot.status.BotStatusStore
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.math.BigDecimal
 
 private val SpaceBlack = Color(0xFF070A12)
@@ -88,6 +91,7 @@ private val TextPrimary = Color(0xFFEAF2FF)
 class MainActivity : ComponentActivity() {
     private lateinit var controller: BotController
     private lateinit var settingsStore: AppSettingsStore
+    private lateinit var statusStore: BotStatusStore
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -97,6 +101,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         controller = BotController(applicationContext)
         settingsStore = AppSettingsStore(applicationContext)
+        statusStore = BotStatusStore(applicationContext)
         notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
 
         setContent {
@@ -104,6 +109,7 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = SpaceBlack) {
                     AdvancedBotApp(
                         store = settingsStore,
+                        statusStore = statusStore,
                         onStart = {
                             startForegroundService(Intent(this, BotForegroundService::class.java).apply {
                                 action = BotForegroundService.ACTION_START
@@ -147,6 +153,7 @@ private fun KspTradingTheme(content: @Composable () -> Unit) {
 
 private enum class AppTab(val label: String) {
     DASHBOARD("Dashboard"),
+    STATUS("Live Status"),
     BOT("Bot"),
     AI("AI Signals"),
     STRATEGY("Strategy Lab"),
@@ -164,14 +171,26 @@ private enum class AppTab(val label: String) {
 @Composable
 private fun AdvancedBotApp(
     store: AppSettingsStore,
+    statusStore: BotStatusStore,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onScan: (BotSettings, Boolean, (List<AiDecision>) -> Unit) -> Unit
 ) {
     var settings by remember { mutableStateOf(store.load()) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
-    var status by remember { mutableStateOf("Ready") }
+    var status by remember { mutableStateOf(statusStore.latestText()) }
+    var statusLevel by remember { mutableStateOf(statusStore.latestLevel()) }
+    var statusHistory by remember { mutableStateOf(statusStore.recentLines()) }
     var decisions by remember { mutableStateOf(sampleDecisions()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            status = statusStore.latestText()
+            statusLevel = statusStore.latestLevel()
+            statusHistory = statusStore.recentLines()
+            delay(1000L)
+        }
+    }
     var apiKey by remember { mutableStateOf("") }
     var secretKey by remember { mutableStateOf("") }
     var newsKey by remember { mutableStateOf("") }
@@ -197,7 +216,7 @@ private fun AdvancedBotApp(
             )
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            HeaderBar(status = status, mode = settings.mode)
+            HeaderBar(status = status, mode = settings.mode, level = statusLevel)
             AppTabs(currentTab = currentTab, onTabSelected = { currentTab = it })
 
             when (currentTab) {
@@ -205,12 +224,13 @@ private fun AdvancedBotApp(
                     settings = settings,
                     status = status,
                     decisions = decisions,
-                    onStart = { onStart(); status = "Foreground live scanner started" },
-                    onStop = { onStop(); status = "Bot stopped" },
+                    onStart = { statusStore.write("Start button pressed from dashboard."); onStart(); status = "Foreground live scanner started" },
+                    onStop = { statusStore.write("Stop button pressed from dashboard.", "WARN"); onStop(); status = "Bot stopped" },
                     onScan = {
                         status = "Scanning market + AI inputs..."
                         onScan(settings, false) { result ->
                             decisions = result.ifEmpty { sampleDecisions() }
+                            statusStore.write("Manual scan complete from dashboard. Decisions=${result.size}")
                             status = "Scan complete"
                         }
                     },
@@ -218,9 +238,17 @@ private fun AdvancedBotApp(
                         status = "Running guarded execution pass..."
                         onScan(settings, settings.mode != BotMode.PAPER) { result ->
                             decisions = result.ifEmpty { sampleDecisions() }
+                            statusStore.write("Manual execution pass complete from dashboard. Decisions=${result.size}")
                             status = "Execution pass complete"
                         }
                     }
+                )
+                AppTab.STATUS -> LiveStatusScreen(
+                    status = status,
+                    level = statusLevel,
+                    history = statusHistory,
+                    settings = settings,
+                    onClear = { statusStore.clear(); statusHistory = statusStore.recentLines() }
                 )
                 AppTab.BOT -> BotControlScreen(
                     settings = settings,
@@ -231,8 +259,8 @@ private fun AdvancedBotApp(
                     onSave = {
                         persistSettings(settings.copy(symbolsCsv = symbols))
                     },
-                    onStart = { onStart(); status = "Bot service active" },
-                    onStop = { onStop(); status = "Bot service stopped" }
+                    onStart = { statusStore.write("Start button pressed from Bot tab."); onStart(); status = "Bot service active" },
+                    onStop = { statusStore.write("Stop button pressed from Bot tab.", "WARN"); onStop(); status = "Bot service stopped" }
                 )
                 AppTab.AI -> AiSignalsScreen(decisions = decisions, settings = settings)
                 AppTab.STRATEGY -> StrategyScreen(settings = settings, onToggleStrategy = { persistSettings(settings.copy(recoveredScalpingStrategyEnabled = it)) })
@@ -281,6 +309,7 @@ private fun AdvancedBotApp(
                     onSaveKeys = {
                         if (apiKey.isNotBlank() && secretKey.isNotBlank()) {
                             store.saveExchangeKeys(settings.exchangeProvider, apiKey, secretKey)
+                            statusStore.write("${settings.exchangeProvider.name} API credentials saved locally.")
                         }
                         if (newsKey.isNotBlank()) store.saveNewsApiKey(newsKey)
                         status = "${settings.exchangeProvider.name.replace('_', ' ')} secrets saved locally"
@@ -292,7 +321,7 @@ private fun AdvancedBotApp(
 }
 
 @Composable
-private fun HeaderBar(status: String, mode: BotMode) {
+private fun HeaderBar(status: String, mode: BotMode, level: String) {
     Column(modifier = Modifier.padding(16.dp, 14.dp, 16.dp, 8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
@@ -304,10 +333,12 @@ private fun HeaderBar(status: String, mode: BotMode) {
         Spacer(Modifier.height(10.dp))
         GlassCard {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(modeColor(mode))
+                StatusDot(levelColor(level))
                 Spacer(Modifier.width(10.dp))
-                Text(status, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text("v0.8", color = Mint, fontWeight = FontWeight.Bold)
+                Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                StatusPill(level, levelColor(level))
+                Spacer(Modifier.width(8.dp))
+                Text("v0.8.3", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -377,6 +408,80 @@ private fun DashboardScreen(
         }
         item { SectionTitle("Top AI Decisions", status) }
         items(decisions.take(4)) { DecisionCard(it) }
+    }
+}
+
+@Composable
+private fun LiveStatusScreen(
+    status: String,
+    level: String,
+    history: List<String>,
+    settings: BotSettings,
+    onClear: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Live Bot Status", "This shows exactly what the foreground service, AI engine, exchange connector, and execution guard are doing.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(levelColor(level))
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Current step", color = Muted)
+                        Text(status, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    StatusPill(level, levelColor(level))
+                }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Trading Readiness", "If one of these is wrong, live orders will be blocked before reaching Kraken.")
+                ToggleInfo("Exchange provider: ${settings.exchangeProvider}", settings.exchangeProvider == ExchangeProvider.KRAKEN)
+                ToggleInfo("Mode: ${settings.mode}", settings.mode == BotMode.LIVE_AUTO)
+                ToggleInfo("Live acknowledgement", settings.liveTradingAcknowledged)
+                ToggleInfo("Manual execution mode OFF", !settings.manualExecutionMode)
+                ToggleInfo("Max position > 0", settings.maxPositionEur > BigDecimal.ZERO)
+                ToggleInfo("Symbols: ${settings.symbolsCsv}", settings.symbols().isNotEmpty())
+            }
+        }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    SectionTitle("Status Timeline", "Newest entry first. Errors from Kraken or the strategy engine appear here.")
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onClear) { Text("Clear") }
+                }
+                Spacer(Modifier.height(8.dp))
+                if (history.isEmpty()) {
+                    Text("No status events yet. Start the service or run an execution pass.", color = Muted)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        history.forEach { line ->
+                            StatusLogRow(line)
+                        }
+                    }
+                }
+            }
+        }
+        item { WarningCard("If the timeline says WATCH, WAIT, score too low, manual/read-only, missing credentials, or live acknowledgement disabled, the bot is working but correctly refusing to place a live order.") }
+    }
+}
+
+@Composable
+private fun StatusLogRow(line: String) {
+    val color = when {
+        line.contains("[ERROR]") -> Danger
+        line.contains("[WARN]") -> Amber
+        line.contains("[LIVE]") -> Mint
+        else -> Muted
+    }
+    Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF0B1220), border = BorderStroke(1.dp, Stroke)) {
+        Text(line, modifier = Modifier.fillMaxWidth().padding(10.dp), color = color)
     }
 }
 
@@ -957,6 +1062,13 @@ private fun StatusPill(text: String, color: Color) {
 @Composable
 private fun StatusDot(color: Color) {
     Box(modifier = Modifier.size(11.dp).clip(CircleShape).background(color))
+}
+
+private fun levelColor(level: String): Color = when (level.uppercase()) {
+    "ERROR" -> Danger
+    "WARN" -> Amber
+    "LIVE" -> Mint
+    else -> Electric
 }
 
 private fun modeColor(mode: BotMode): Color = when (mode) {
