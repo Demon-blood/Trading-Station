@@ -121,7 +121,7 @@ data class BotSettings(
     val dryRunMirrorModeEnabled: Boolean = true,
     val bearishAutoSellScore: Int = 45,
 
-    // v1.2 autonomous intelligence pack. These make the bot more self-directing while
+    // v1.3 live automation settings. These make the bot more self-directing while
     // keeping all live orders behind the existing exchange, balance and risk guards.
     val autonomousStrategyPerSymbolEnabled: Boolean = true,
     val selfOptimizationEnabled: Boolean = true,
@@ -136,6 +136,15 @@ data class BotSettings(
     val minSymbolWinRatePercent: Int = 40,
     val minSymbolProfitFactor: BigDecimal = BigDecimal("0.90"),
     val optimizerLookbackTrades: Int = 30,
+
+    // v1.4 auto symbol discovery. When enabled, Kraken EUR markets are discovered,
+    // validated, scored, ranked and automatically used for trading rotation.
+    val autoSymbolDiscoveryEnabled: Boolean = true,
+    val autoSymbolCandidateLimit: Int = 40,
+    val autoSymbolActiveLimit: Int = 8,
+    val autoSymbolMaxSpreadPercent: BigDecimal = BigDecimal("0.35"),
+    val autoSymbolMinVolume24hEur: BigDecimal = BigDecimal("1000000"),
+    val autoSymbolRefreshMinutes: Int = 240,
     val taxExportYear: Int = 2026
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
@@ -376,6 +385,24 @@ data class ExchangeSymbolInfo(
     val priceDecimals: Int,
     val quantityDecimals: Int,
     val tradable: Boolean,
+    val reason: String = ""
+)
+
+data class SymbolDiscoveryCandidate(
+    val symbol: String,
+    val exchangePair: String,
+    val baseAsset: String,
+    val quoteAsset: String,
+    val tradable: Boolean,
+    val minOrderSize: BigDecimal,
+    val lastPrice: BigDecimal = BigDecimal.ZERO,
+    val bid: BigDecimal = BigDecimal.ZERO,
+    val ask: BigDecimal = BigDecimal.ZERO,
+    val spreadPercent: BigDecimal = BigDecimal.ZERO,
+    val volume24hEur: BigDecimal = BigDecimal.ZERO,
+    val change24hPercent: BigDecimal = BigDecimal.ZERO,
+    val score: Int = 0,
+    val enabledForRotation: Boolean = false,
     val reason: String = ""
 )
 

@@ -116,6 +116,12 @@ class AppSettingsStore(context: Context) {
             minSymbolWinRatePercent = prefs.getInt("min_symbol_win_rate_percent", 40),
             minSymbolProfitFactor = prefs.getString("min_symbol_profit_factor", "0.90")!!.toBigDecimalOrNull() ?: BigDecimal("0.90"),
             optimizerLookbackTrades = prefs.getInt("optimizer_lookback_trades", 30),
+            autoSymbolDiscoveryEnabled = prefs.getBoolean("auto_symbol_discovery_enabled", true),
+            autoSymbolCandidateLimit = prefs.getInt("auto_symbol_candidate_limit", 40),
+            autoSymbolActiveLimit = prefs.getInt("auto_symbol_active_limit", 8),
+            autoSymbolMaxSpreadPercent = prefs.getString("auto_symbol_max_spread_percent", "0.35")!!.toBigDecimalOrNull() ?: BigDecimal("0.35"),
+            autoSymbolMinVolume24hEur = prefs.getString("auto_symbol_min_volume_24h_eur", "1000000")!!.toBigDecimalOrNull() ?: BigDecimal("1000000"),
+            autoSymbolRefreshMinutes = prefs.getInt("auto_symbol_refresh_minutes", 240),
             taxExportYear = prefs.getInt("tax_export_year", 2026)
         )
     }
@@ -223,6 +229,12 @@ class AppSettingsStore(context: Context) {
             .putInt("min_symbol_win_rate_percent", settings.minSymbolWinRatePercent)
             .putString("min_symbol_profit_factor", settings.minSymbolProfitFactor.toPlainString())
             .putInt("optimizer_lookback_trades", settings.optimizerLookbackTrades)
+            .putBoolean("auto_symbol_discovery_enabled", settings.autoSymbolDiscoveryEnabled)
+            .putInt("auto_symbol_candidate_limit", settings.autoSymbolCandidateLimit)
+            .putInt("auto_symbol_active_limit", settings.autoSymbolActiveLimit)
+            .putString("auto_symbol_max_spread_percent", settings.autoSymbolMaxSpreadPercent.toPlainString())
+            .putString("auto_symbol_min_volume_24h_eur", settings.autoSymbolMinVolume24hEur.toPlainString())
+            .putInt("auto_symbol_refresh_minutes", settings.autoSymbolRefreshMinutes)
             .putInt("tax_export_year", settings.taxExportYear)
             .apply()
     }

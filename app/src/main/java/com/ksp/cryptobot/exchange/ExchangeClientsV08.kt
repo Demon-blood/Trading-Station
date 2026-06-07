@@ -10,14 +10,15 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.math.BigDecimal
 import java.math.RoundingMode
 import com.ksp.cryptobot.core.BalanceInfo
+import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
 
 /**
- * v0.8 multi-exchange layer.
+ * v1.3 Kraken-live exchange layer.
  *
  * The public market-data methods are implemented with resilient fallbacks so the app can keep scanning even when
  * a provider is unavailable. Live trading remains blocked unless the selected provider explicitly supports it and
  * credentials are present. This avoids bypassing jurisdiction restrictions while still making the app usable in
- * Belgium through compliant providers or manual execution.
+ * Belgium through Kraken live trading, paper trading, or manual execution.
  */
 abstract class BaseExchangeClient(
     private val providerName: String,
@@ -94,6 +95,28 @@ class KrakenSpotClient(
             tradable = rule.tradable,
             reason = if (rule.tradable) "Tradable on Kraken. status=${rule.status}" else "Not tradable on Kraken. status=${rule.status}"
         )
+    }
+
+
+    override suspend fun discoverTradableSymbols(quoteAsset: String, limit: Int): List<SymbolDiscoveryCandidate> = withContext(Dispatchers.IO) {
+        val quote = quoteAsset.uppercase()
+        ensurePairCache().values
+            .distinctBy { it.canonicalSymbol }
+            .filter { it.quoteAsset == quote && it.tradable }
+            .filterNot { it.baseAsset.contains(".") || it.baseAsset.contains("FEE") }
+            .sortedBy { it.canonicalSymbol }
+            .take(limit.coerceAtLeast(1))
+            .map { rule ->
+                SymbolDiscoveryCandidate(
+                    symbol = rule.canonicalSymbol,
+                    exchangePair = rule.exchangePair,
+                    baseAsset = rule.baseAsset,
+                    quoteAsset = rule.quoteAsset,
+                    tradable = rule.tradable,
+                    minOrderSize = rule.minOrderSize,
+                    reason = "Discovered from Kraken AssetPairs. status=${rule.status}, min=${rule.minOrderSize}, pair=${rule.exchangePair}"
+                )
+            }
     }
 
     override suspend fun getTicker(symbol: String): MarketTicker = withContext(Dispatchers.IO) {
@@ -601,8 +624,8 @@ object ExchangeCapabilityChecker {
         ExchangeProvider.PAPER -> ExchangeCapability(provider, "Paper Trading", true, false, false, "Simulation only. No real orders are sent.")
         ExchangeProvider.BINANCE_READ_ONLY -> ExchangeCapability(provider, "Binance Read-Only", true, false, true, "Belgium mode: Binance trading is disabled. Use signals/manual mode only.")
         ExchangeProvider.KRAKEN -> ExchangeCapability(provider, "Kraken", true, true, false, "Verify your Belgian account supports API spot trading before enabling LIVE_AUTO.")
-        ExchangeProvider.COINBASE_ADVANCED -> ExchangeCapability(provider, "Coinbase Advanced", true, true, false, "Verify your Belgian account supports API spot trading before enabling LIVE_AUTO.")
-        ExchangeProvider.BITVAVO -> ExchangeCapability(provider, "Bitvavo", true, true, false, "Verify your Belgian account supports API spot trading before enabling LIVE_AUTO.")
+        ExchangeProvider.COINBASE_ADVANCED -> ExchangeCapability(provider, "Coinbase Advanced", true, false, true, "Coinbase live trading is not exposed in v1.5.0; use Kraken for live orders.")
+        ExchangeProvider.BITVAVO -> ExchangeCapability(provider, "Bitvavo", true, false, true, "Bitvavo live trading is not exposed in v1.5.0; use Kraken for live orders.")
         ExchangeProvider.MANUAL -> ExchangeCapability(provider, "Manual Execution", true, false, true, "The app produces trade plans only; you execute them yourself.")
     }
 }

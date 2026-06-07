@@ -75,6 +75,7 @@ import com.ksp.cryptobot.core.TaxExportSummary
 import com.ksp.cryptobot.core.RemoteCommandResult
 import com.ksp.cryptobot.core.LiveOrderInfo
 import com.ksp.cryptobot.core.LifecycleSnapshot
+import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
 import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
@@ -156,6 +157,11 @@ class MainActivity : ComponentActivity() {
                                 controller.validateConfiguredSymbols(settings)
                             }
                         },
+                        onDiscoverSymbols = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.discoverAutoSymbols(settings))
+                            }
+                        },
                         onExportTax = { settings, callback ->
                             lifecycleScope.launch {
                                 callback(controller.exportBelgianTaxCsv(settings))
@@ -207,7 +213,8 @@ private enum class AppTab(val label: String) {
     TAX("Belgium Tax"),
     RISK("Risk Center"),
     HISTORY("History"),
-    SETTINGS("Settings")
+    SETTINGS("Settings"),
+    SYMBOLS("Symbol Scanner")
 }
 
 @Composable
@@ -222,6 +229,7 @@ private fun AdvancedBotApp(
     onLoadLifecycle: (BotSettings, (LifecycleSnapshot) -> Unit) -> Unit,
     onCancelOrder: (BotSettings, String, (Boolean) -> Unit) -> Unit,
     onValidateSymbols: (BotSettings) -> Unit,
+    onDiscoverSymbols: (BotSettings, (List<SymbolDiscoveryCandidate>) -> Unit) -> Unit,
     onExportTax: (BotSettings, (TaxExportSummary) -> Unit) -> Unit,
     onRemoteCommand: (BotSettings, String, (RemoteCommandResult) -> Unit) -> Unit
 ) {
@@ -234,6 +242,7 @@ private fun AdvancedBotApp(
     var portfolioSnapshot by remember { mutableStateOf<PortfolioSnapshot?>(null) }
     var liveOrders by remember { mutableStateOf<List<LiveOrderInfo>>(emptyList()) }
     var lifecycleSnapshot by remember { mutableStateOf<LifecycleSnapshot?>(null) }
+    var symbolCandidates by remember { mutableStateOf<List<SymbolDiscoveryCandidate>>(emptyList()) }
     var taxExportSummary by remember { mutableStateOf<TaxExportSummary?>(null) }
     var remoteCommand by remember { mutableStateOf("/status") }
     var remoteResult by remember { mutableStateOf<RemoteCommandResult?>(null) }
@@ -267,6 +276,13 @@ private fun AdvancedBotApp(
                 lifecycleSnapshot = result
                 statusStore.write("Lifecycle auto-refresh complete. Positions=${result.positions.size}")
                 status = "Lifecycle loaded: ${result.positions.size} position(s)"
+            }
+        }
+        if (currentTab == AppTab.SYMBOLS) {
+            onDiscoverSymbols(settings) { result ->
+                symbolCandidates = result
+                statusStore.write("Auto symbol scanner loaded. Candidates=${result.size}, enabled=${result.count { it.enabledForRotation }}")
+                status = "Symbol scanner loaded: ${result.count { it.enabledForRotation }} enabled"
             }
         }
     }
@@ -340,6 +356,27 @@ private fun AdvancedBotApp(
                     },
                     onStart = { statusStore.write("Start button pressed from Bot tab."); onStart(); status = "Bot service active" },
                     onStop = { statusStore.write("Stop button pressed from Bot tab.", "WARN"); onStop(); status = "Bot service stopped" }
+                )
+                AppTab.SYMBOLS -> SymbolScannerScreen(
+                    settings = settings,
+                    candidates = symbolCandidates,
+                    onRefresh = {
+                        statusStore.write("Auto symbol scanner refresh requested from UI.")
+                        onDiscoverSymbols(settings) { result ->
+                            symbolCandidates = result
+                            status = "Symbol scanner loaded: ${result.count { it.enabledForRotation }} enabled"
+                        }
+                    },
+                    onEnableAutoDiscovery = { enabled -> persistSettings(settings.copy(autoSymbolDiscoveryEnabled = enabled)) },
+                    onUseTopSymbols = {
+                        val selected = symbolCandidates.filter { it.enabledForRotation }.take(settings.autoSymbolActiveLimit.coerceAtLeast(1)).joinToString(",") { it.symbol }
+                        if (selected.isNotBlank()) {
+                            symbols = selected
+                            persistSettings(settings.copy(symbolsCsv = selected))
+                            statusStore.write("Configured symbols replaced by scanner selection: $selected", "INFO")
+                            status = "Symbols updated from scanner"
+                        }
+                    }
                 )
                 AppTab.AI -> AiSignalsScreen(decisions = decisions, settings = settings)
                 AppTab.STRATEGY -> StrategyScreen(settings = settings, onToggleStrategy = { persistSettings(settings.copy(recoveredScalpingStrategyEnabled = it)) })
@@ -466,7 +503,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("KSP Crypto AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-                Text("Android-only multi-exchange Belgium mode", color = Muted)
+                Text("Kraken live trading + auto symbol discovery", color = Muted)
             }
             StatusPill(text = mode.name.replace('_', ' '), color = modeColor(mode))
         }
@@ -478,7 +515,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.2.0", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.5.0 Live Audit", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -493,7 +530,21 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        AppTab.values().forEach { tab ->
+        val liveTabs = listOf(
+            AppTab.DASHBOARD,
+            AppTab.STATUS,
+            AppTab.BOT,
+            AppTab.SYMBOLS,
+            AppTab.AI,
+            AppTab.STRATEGY,
+            AppTab.ORDERS,
+            AppTab.POSITIONS,
+            AppTab.PORTFOLIO,
+            AppTab.TAX,
+            AppTab.RISK,
+            AppTab.SETTINGS
+        )
+        liveTabs.forEach { tab ->
             FilterChip(
                 selected = currentTab == tab,
                 onClick = { onTabSelected(tab) },
@@ -669,6 +720,91 @@ private fun BotControlScreen(
             }
         }
         item { WarningCard("Live-auto mode still uses execution guards. Keep withdrawal permission disabled on exchange API keys.") }
+    }
+}
+
+
+@Composable
+private fun SymbolScannerScreen(
+    settings: BotSettings,
+    candidates: List<SymbolDiscoveryCandidate>,
+    onRefresh: () -> Unit,
+    onEnableAutoDiscovery: (Boolean) -> Unit,
+    onUseTopSymbols: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Auto Symbol Scanner", "Kraken EUR markets are discovered, validated, scored, ranked and automatically used for rotation.") }
+        item {
+            GlassCard {
+                ToggleRow("Auto symbol discovery", settings.autoSymbolDiscoveryEnabled, onEnableAutoDiscovery)
+                Spacer(Modifier.height(8.dp))
+                ToggleInfo("Provider must be Kraken", settings.exchangeProvider == ExchangeProvider.KRAKEN)
+                ToggleInfo("Candidates scanned", candidates.isNotEmpty())
+                ToggleInfo("Enabled symbols: ${candidates.count { it.enabledForRotation }}", candidates.any { it.enabledForRotation })
+                Text("Limits: max spread ${settings.autoSymbolMaxSpreadPercent}%, min 24h volume €${settings.autoSymbolMinVolume24hEur}, active limit ${settings.autoSymbolActiveLimit}", color = Muted)
+                Spacer(Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    item { Button(onClick = onRefresh) { Text("Scan Kraken Symbols") } }
+                    item { OutlinedButton(onClick = onUseTopSymbols, enabled = candidates.any { it.enabledForRotation }) { Text("Use Top Symbols") } }
+                }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Selected Rotation", "These are the symbols currently allowed by the scanner.")
+                val enabled = candidates.filter { it.enabledForRotation }.take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
+                if (enabled.isEmpty()) {
+                    Text("No enabled candidates yet. Tap Scan Kraken Symbols. If none pass, reduce min volume or max spread carefully.", color = Muted)
+                } else {
+                    Text(enabled.joinToString(",") { it.symbol }, color = Mint, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        items(candidates.take(60)) { candidate ->
+            SymbolCandidateCard(candidate)
+        }
+    }
+}
+
+@Composable
+private fun SymbolCandidateCard(candidate: SymbolDiscoveryCandidate) {
+    val color = when {
+        candidate.enabledForRotation -> Mint
+        candidate.tradable -> Amber
+        else -> Danger
+    }
+    GlassCard {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(candidate.symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Pair ${candidate.exchangePair} • ${candidate.baseAsset}/${candidate.quoteAsset}", color = Muted)
+            }
+            StatusPill(if (candidate.enabledForRotation) "ENABLED" else "SKIPPED", color)
+        }
+        Spacer(Modifier.height(10.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            item { MetricMini("Score", candidate.score.toString(), color) }
+            item { MetricMini("Spread", "${candidate.spreadPercent}%", Electric) }
+            item { MetricMini("24h Vol", "€${candidate.volume24hEur}", Mint) }
+            item { MetricMini("24h", "${candidate.change24hPercent}%", Amber) }
+            item { MetricMini("Min", candidate.minOrderSize.stripTrailingZeros().toPlainString(), Muted) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(candidate.reason, color = Muted)
+    }
+}
+
+@Composable
+private fun MetricMini(label: String, value: String, color: Color) {
+    Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF0B1220), border = BorderStroke(1.dp, Stroke)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(value, color = color, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -1188,7 +1324,7 @@ private fun AutonomousScreen(
         }
         item {
             GlassCard {
-                SectionTitle("Remote Command Preview", "Local parser for future Telegram/Discord bridge commands.")
+                SectionTitle("Command Parser", "Local command parser for status/pause/resume style commands.")
                 OutlinedTextField(value = remoteCommand, onValueChange = onRemoteCommandChange, label = { Text("Command") }, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = onRunRemoteCommand, modifier = Modifier.fillMaxWidth()) { Text("Parse Command") }
@@ -1241,7 +1377,7 @@ private fun ProSystemsScreen(settings: BotSettings) {
         item {
             GlassCard {
                 SectionTitle("Live Intelligence", "These modules run through the service, controller or diagnostics layer.")
-                ToggleInfo("Kraken WebSocket-ready ticker monitor", settings.enableKrakenWebSocketFeed)
+                ToggleInfo("Kraken REST live ticker monitor", settings.enableKrakenWebSocketFeed)
                 ToggleInfo("Smart profit-lock engine", settings.smartProfitLockEnabled)
                 ToggleInfo("Fee/spread net-profit filter", settings.enableNetProfitFilter)
                 ToggleInfo("Why traded / why skipped explanations", settings.saveWhyTradedExplanations)
@@ -1294,12 +1430,13 @@ private fun SettingsScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Settings", "Multi-exchange Belgium mode, secure keys, AI modules and app behavior.") }
+        item { SectionTitle("Settings", "Kraken live trading, paper trading, secure keys and risk controls.") }
         item {
             GlassCard {
-                SectionTitle("Exchange Provider", "Choose a legal connector. Binance is read-only in Belgium mode.")
+                SectionTitle("Working Provider", "Kraken is the live trading connector. Paper and Manual modes are also fully usable.")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(ExchangeProvider.values().toList()) { provider ->
+                    val liveProviders = listOf(ExchangeProvider.PAPER, ExchangeProvider.KRAKEN, ExchangeProvider.MANUAL, ExchangeProvider.BINANCE_READ_ONLY)
+                    items(liveProviders) { provider ->
                         FilterChip(
                             selected = settings.exchangeProvider == provider,
                             onClick = { onExchangeProvider(provider) },
@@ -1330,7 +1467,7 @@ private fun SettingsScreen(
         }
         item {
             GlassCard {
-                SectionTitle("v1.1 Full Pro Automation", "These live systems are enabled by default in this build.")
+                SectionTitle("Live Automation", "Only working live/paper features are exposed in this v1.5.0 live-audit build.")
                 ToggleInfo("Live trade lifecycle manager", settings.liveLifecycleManagerEnabled)
                 ToggleInfo("Auto exit manager", settings.autoExitManagerEnabled)
                 ToggleInfo("Automatic take-profit", settings.autoTakeProfitEnabled)
@@ -1338,7 +1475,7 @@ private fun SettingsScreen(
                 ToggleInfo("Profit maximizer / trailing exits", settings.profitMaximizerEnabled)
                 ToggleInfo("Sell on bearish AI signal", settings.forceSellOnBearishSignal)
                 ToggleInfo("Closed-order sync", settings.syncKrakenHistory)
-                Text("No bot can guarantee maximum possible profit. This build attempts to maximize captured profit with smart profit-locking, multi-stage exits, fee-aware filtering, WebSocket-ready diagnostics, portfolio balancing, watchdog checks and strategy optimization.", color = Amber)
+                Text("No bot can guarantee maximum possible profit. This build attempts to maximize captured profit with smart profit-locking, multi-stage exits, fee-aware filtering, portfolio balancing, watchdog checks and strategy optimization.", color = Amber)
             }
         }
         item { WarningCard("Do not use VPNs, false residency, borrowed accounts or other bypass methods. Use a provider that legally supports your Belgian account, or keep the app in manual/paper mode.") }
@@ -1349,8 +1486,8 @@ private fun exchangeProviderWarning(provider: ExchangeProvider): String = when (
     ExchangeProvider.PAPER -> "Paper trading only. No real orders are sent."
     ExchangeProvider.BINANCE_READ_ONLY -> "Belgium mode: Binance trading remains disabled. Signals and read-only market data only."
     ExchangeProvider.KRAKEN -> "Verify Kraken API spot trading is available for your Belgian account before enabling LIVE_AUTO."
-    ExchangeProvider.COINBASE_ADVANCED -> "Verify Coinbase Advanced API spot trading is available for your Belgian account before enabling LIVE_AUTO."
-    ExchangeProvider.BITVAVO -> "Verify Bitvavo API spot trading is available for your Belgian account before enabling LIVE_AUTO."
+    ExchangeProvider.COINBASE_ADVANCED -> "Coinbase connector is hidden in v1.5.0 because live signing is not implemented in this Android build."
+    ExchangeProvider.BITVAVO -> "Bitvavo connector is hidden in v1.5.0 because live signing is not implemented in this Android build."
     ExchangeProvider.MANUAL -> "Manual mode creates trade plans. You place the order yourself in a compliant app."
 }
 

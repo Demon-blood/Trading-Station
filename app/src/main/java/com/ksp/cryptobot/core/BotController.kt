@@ -90,7 +90,7 @@ class BotController(
         var reservedEurThisScan = BigDecimal.ZERO
         val newsClient = createNewsClient(settings)
         val recentTrades = dao.recentTradesSnapshot(100)
-        val configuredSymbols = if (settings.tradeOnlyBtcEth) settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") } else settings.symbols()
+        val configuredSymbols = selectSymbolUniverse(settings, exchange)
         val symbols = configuredSymbols.mapNotNull { rawSymbol ->
             val autonomousAssessment = autonomousPack.assessSymbol(rawSymbol, recentTrades, settings)
             updateStatus("[$rawSymbol] v1.2 assessment: strategy=${autonomousAssessment.selectedStrategy}, allowed=${autonomousAssessment.allowed}, winRate=${autonomousAssessment.winRatePercent}%, pf=${autonomousAssessment.profitFactor}. ${autonomousAssessment.optimizerHint}", if (autonomousAssessment.allowed) "INFO" else "WARN")
@@ -179,6 +179,98 @@ class BotController(
         }
         updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. ReservedEURThisScan=${reservedEurThisScan.setScale(2, RoundingMode.UP)}")
         return decisions
+    }
+
+    private suspend fun selectSymbolUniverse(settings: BotSettings, exchange: CryptoExchangeClient): List<String> {
+        val fallback = if (settings.tradeOnlyBtcEth) {
+            settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") }
+        } else settings.symbols()
+        if (!settings.autoSymbolDiscoveryEnabled || settings.exchangeProvider != ExchangeProvider.KRAKEN || settings.mode == BotMode.PAPER) {
+            updateStatus("Auto symbol discovery disabled or unavailable. Using configured symbols: ${fallback.joinToString(",")}", "INFO")
+            return fallback
+        }
+        val discovered = discoverAutoSymbols(settings, exchange)
+        val selected = discovered
+            .filter { it.enabledForRotation }
+            .map { it.symbol }
+            .let { list -> if (settings.tradeOnlyBtcEth) list.filter { it.startsWith("BTC") || it.startsWith("ETH") } else list }
+            .take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
+        if (selected.isEmpty()) {
+            updateStatus("Auto symbol discovery produced no enabled candidates. Falling back to configured symbols: ${fallback.joinToString(",")}", "WARN")
+            return fallback
+        }
+        updateStatus("Auto symbol rotation active: ${selected.joinToString(",")}", "LIVE")
+        return selected
+    }
+
+    suspend fun discoverAutoSymbols(settings: BotSettings = settingsStore.load()): List<SymbolDiscoveryCandidate> {
+        return discoverAutoSymbols(settings, createExchange(settings))
+    }
+
+    private suspend fun discoverAutoSymbols(settings: BotSettings, exchange: CryptoExchangeClient): List<SymbolDiscoveryCandidate> {
+        updateStatus("Auto symbol discovery started. provider=${settings.exchangeProvider}, quote=EUR, candidates=${settings.autoSymbolCandidateLimit}", "INFO")
+        val raw = runCatching { exchange.discoverTradableSymbols("EUR", settings.autoSymbolCandidateLimit.coerceAtLeast(5)) }
+            .onFailure { updateStatus("Auto symbol discovery failed: ${it.message}", "ERROR") }
+            .getOrElse { emptyList() }
+        if (raw.isEmpty()) {
+            updateStatus("Auto symbol discovery returned no exchange candidates.", "WARN")
+            return emptyList()
+        }
+        val enriched = raw.mapNotNull { candidate ->
+            runCatching {
+                val ticker = exchange.getTicker(candidate.symbol)
+                val spreadPercent = if (ticker.lastPrice > BigDecimal.ZERO) {
+                    ticker.ask.subtract(ticker.bid).divide(ticker.lastPrice, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100"))
+                } else BigDecimal("999")
+                val volumeScore = when {
+                    ticker.volume24h >= settings.autoSymbolMinVolume24hEur.multiply(BigDecimal("10")) -> 30
+                    ticker.volume24h >= settings.autoSymbolMinVolume24hEur -> 22
+                    ticker.volume24h >= settings.autoSymbolMinVolume24hEur.divide(BigDecimal("2"), 2, RoundingMode.HALF_UP) -> 10
+                    else -> -18
+                }
+                val spreadScore = when {
+                    spreadPercent <= settings.autoSymbolMaxSpreadPercent.divide(BigDecimal("4"), 4, RoundingMode.HALF_UP) -> 30
+                    spreadPercent <= settings.autoSymbolMaxSpreadPercent -> 18
+                    spreadPercent <= settings.autoSymbolMaxSpreadPercent.multiply(BigDecimal("2")) -> -8
+                    else -> -35
+                }
+                val momentum = ticker.priceChangePercent24h.abs()
+                val momentumScore = when {
+                    momentum < BigDecimal("0.15") -> -6
+                    momentum <= BigDecimal("12.0") -> 12
+                    momentum <= BigDecimal("24.0") -> 2
+                    else -> -12
+                }
+                val majorBoost = if (candidate.symbol.startsWith("BTC") || candidate.symbol.startsWith("ETH")) 8 else 0
+                val score = (50 + volumeScore + spreadScore + momentumScore + majorBoost).coerceIn(0, 100)
+                val enabled = candidate.tradable &&
+                    spreadPercent <= settings.autoSymbolMaxSpreadPercent &&
+                    ticker.volume24h >= settings.autoSymbolMinVolume24hEur &&
+                    score >= 55
+                candidate.copy(
+                    lastPrice = ticker.lastPrice,
+                    bid = ticker.bid,
+                    ask = ticker.ask,
+                    spreadPercent = spreadPercent.setScale(4, RoundingMode.HALF_UP),
+                    volume24hEur = ticker.volume24h.setScale(0, RoundingMode.HALF_UP),
+                    change24hPercent = ticker.priceChangePercent24h.setScale(2, RoundingMode.HALF_UP),
+                    score = score,
+                    enabledForRotation = enabled,
+                    reason = if (enabled) {
+                        "Enabled: spread=${spreadPercent.setScale(3, RoundingMode.HALF_UP)}%, volume≈€${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)}, 24h=${ticker.priceChangePercent24h.setScale(2, RoundingMode.HALF_UP)}%."
+                    } else {
+                        "Skipped: spread=${spreadPercent.setScale(3, RoundingMode.HALF_UP)}%, volume≈€${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)}, score=$score. Limits spread<=${settings.autoSymbolMaxSpreadPercent}%, volume>=€${settings.autoSymbolMinVolume24hEur}."
+                    }
+                )
+            }.getOrElse { error ->
+                updateStatus("[${candidate.symbol}] Auto-discovery ticker scoring failed: ${error.message}", "WARN")
+                candidate.copy(score = 0, enabledForRotation = false, reason = "Ticker/scoring failed: ${error.message}")
+            }
+        }.sortedWith(compareByDescending<SymbolDiscoveryCandidate> { it.enabledForRotation }.thenByDescending { it.score }.thenBy { it.spreadPercent })
+        val selected = enriched.filter { it.enabledForRotation }.take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
+        updateStatus("Auto symbol discovery complete. candidates=${enriched.size}, enabled=${selected.size}, selected=${selected.joinToString(",") { it.symbol }}", "INFO")
+        enriched.take(12).forEach { c -> updateStatus("Symbol scanner: ${c.symbol} score=${c.score}, enabled=${c.enabledForRotation}, spread=${c.spreadPercent}%, vol≈€${c.volume24hEur}. ${c.reason.take(140)}", if (c.enabledForRotation) "INFO" else "WARN") }
+        return enriched
     }
 
     private suspend fun executeDecisionIfAllowed(

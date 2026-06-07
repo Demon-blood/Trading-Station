@@ -9,6 +9,7 @@ import com.ksp.cryptobot.core.BalanceInfo
 import com.ksp.cryptobot.core.ExchangeSymbolInfo
 import com.ksp.cryptobot.core.LiveOrderInfo
 import com.ksp.cryptobot.core.ClosedOrderInfo
+import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
 
 interface CryptoExchangeClient {
     suspend fun getTicker(symbol: String): MarketTicker
@@ -46,6 +47,12 @@ interface CryptoExchangeClient {
         tradable = true,
         reason = "No exchange-specific validator available."
     )
+
+    /**
+     * Discover tradable symbols from the selected exchange. Live connectors should return
+     * real pair metadata so the bot can build a market universe automatically.
+     */
+    suspend fun discoverTradableSymbols(quoteAsset: String = "EUR", limit: Int = 50): List<SymbolDiscoveryCandidate> = emptyList()
 
     /** Open live orders as reported by the exchange. */
     suspend fun getOpenOrders(): List<LiveOrderInfo> = emptyList()
