@@ -56,7 +56,10 @@ class BotController(
             runCatching { exchange.getAvailableBalances() }
                 .onSuccess { balances ->
                     val eur = balances["EUR"] ?: balances["ZEUR"] ?: BigDecimal.ZERO
-                    updateStatus("Live balance check: available EUR=${eur.setScale(2, RoundingMode.DOWN)}. Funds will be reserved per submitted order.", "INFO")
+                    updateStatus("Live balance check: free/available EUR=${eur.setScale(2, RoundingMode.DOWN)}. This excludes funds locked in open orders.", "INFO")
+                    runCatching { exchange.getBalanceDiagnostics() }
+                        .onSuccess { lines -> lines.take(8).forEach { updateStatus(it, "INFO") } }
+                        .onFailure { error -> updateStatus("Balance diagnostics failed: ${error.message}", "WARN") }
                 }
                 .onFailure { error -> updateStatus("Live balance check failed: ${error.message}. Orders may be blocked before submit.", "ERROR") }
                 .getOrDefault(emptyMap())
@@ -114,7 +117,7 @@ class BotController(
                 )
             }
         }
-        updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. ReservedEUR=${reservedEurThisScan.setScale(2, RoundingMode.UP)}")
+        updateStatus("Last scan complete: ${decisions.size} AI decisions. Execute=$execute. ReservedEURThisScan=${reservedEurThisScan.setScale(2, RoundingMode.UP)}")
         return decisions
     }
 
@@ -159,7 +162,7 @@ class BotController(
         }
 
         if (side == OrderSide.BUY) {
-            updateStatus("[${ticker.symbol}] EUR budget: available=${availableEur?.setScale(2, RoundingMode.DOWN) ?: "unknown"}, reservedThisScan=${reservedEurThisScan.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotionalEur.setScale(2, RoundingMode.DOWN)}", "INFO")
+            updateStatus("[${ticker.symbol}] EUR budget: freeAvailable=${availableEur?.setScale(2, RoundingMode.DOWN) ?: "unknown"}, reservedByBotThisScan=${reservedEurThisScan.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotionalEur.setScale(2, RoundingMode.DOWN)}", "INFO")
         }
 
         if (side == OrderSide.BUY && targetNotionalEur < minimumOrderEur) {

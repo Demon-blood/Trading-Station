@@ -19,5 +19,11 @@ interface CryptoExchangeClient {
      */
     suspend fun getAvailableBalances(): Map<String, java.math.BigDecimal> = emptyMap()
 
+    /**
+     * Human-readable diagnostics for live status. Connectors can expose raw balance
+     * fields and open-order holds so the app can explain why a balance is blocked.
+     */
+    suspend fun getBalanceDiagnostics(): List<String> = emptyList()
+
     suspend fun placeOrder(request: OrderRequest): OrderResult
 }

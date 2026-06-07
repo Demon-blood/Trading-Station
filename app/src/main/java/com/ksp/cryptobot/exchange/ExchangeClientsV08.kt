@@ -158,6 +158,92 @@ class KrakenSpotClient(
         out
     }
 
+    override suspend fun getBalanceDiagnostics(): List<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) return@withContext listOf("Kraken diagnostics skipped: missing API credentials.")
+        val lines = mutableListOf<String>()
+
+        runCatching { privateJson("/0/private/BalanceEx", emptyMap()) }
+            .onSuccess { root ->
+                val result = root.optJSONObject("result")
+                if (result != null) {
+                    result.keys().forEach { asset ->
+                        val item = result.optJSONObject(asset) ?: return@forEach
+                        val total = item.optString("balance", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        val hold = item.optString("hold_trade", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        val credit = item.optString("credit", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        val creditUsed = item.optString("credit_used", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        val available = total.add(credit).subtract(creditUsed).subtract(hold).max(BigDecimal.ZERO)
+                        if (normalizeKrakenAsset(asset) == "EUR" || asset.uppercase().contains("EUR")) {
+                            lines += "Kraken balance detail: $asset total=${total.scale2()}, holdTrade=${hold.scale2()}, free=${available.scale2()}"
+                        }
+                    }
+                }
+            }
+            .onFailure { lines += "Kraken BalanceEx diagnostics failed: ${it.message}" }
+
+
+
+        runCatching { privateJson("/0/private/Balance", emptyMap()) }
+            .onSuccess { root ->
+                val result = root.optJSONObject("result")
+                if (result != null) {
+                    result.keys().forEach { asset ->
+                        val value = result.optString(asset, "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        if (value > BigDecimal.ZERO) {
+                            val normalized = normalizeKrakenAsset(asset)
+                            lines += "Kraken raw Balance: $asset normalized=$normalized total=${value.scale2()}"
+                        }
+                    }
+                }
+            }
+            .onFailure { lines += "Kraken raw Balance diagnostics failed: ${it.message}" }
+
+        runCatching { privateJson("/0/private/TradeBalance", mapOf("asset" to "ZEUR")) }
+            .onSuccess { root ->
+                val result = root.optJSONObject("result")
+                if (result != null) {
+                    val eb = result.optString("eb", "0")
+                    val tb = result.optString("tb", "0")
+                    val m = result.optString("m", "0")
+                    val n = result.optString("n", "0")
+                    lines += "Kraken trade balance EUR: equivalentBalance=$eb, tradeBalance=$tb, margin=$m, unrealizedPnL=$n"
+                }
+            }
+            .onFailure { lines += "Kraken TradeBalance diagnostics failed: ${it.message}" }
+
+        runCatching { privateJson("/0/private/OpenOrders", mapOf("trades" to "false")) }
+            .onSuccess { root ->
+                val open = root.optJSONObject("result")?.optJSONObject("open")
+                val count = open?.length() ?: 0
+                var lockedEur = BigDecimal.ZERO
+                val samples = mutableListOf<String>()
+                if (open != null) {
+                    open.keys().forEach { txid ->
+                        val item = open.optJSONObject(txid) ?: return@forEach
+                        val descr = item.optJSONObject("descr")
+                        val type = descr?.optString("type", "")?.lowercase().orEmpty()
+                        val pair = descr?.optString("pair", "").orEmpty()
+                        val price = (descr?.optString("price", "0") ?: "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        val vol = item.optString("vol", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        val volExec = item.optString("vol_exec", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+                        val remaining = vol.subtract(volExec).max(BigDecimal.ZERO)
+                        if (type == "buy" && pair.uppercase().contains("EUR")) {
+                            lockedEur = lockedEur.add(price.multiply(remaining))
+                        }
+                        if (samples.size < 3) {
+                            samples += "$type $pair remaining=${remaining.stripTrailingZeros().toPlainString()} price=${price.stripTrailingZeros().toPlainString()}"
+                        }
+                    }
+                }
+                lines += "Kraken open orders: count=$count, estimated EUR locked=${lockedEur.setScale(2, RoundingMode.UP)}"
+                samples.forEach { lines += "Open order: $it" }
+            }
+            .onFailure { lines += "Kraken open-order diagnostics failed: ${it.message}" }
+
+        if (lines.isEmpty()) listOf("Kraken diagnostics: no EUR balance/open-order details returned.") else lines
+    }
+
+
     override suspend fun placeOrder(request: OrderRequest): OrderResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken API key and private key are required for live trading.")
         val limit = request.limitPrice ?: error("Kraken live trading only supports limit orders in this app build.")
@@ -231,13 +317,15 @@ class KrakenSpotClient(
     }
 
     private fun putBalanceAliases(out: MutableMap<String, BigDecimal>, rawAsset: String, value: BigDecimal) {
+        val raw = rawAsset.uppercase()
         val normalized = normalizeKrakenAsset(rawAsset)
-        out[rawAsset.uppercase()] = value
-        out[normalized] = value
+        out[raw] = value
+        // Sum canonical aliases so EUR reflects all Kraken EUR-coded free balances returned by the API.
+        out[normalized] = (out[normalized] ?: BigDecimal.ZERO).add(value)
     }
 
     private fun normalizeKrakenAsset(rawAsset: String): String {
-        val a = rawAsset.uppercase()
+        val a = rawAsset.uppercase().substringBefore('.')
         return when (a) {
             "ZEUR", "EUR" -> "EUR"
             "XXBT", "XBT", "BTC" -> "BTC"
@@ -246,6 +334,8 @@ class KrakenSpotClient(
             else -> a.removePrefix("X").removePrefix("Z")
         }
     }
+
+    private fun BigDecimal.scale2(): String = setScale(2, RoundingMode.DOWN).toPlainString()
 
     private fun toKrakenPair(symbol: String): String {
         val normalized = symbol.uppercase().replace("/", "")
