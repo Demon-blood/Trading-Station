@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.math.BigDecimal
 
 /**
@@ -143,10 +145,7 @@ class KrakenSpotClient(
             "${java.net.URLEncoder.encode(k, "UTF-8")}=${java.net.URLEncoder.encode(v, "UTF-8")}"
         }
         val signature = krakenSignature(path, nonce, encoded, secretKey)
-        val body = okhttp3.RequestBody.create(
-            okhttp3.MediaType.parse("application/x-www-form-urlencoded; charset=utf-8"),
-            encoded
-        )
+        val body = encoded.toRequestBody("application/x-www-form-urlencoded; charset=utf-8".toMediaType())
         val req = Request.Builder()
             .url("https://api.kraken.com$path")
             .addHeader("API-Key", apiKey)
