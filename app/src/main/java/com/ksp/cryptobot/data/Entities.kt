@@ -153,3 +153,22 @@ data class SelfLearningAuditEntity(
     val symbol: String,
     val message: String
 )
+
+
+@Entity(tableName = "learned_hold_profiles")
+data class LearnedHoldProfileEntity(
+    @PrimaryKey val symbol: String,
+    val updatedAtEpochMs: Long,
+    val sampleSize: Int,
+    val profitableExits: Int,
+    val losingExits: Int,
+    val continuationWinRatePercent: String,
+    val averageHoldMinutes: String,
+    val averagePnlEur: String,
+    val netPnlEur: String,
+    val holdConfidencePercent: Int,
+    val holdMultiplier: String,
+    val shouldDeferTakeProfit: Boolean,
+    val shouldDeferTrailingExit: Boolean,
+    val explanation: String
+)

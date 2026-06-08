@@ -1,0 +1,12 @@
+<resources>
+    <color name="launcher_background">#081326</color>
+    <color name="cts_bg">#081326</color>
+    <color name="cts_panel">#0F1B33</color>
+    <color name="cts_panel_alt">#142544</color>
+    <color name="cts_stroke">#2A4471</color>
+    <color name="cts_cyan">#47B8FF</color>
+    <color name="cts_aqua">#55F0DE</color>
+    <color name="cts_magenta">#C56BFF</color>
+    <color name="cts_text">#EAF3FF</color>
+    <color name="cts_muted">#A5B4D0</color>
+</resources>

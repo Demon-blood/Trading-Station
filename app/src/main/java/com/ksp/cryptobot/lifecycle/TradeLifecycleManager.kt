@@ -6,6 +6,8 @@ import com.ksp.cryptobot.data.PositionEntity
 import com.ksp.cryptobot.data.TaxReportEntity
 import com.ksp.cryptobot.data.TradeEntity
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
+import com.ksp.cryptobot.learning.TrueSelfLearningEngine
+import com.ksp.cryptobot.learning.SpikeProfitTimingEngine
 import com.ksp.cryptobot.status.BotStatusStore
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -22,6 +24,8 @@ class TradeLifecycleManager(
     private val dao: AppDao,
     private val statusStore: BotStatusStore
 ) {
+    private val selfLearningEngine = TrueSelfLearningEngine()
+    private val spikeProfitTimingEngine = SpikeProfitTimingEngine()
     private fun log(message: String, level: String = "INFO") = statusStore.write(message, level)
 
     suspend fun runPreScanMaintenance(settings: BotSettings, exchange: CryptoExchangeClient) {
@@ -79,17 +83,46 @@ class TradeLifecycleManager(
         val hitTrailing = settings.profitMaximizerEnabled && settings.enableTrailingStop && position.currentPrice <= position.trailingStopPrice && position.trailingStopPrice > position.entryPrice
         val hitTakeProfit = settings.autoTakeProfitEnabled && position.currentPrice >= position.takeProfitPrice && position.takeProfitPrice > BigDecimal.ZERO
 
+        val spikeTiming = if (settings.spikeProfitTimingEnabled && position.unrealizedPnlPercent >= settings.spikeTimingMinProfitPercent) {
+            val h1 = runCatching { exchange.getCandles(symbol, Timeframe.H1, settings.spikeTimingLookbackCandles.coerceIn(80, 720)) }.getOrDefault(emptyList())
+            val h4 = runCatching { exchange.getCandles(symbol, Timeframe.H4, settings.spikeTimingLookbackCandles.coerceIn(80, 720)) }.getOrDefault(emptyList())
+            spikeProfitTimingEngine.evaluate(settings, position, h1, h4, decision)
+        } else {
+            spikeProfitTimingEngine.evaluate(settings.copy(spikeProfitTimingEnabled = false), position, emptyList(), emptyList(), decision)
+        }
+        if (settings.spikeProfitTimingEnabled && spikeTiming.explanation.isNotBlank()) {
+            out += "[$symbol] ${spikeTiming.explanation}"
+        }
+
         val reason = when {
-            hitTrailing -> "trailing-stop profit capture"
-            hitTakeProfit -> "take-profit target reached"
+            hitTrailing && !spikeTiming.shouldHold -> "trailing-stop profit capture"
+            hitTakeProfit && !spikeTiming.shouldHold -> "take-profit target reached"
             hitStop -> "stop-loss protection"
             riskOffSell -> "AI bearish/risk-off sell signal"
+            spikeTiming.shouldSellNow -> "spike-exhaustion profit capture"
             else -> null
         }
         if (reason == null) {
-            out += "[$symbol] Lifecycle hold. PnL=${position.unrealizedPnlPercent.setScale(2, RoundingMode.HALF_UP)}%, TP=${position.takeProfitPrice.scale2()}, SL=${position.stopPrice.scale2()}, trail=${position.trailingStopPrice.scale2()}."
+            val spikeNote = if (spikeTiming.shouldHold) " Spike timing is holding for continuation." else ""
+            out += "[$symbol] Lifecycle hold. PnL=${position.unrealizedPnlPercent.setScale(2, RoundingMode.HALF_UP)}%, TP=${position.takeProfitPrice.scale2()}, SL=${position.stopPrice.scale2()}, trail=${position.trailingStopPrice.scale2()}.$spikeNote"
             return out
         }
+
+        if ((hitTrailing || hitTakeProfit) && spikeTiming.shouldHold) {
+            out += "[$symbol] Spike timing HOLD instead of sell: ${spikeTiming.explanation}"
+            log(out.last(), "LEARN")
+            return out
+        }
+
+        val learnedHold = selfLearningEngine.evaluateLearnedHoldExit(dao, settings, position, reason, decision)
+        if (learnedHold.shouldHold) {
+            out += "[$symbol] Learned HOLD instead of sell: ${learnedHold.explanation}"
+            log(out.last(), "LEARN")
+            return out
+        } else if (settings.learnedHoldForProfitEnabled && learnedHold.explanation.isNotBlank()) {
+            out += "[$symbol] Learned hold check: ${learnedHold.explanation}"
+        }
+
         if (hasSellOrder && !settings.enableMarketOrders) {
             out += "[$symbol] Exit condition hit ($reason), but an existing SELL order is already open. No duplicate order sent."
             log(out.last(), "WARN")

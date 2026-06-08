@@ -1,3 +1,5 @@
 <resources>
-    <style name="Theme.KspCryptoBot" parent="android:style/Theme.Material.Light.NoActionBar" />
+    <style name="Theme.CryptoTradeStation" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_screen</item>
+    </style>
 </resources>

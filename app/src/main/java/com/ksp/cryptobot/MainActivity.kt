@@ -61,6 +61,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.animateFloatAsState
+
+import androidx.compose.animation.core.tween
+
+import androidx.compose.foundation.Image
+
+import androidx.compose.ui.draw.alpha
+
+import androidx.compose.ui.draw.scale
+
+import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.lifecycleScope
 import com.ksp.cryptobot.core.AiDecision
 import com.ksp.cryptobot.core.BotController
@@ -85,16 +96,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import java.math.BigDecimal
 
-private val SpaceBlack = Color(0xFF070A12)
-private val Panel = Color(0xFF101727)
-private val PanelAlt = Color(0xFF162033)
-private val Stroke = Color(0xFF25344F)
-private val Electric = Color(0xFF4DA3FF)
-private val Mint = Color(0xFF39F5B6)
+private val SpaceBlack = Color(0xFF081326)
+private val Panel = Color(0xFF0F1B33)
+private val PanelAlt = Color(0xFF142544)
+private val Stroke = Color(0xFF2A4471)
+private val Electric = Color(0xFF47B8FF)
+private val Mint = Color(0xFF55F0DE)
 private val Amber = Color(0xFFFFC857)
-private val Danger = Color(0xFFFF5C7A)
-private val Muted = Color(0xFF9DA9C2)
-private val TextPrimary = Color(0xFFEAF2FF)
+private val Danger = Color(0xFFFF5E8A)
+private val Muted = Color(0xFFA5B4D0)
+private val TextPrimary = Color(0xFFEAF3FF)
 
 class MainActivity : ComponentActivity() {
     private lateinit var controller: BotController
@@ -113,7 +124,7 @@ class MainActivity : ComponentActivity() {
         notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
 
         setContent {
-            KspTradingTheme {
+            CryptoTradeStationTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = SpaceBlack) {
                     AdvancedBotApp(
                         store = settingsStore,
@@ -182,7 +193,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun KspTradingTheme(content: @Composable () -> Unit) {
+private fun CryptoTradeStationTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             background = SpaceBlack,
@@ -316,7 +327,32 @@ private fun AdvancedBotApp(
         status = "Settings saved"
     }
 
-    Box(
+    var showSplash by remember { mutableStateOf(true) }
+    var showOnboarding by remember { mutableStateOf(store.isOnboardingPending()) }
+
+    LaunchedEffect(Unit) {
+        delay(1400L)
+        showSplash = false
+    }
+
+    if (showSplash) {
+        PremiumSplashScreen()
+    } else if (showOnboarding) {
+        OnboardingScreen(
+            onGetStarted = {
+                store.setOnboardingCompleted(true)
+                showOnboarding = false
+                currentTab = AppTab.DASHBOARD
+                status = "Welcome to Crypto TradeStation"
+            },
+            onOpenSettings = {
+                store.setOnboardingCompleted(true)
+                showOnboarding = false
+                currentTab = AppTab.SETTINGS
+                status = "Open Settings to connect Kraken or start in PAPER mode"
+            }
+        )
+    } else Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
@@ -546,8 +582,8 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
     Column(modifier = Modifier.padding(16.dp, 14.dp, 16.dp, 8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("KSP Crypto AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-                Text("Kraken live trading + auto symbol discovery", color = Muted)
+                Text("Crypto TradeStation", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                Text("Adaptive crypto trading and market intelligence", color = Muted)
             }
             StatusPill(text = mode.name.replace('_', ' '), color = modeColor(mode))
         }
@@ -559,7 +595,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.7.4 Learning Tab Fix", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.8.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1421,6 +1457,7 @@ private fun SelfLearningScreen(
 ) {
     val profiles = summary?.symbolProfiles.orEmpty()
     val strategies = summary?.strategyProfiles.orEmpty()
+    val holdProfiles = summary?.holdProfiles.orEmpty()
     val audit = summary?.audit.orEmpty()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -1442,6 +1479,7 @@ private fun SelfLearningScreen(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { MetricCard("Profiles", profiles.size.toString(), "Learned symbols", Electric) }
                 item { MetricCard("Strategies", strategies.size.toString(), "Learned strategy keys", Mint) }
+                item { MetricCard("Hold Profiles", holdProfiles.size.toString(), "Learned hold symbols", Electric) }
                 item { MetricCard("Max Boost", settings.selfLearningMaxScoreBoost.toString(), "Score cap", Amber) }
                 item { MetricCard("Max Penalty", settings.selfLearningMaxScorePenalty.toString(), "Risk cap", Danger) }
             }
@@ -1454,7 +1492,11 @@ private fun SelfLearningScreen(
                 ToggleInfo("Auto-disable bad symbols", settings.selfLearningAutoDisableEnabled)
                 ToggleInfo("Paper/live separation", settings.selfLearningPaperAndLiveSeparated)
                 ToggleInfo("Explain every learned decision", settings.selfLearningExplainEveryDecision)
+                ToggleInfo("Learned hold for profit", settings.learnedHoldForProfitEnabled)
+                ToggleInfo("Spike profit timing", settings.spikeProfitTimingEnabled)
                 Text("Lookback: ${settings.selfLearningLookbackTrades} trades • Minimum samples: ${settings.selfLearningMinSamples} per symbol", color = Muted)
+                Text("Hold learning: min ${settings.learnedHoldMinSamples} exits • confidence ≥ ${settings.learnedHoldConfidenceThresholdPercent}% • min profit ${settings.learnedHoldMinProfitPercent}%", color = Muted)
+                Text("Spike timing: historical spike ≥ ${settings.spikeTimingHistoricalSpikeThresholdPercent}% • hold until ${settings.spikeTimingHoldUntilProgressPercent}% of typical spike • sell near ${settings.spikeTimingExhaustionProgressPercent}%/weakness", color = Muted)
             }
         }
         if (profiles.isEmpty()) {
@@ -1474,6 +1516,24 @@ private fun SelfLearningScreen(
                     Text("Win ${profile.winRatePercent}% • PF ${profile.profitFactor} • Net €${profile.netPnlEur} • Avg €${profile.averagePnlEur}", color = Muted)
                     Text("Strategy=${profile.preferredStrategy} • size×${profile.positionMultiplier} • confidence=${profile.confidence}%", color = Muted)
                     if (profile.disabledUntilEpochMs > System.currentTimeMillis()) Text("Temporarily disabled by learning guard until ${profile.disabledUntilEpochMs}", color = Danger)
+                    Text(profile.explanation, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        if (holdProfiles.isNotEmpty()) {
+            item { SectionTitle("Learned Hold Profiles", "Symbols where the bot learned whether to hold longer instead of selling immediately at TP/trailing exits.") }
+            items(holdProfiles.take(20)) { profile ->
+                GlassCard {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(profile.symbol, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("samples=${profile.sampleSize} • profitable=${profile.profitableExits} • losing=${profile.losingExits}", color = Muted)
+                        }
+                        StatusPill("hold ${profile.holdConfidencePercent}%", if (profile.holdConfidencePercent >= settings.learnedHoldConfidenceThresholdPercent) Mint else Amber)
+                    }
+                    Text("Continuation win ${profile.continuationWinRatePercent}% • avgHold ${profile.averageHoldMinutes}m • net €${profile.netPnlEur}", color = Muted)
+                    Text("deferTP=${profile.shouldDeferTakeProfit} • deferTrailing=${profile.shouldDeferTrailingExit} • hold×${profile.holdMultiplier}", color = Muted)
                     Text(profile.explanation, color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -1630,7 +1690,7 @@ private fun AdvancedSettingsScreen(
     fun balancedSettings(): BotSettings = settings.copy(
         minStrategyScoreToBuy = 72,
         minTrendAgreement = 2,
-        allowedQuoteAssetsCsv = "EUR,USD,USDT,USDC",
+        allowedQuoteAssetsCsv = "EUR",
         autoSymbolCandidateLimit = 250,
         autoSymbolActiveLimit = 20,
         maxNewTradesPerScan = 2,
@@ -1660,7 +1720,7 @@ private fun AdvancedSettingsScreen(
     fun aggressiveSettings(): BotSettings = settings.copy(
         minStrategyScoreToBuy = 63,
         minTrendAgreement = 2,
-        allowedQuoteAssetsCsv = "ALL",
+        allowedQuoteAssetsCsv = "EUR",
         autoSymbolCandidateLimit = 350,
         autoSymbolActiveLimit = 30,
         maxNewTradesPerScan = 3,
@@ -2134,3 +2194,103 @@ private fun sampleDecisions(): List<AiDecision> = listOf(
         explanation = "Signal quality is acceptable for a small position under the current risk cap."
     )
 )
+
+
+@Composable
+private fun PremiumSplashScreen() {
+    var reveal by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { reveal = true }
+    val alpha by animateFloatAsState(if (reveal) 1f else 0f, animationSpec = tween(900), label = "splashAlpha")
+    val scale by animateFloatAsState(if (reveal) 1f else 0.84f, animationSpec = tween(900), label = "splashScale")
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF081326), Color(0xFF0A1730), Color(0xFF050A14)))),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(
+                painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                contentDescription = "Crypto TradeStation",
+                modifier = Modifier
+                    .size(160.dp)
+                    .alpha(alpha)
+                    .scale(scale)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("Crypto TradeStation", color = TextPrimary, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Adaptive crypto trading and market intelligence", color = Muted)
+            Spacer(modifier = Modifier.height(28.dp))
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp))
+        }
+    }
+}
+
+@Composable
+private fun OnboardingScreen(
+    onGetStarted: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF081326), Color(0xFF0B1428), Color(0xFF070A12))))
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                Image(
+                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                    contentDescription = "Crypto TradeStation",
+                    modifier = Modifier.size(120.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Welcome to Crypto TradeStation", color = TextPrimary, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("A cleaner way to run paper trading, live Kraken automation, symbol discovery, and self-learning strategies.", color = Muted)
+            }
+            item {
+                FeatureCard("Live & Paper Trading", "Switch between live Kraken execution and a fully simulated paper wallet using Kraken public data.")
+            }
+            item {
+                FeatureCard("Adaptive Intelligence", "Use self-learning, adaptive multi-strategy selection, spike timing, and learned hold behavior.")
+            }
+            item {
+                FeatureCard("Safer Setup", "Use EUR as your main quote balance, control risk, and inspect Live Status before enabling live orders.")
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    ElevatedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f), colors = ButtonDefaults.elevatedButtonColors(containerColor = PanelAlt)) {
+                        Text("Open Settings")
+                    }
+                    Button(onClick = onGetStarted, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
+                        Text("Get Started")
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Tip: Start in PAPER mode first, let the bot learn, then move to live trading with small amounts.", color = Muted)
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeatureCard(title: String, body: String) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Panel),
+        border = BorderStroke(1.dp, Stroke),
+        shape = RoundedCornerShape(22.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+            Text(title, color = TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(body, color = Muted)
+        }
+    }
+}

@@ -1,4 +1,28 @@
-# KSP Crypto AI — v1.7.1 Adaptive Multi-Strategy Learning
+# Crypto TradeStation Android App
+
+Android-only Kraken/PAPER crypto bot with adaptive multi-strategy self-learning, EUR-first Belgian cash routing, learned hold profiles, and historical spike/profit-cycle timing.
+
+## v1.7.9 highlight
+
+The lifecycle manager now analyzes historical spike behavior for held symbols such as BTC. It compares the current move against prior spike size, duration, momentum, and pullback behavior. It can defer normal take-profit/trailing exits when the move still looks early and healthy, or lock profit when the run looks exhausted.
+
+It still cannot know the exact top and does not guarantee maximum profit. It is a bounded profit-capture improvement, not a prediction guarantee.
+
+# Crypto TradeStation v1.7.7 EUR Cash
+
+Android-only crypto trading bot focused on Kraken live/paper trading, automatic symbol discovery, adaptive multi-strategy learning, and EUR-first cash routing for Belgian users.
+
+## Important default
+
+For Belgian Kraken accounts, EUR is treated as the main quote/cash asset:
+
+```text
+Allowed Quote Assets: EUR
+Auto Symbol Universe: ALL
+```
+
+The app can still scan all Kraken markets, but BUY trades are routed only through allowed quote balances. This prevents the bot from selecting USD/USDT/BTC quote pairs when your available cash is EUR.
+# Crypto TradeStation — v1.7.1 Adaptive Multi-Strategy Learning
 
 Android-only crypto trading bot focused on Kraken live trading, paper trading with live Kraken public market data, auto symbol discovery, rotation safety, editable advanced settings, and now a bounded persistent self-learning engine.
 

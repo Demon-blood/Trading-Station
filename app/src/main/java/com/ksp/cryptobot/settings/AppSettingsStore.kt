@@ -125,7 +125,7 @@ class AppSettingsStore(context: Context) {
             autoSymbolRefreshMinutes = prefs.getInt("auto_symbol_refresh_minutes", 240),
             autoTradeMultipleSymbolsPerScan = prefs.getBoolean("auto_trade_multiple_symbols_per_scan", true),
             maxSymbolsTradedPerScan = prefs.getInt("max_symbols_traded_per_scan", 6),
-            allowedQuoteAssetsCsv = prefs.getString("allowed_quote_assets_csv", "EUR,USD,USDT,USDC") ?: "EUR,USD,USDT,USDC",
+            allowedQuoteAssetsCsv = prefs.getString("allowed_quote_assets_csv", "EUR") ?: "EUR",
             maxNewTradesPerScan = prefs.getInt("max_new_trades_per_scan", 2),
             maxTradesPerHour = prefs.getInt("max_trades_per_hour", 3),
             maxSimultaneousLivePositions = prefs.getInt("max_simultaneous_live_positions", 3),
@@ -158,8 +158,41 @@ class AppSettingsStore(context: Context) {
             adaptiveStrategyPreferSymbolProfile = prefs.getBoolean("adaptive_strategy_prefer_symbol_profile", true),
             adaptiveStrategyAllowLiveLearning = prefs.getBoolean("adaptive_strategy_allow_live_learning", true),
             adaptiveStrategyAllowPaperLearning = prefs.getBoolean("adaptive_strategy_allow_paper_learning", true),
+            learnedHoldForProfitEnabled = prefs.getBoolean("learned_hold_for_profit_enabled", true),
+            learnedHoldMinSamples = prefs.getInt("learned_hold_min_samples", 8),
+            learnedHoldConfidenceThresholdPercent = prefs.getInt("learned_hold_confidence_threshold_percent", 60),
+            learnedHoldMinProfitPercent = prefs.getString("learned_hold_min_profit_percent", "0.80")!!.toBigDecimalOrNull() ?: BigDecimal("0.80"),
+            learnedHoldMaxExtraHoldMinutes = prefs.getInt("learned_hold_max_extra_hold_minutes", 180),
+            learnedHoldAllowTakeProfitDeferral = prefs.getBoolean("learned_hold_allow_take_profit_deferral", true),
+            learnedHoldAllowTrailingDeferral = prefs.getBoolean("learned_hold_allow_trailing_deferral", true),
+            learnedHoldAllowBearishOverride = prefs.getBoolean("learned_hold_allow_bearish_override", false),
+            spikeProfitTimingEnabled = prefs.getBoolean("spike_profit_timing_enabled", true),
+            spikeTimingLookbackCandles = prefs.getInt("spike_timing_lookback_candles", 240),
+            spikeTimingPatternHorizonCandles = prefs.getInt("spike_timing_pattern_horizon_candles", 36),
+            spikeTimingPullbackWindowCandles = prefs.getInt("spike_timing_pullback_window_candles", 12),
+            spikeTimingMinPatternSamples = prefs.getInt("spike_timing_min_pattern_samples", 3),
+            spikeTimingHistoricalSpikeThresholdPercent = prefs.getString("spike_timing_historical_spike_threshold_percent", "3.00")!!.toBigDecimalOrNull() ?: BigDecimal("3.00"),
+            spikeTimingMinProfitPercent = prefs.getString("spike_timing_min_profit_percent", "0.80")!!.toBigDecimalOrNull() ?: BigDecimal("0.80"),
+            spikeTimingHoldUntilProgressPercent = prefs.getString("spike_timing_hold_until_progress_percent", "70.00")!!.toBigDecimalOrNull() ?: BigDecimal("70.00"),
+            spikeTimingExhaustionProgressPercent = prefs.getString("spike_timing_exhaustion_progress_percent", "90.00")!!.toBigDecimalOrNull() ?: BigDecimal("90.00"),
+            spikeTimingHoldConfidenceThresholdPercent = prefs.getInt("spike_timing_hold_confidence_threshold_percent", 65),
+            spikeTimingSellConfidenceThresholdPercent = prefs.getInt("spike_timing_sell_confidence_threshold_percent", 70),
+            spikeTimingTrailingFlexMultiplier = prefs.getString("spike_timing_trailing_flex_multiplier", "1.15")!!.toBigDecimalOrNull() ?: BigDecimal("1.15"),
+            spikeTimingMinDynamicTrailPercent = prefs.getString("spike_timing_min_dynamic_trail_percent", "0.60")!!.toBigDecimalOrNull() ?: BigDecimal("0.60"),
+            spikeTimingMaxDynamicTrailPercent = prefs.getString("spike_timing_max_dynamic_trail_percent", "4.00")!!.toBigDecimalOrNull() ?: BigDecimal("4.00"),
             taxExportYear = prefs.getInt("tax_export_year", 2026)
         )
+    }
+
+
+    fun isOnboardingPending(): Boolean = prefs.getBoolean("onboarding_pending", true)
+
+    fun setOnboardingCompleted(completed: Boolean) {
+        prefs.edit().putBoolean("onboarding_pending", !completed).commit()
+    }
+
+    fun resetOnboarding() {
+        prefs.edit().putBoolean("onboarding_pending", true).commit()
     }
 
     fun save(settings: BotSettings) {
@@ -307,6 +340,28 @@ class AppSettingsStore(context: Context) {
             .putBoolean("adaptive_strategy_prefer_symbol_profile", settings.adaptiveStrategyPreferSymbolProfile)
             .putBoolean("adaptive_strategy_allow_live_learning", settings.adaptiveStrategyAllowLiveLearning)
             .putBoolean("adaptive_strategy_allow_paper_learning", settings.adaptiveStrategyAllowPaperLearning)
+            .putBoolean("learned_hold_for_profit_enabled", settings.learnedHoldForProfitEnabled)
+            .putInt("learned_hold_min_samples", settings.learnedHoldMinSamples)
+            .putInt("learned_hold_confidence_threshold_percent", settings.learnedHoldConfidenceThresholdPercent)
+            .putString("learned_hold_min_profit_percent", settings.learnedHoldMinProfitPercent.toPlainString())
+            .putInt("learned_hold_max_extra_hold_minutes", settings.learnedHoldMaxExtraHoldMinutes)
+            .putBoolean("learned_hold_allow_take_profit_deferral", settings.learnedHoldAllowTakeProfitDeferral)
+            .putBoolean("learned_hold_allow_trailing_deferral", settings.learnedHoldAllowTrailingDeferral)
+            .putBoolean("learned_hold_allow_bearish_override", settings.learnedHoldAllowBearishOverride)
+            .putBoolean("spike_profit_timing_enabled", settings.spikeProfitTimingEnabled)
+            .putInt("spike_timing_lookback_candles", settings.spikeTimingLookbackCandles)
+            .putInt("spike_timing_pattern_horizon_candles", settings.spikeTimingPatternHorizonCandles)
+            .putInt("spike_timing_pullback_window_candles", settings.spikeTimingPullbackWindowCandles)
+            .putInt("spike_timing_min_pattern_samples", settings.spikeTimingMinPatternSamples)
+            .putString("spike_timing_historical_spike_threshold_percent", settings.spikeTimingHistoricalSpikeThresholdPercent.toPlainString())
+            .putString("spike_timing_min_profit_percent", settings.spikeTimingMinProfitPercent.toPlainString())
+            .putString("spike_timing_hold_until_progress_percent", settings.spikeTimingHoldUntilProgressPercent.toPlainString())
+            .putString("spike_timing_exhaustion_progress_percent", settings.spikeTimingExhaustionProgressPercent.toPlainString())
+            .putInt("spike_timing_hold_confidence_threshold_percent", settings.spikeTimingHoldConfidenceThresholdPercent)
+            .putInt("spike_timing_sell_confidence_threshold_percent", settings.spikeTimingSellConfidenceThresholdPercent)
+            .putString("spike_timing_trailing_flex_multiplier", settings.spikeTimingTrailingFlexMultiplier.toPlainString())
+            .putString("spike_timing_min_dynamic_trail_percent", settings.spikeTimingMinDynamicTrailPercent.toPlainString())
+            .putString("spike_timing_max_dynamic_trail_percent", settings.spikeTimingMaxDynamicTrailPercent.toPlainString())
             .putInt("tax_export_year", settings.taxExportYear)
             .commit()
     }

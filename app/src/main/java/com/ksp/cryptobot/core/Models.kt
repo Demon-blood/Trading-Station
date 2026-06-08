@@ -152,7 +152,9 @@ data class BotSettings(
 
     // v1.6.2 rotation safety controls. These keep full-universe scanning from
     // opening too many positions or spending the wrong quote asset.
-    val allowedQuoteAssetsCsv: String = "EUR,USD,USDT,USDC",
+    // EUR is the default primary cash/quote balance for Belgian Kraken users.
+    // ALL still works as a wildcard, but EUR-only is safer unless you also hold USD/USDT/BTC/etc.
+    val allowedQuoteAssetsCsv: String = "EUR",
     val maxNewTradesPerScan: Int = 2,
     val maxTradesPerHour: Int = 3,
     val maxSimultaneousLivePositions: Int = 3,
@@ -193,6 +195,37 @@ data class BotSettings(
     val adaptiveStrategyAllowLiveLearning: Boolean = true,
     val adaptiveStrategyAllowPaperLearning: Boolean = true,
 
+    // v1.7.8 learned hold/profit continuation. This lets the bot learn when a
+    // symbol tends to keep running after normal TP/trailing conditions. It can
+    // defer profit-taking, but it never overrides hard stop-loss protection.
+    val learnedHoldForProfitEnabled: Boolean = true,
+    val learnedHoldMinSamples: Int = 8,
+    val learnedHoldConfidenceThresholdPercent: Int = 60,
+    val learnedHoldMinProfitPercent: BigDecimal = BigDecimal("0.80"),
+    val learnedHoldMaxExtraHoldMinutes: Int = 180,
+    val learnedHoldAllowTakeProfitDeferral: Boolean = true,
+    val learnedHoldAllowTrailingDeferral: Boolean = true,
+    val learnedHoldAllowBearishOverride: Boolean = false,
+
+    // v1.7.9 spike/profit-cycle timing. This analyzes historical candle spikes
+    // for the held symbol and can defer profit-taking when a move still looks
+    // early, or sell/lock profit when the run looks exhausted. It never claims
+    // to know the perfect top and never overrides hard stop-loss protection.
+    val spikeProfitTimingEnabled: Boolean = true,
+    val spikeTimingLookbackCandles: Int = 240,
+    val spikeTimingPatternHorizonCandles: Int = 36,
+    val spikeTimingPullbackWindowCandles: Int = 12,
+    val spikeTimingMinPatternSamples: Int = 3,
+    val spikeTimingHistoricalSpikeThresholdPercent: BigDecimal = BigDecimal("3.00"),
+    val spikeTimingMinProfitPercent: BigDecimal = BigDecimal("0.80"),
+    val spikeTimingHoldUntilProgressPercent: BigDecimal = BigDecimal("70.00"),
+    val spikeTimingExhaustionProgressPercent: BigDecimal = BigDecimal("90.00"),
+    val spikeTimingHoldConfidenceThresholdPercent: Int = 65,
+    val spikeTimingSellConfidenceThresholdPercent: Int = 70,
+    val spikeTimingTrailingFlexMultiplier: BigDecimal = BigDecimal("1.15"),
+    val spikeTimingMinDynamicTrailPercent: BigDecimal = BigDecimal("0.60"),
+    val spikeTimingMaxDynamicTrailPercent: BigDecimal = BigDecimal("4.00"),
+
     val taxExportYear: Int = 2026
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
@@ -202,6 +235,16 @@ data class BotSettings(
         .map { it.trim().uppercase() }
         .filter { it.isNotBlank() }
         .toSet()
+
+    fun allQuoteAssetsAllowed(): Boolean = allowedQuoteAssets()
+        .any { it == "ALL" || it == "*" || it == "ANY" }
+
+    fun isQuoteAssetAllowed(quoteAsset: String): Boolean {
+        val normalized = quoteAsset.trim().uppercase()
+        if (normalized.isBlank()) return false
+        val allowed = allowedQuoteAssets()
+        return allowed.any { it == "ALL" || it == "*" || it == "ANY" } || normalized in allowed
+    }
 }
 
 data class Recommendation(

@@ -257,7 +257,7 @@ class BotController(
                 val quoteSpendable = quoteFree
                     .subtract(quoteReserveAmount(settings, quoteFree))
                     .max(BigDecimal.ZERO)
-                val canBuyWithQuote = candidate.quoteAsset.uppercase() in settings.allowedQuoteAssets() && quoteSpendable >= BigDecimal("5.00")
+                val canBuyWithQuote = settings.isQuoteAssetAllowed(candidate.quoteAsset) && quoteSpendable >= BigDecimal("5.00")
                 val canSellHeldBase = candidate.lastPrice > BigDecimal.ZERO && baseFree.multiply(candidate.lastPrice) >= BigDecimal("5.00")
                 canBuyWithQuote || canSellHeldBase
             }
@@ -294,7 +294,7 @@ class BotController(
 
     private suspend fun discoverAutoSymbols(settings: BotSettings, exchange: CryptoExchangeClient): List<SymbolDiscoveryCandidate> {
         val quoteUniverse = settings.autoSymbolQuoteAsset.uppercase().ifBlank { "ALL" }
-        updateStatus("Auto symbol discovery started. provider=${settings.exchangeProvider}, quoteUniverse=$quoteUniverse, candidates=${settings.autoSymbolCandidateLimit}", "INFO")
+        updateStatus("Auto symbol discovery started. provider=${settings.exchangeProvider}, quoteUniverse=$quoteUniverse, candidates=${settings.autoSymbolCandidateLimit}, allowedQuotes=${settings.allowedQuoteAssetsCsv}. EUR is treated as the primary cash quote unless you enable more quotes.", "INFO")
         val raw = runCatching { exchange.discoverTradableSymbols(quoteUniverse, settings.autoSymbolCandidateLimit.coerceAtLeast(5)) }
             .onFailure { updateStatus("Auto symbol discovery failed: ${it.message}", "ERROR") }
             .getOrElse { emptyList() }
@@ -334,8 +334,8 @@ class BotController(
                     "BTC", "ETH" -> 2
                     else -> 0
                 }
-                val quoteAllowed = settings.autoSymbolQuoteAsset.equals("ALL", ignoreCase = true) || candidate.quoteAsset.uppercase() in settings.allowedQuoteAssets()
-                val quoteTradabilityPenalty = if (!quoteAllowed) -35 else if (candidate.quoteAsset.uppercase() != "EUR" && !settings.nonEurQuoteBuyEnabled) -4 else 0
+                val quoteAllowed = settings.isQuoteAssetAllowed(candidate.quoteAsset)
+                val quoteTradabilityPenalty = if (!quoteAllowed) -35 else if (candidate.quoteAsset.uppercase() != "EUR" && !settings.nonEurQuoteBuyEnabled) -8 else 0
                 val liquidityBlocked = settings.liquidityBlacklistEnabled && (spreadPercent > settings.autoSymbolMaxSpreadPercent || ticker.volume24h < settings.autoSymbolMinVolume24hEur)
                 val score = (50 + volumeScore + spreadScore + momentumScore + majorBoost + quoteBoost + quoteTradabilityPenalty).coerceIn(0, 100)
                 val enabled = candidate.tradable &&
@@ -405,14 +405,12 @@ class BotController(
         val pairInfo = runCatching { exchange.validateSymbol(ticker.symbol) }.getOrNull()
         val baseAsset = pairInfo?.baseAsset ?: baseAssetFromSymbol(ticker.symbol)
         val quoteAsset = pairInfo?.quoteAsset ?: quoteAssetFromSymbol(ticker.symbol)
-        val availableQuote = liveBalances[quoteAsset] ?: if (quoteAsset == "EUR") liveBalances["ZEUR"] else null
-        val availableBase = liveBalances[baseAsset]
-        val quoteReserve = quoteReserveAmount(settings, availableQuote ?: BigDecimal.ZERO)
+        val availableQuote = freeBalanceForAsset(liveBalances, quoteAsset)
+        val availableBase = freeBalanceForAsset(liveBalances, baseAsset)
+        val quoteReserve = quoteReserveAmount(settings, availableQuote)
         val quoteReservedThisScan = reservedByQuoteThisScan[quoteAsset] ?: BigDecimal.ZERO
-        val allowedQuotes = settings.allowedQuoteAssets()
-
-        if (side == OrderSide.BUY && quoteAsset !in allowedQuotes) {
-            updateStatus("Trade blocked: quote asset $quoteAsset is not enabled in Allowed Quote Assets (${settings.allowedQuoteAssetsCsv}). SELL remains available if you hold $baseAsset.", "WARN")
+        if (side == OrderSide.BUY && !settings.isQuoteAssetAllowed(quoteAsset)) {
+            updateStatus("Trade blocked: quote asset $quoteAsset is not enabled in Allowed Quote Assets (${settings.allowedQuoteAssetsCsv}). Kraken Belgian deposits are held as the EUR cash asset internally reported as ZEUR/EUR; set Allowed Quote Assets to EUR or enable non-EUR quotes only when you hold those quote balances. SELL remains available if you hold $baseAsset.", "WARN")
             return ExecutionAttemptResult(false)
         }
         if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) {
@@ -467,7 +465,7 @@ class BotController(
         }
 
         if (side == OrderSide.BUY) {
-            updateStatus("[${ticker.symbol}] Quote budget: base=$baseAsset, quote=$quoteAsset, freeQuote=${availableQuote?.stripTrailingZeros()?.toPlainString() ?: "unknown"}, reservedByBotThisScan=${quoteReservedThisScan.setScale(2, RoundingMode.DOWN)}, reserve=${quoteReserve.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotional.stripTrailingZeros().toPlainString()} $quoteAsset", "INFO")
+            updateStatus("[${ticker.symbol}] Quote budget: base=$baseAsset, quote=$quoteAsset, freeQuote=${availableQuote.stripTrailingZeros().toPlainString()}, reservedByBotThisScan=${quoteReservedThisScan.setScale(2, RoundingMode.DOWN)}, reserve=${quoteReserve.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotional.stripTrailingZeros().toPlainString()} $quoteAsset", "INFO")
             val heldBaseValue = (availableBase ?: BigDecimal.ZERO).multiply(price)
             if (quoteAsset != "EUR" && quoteAsset !in setOf("USD", "USDT", "USDC") && !settings.nonEurQuoteBuyEnabled) {
                 updateStatus("Trade blocked: ${ticker.symbol} uses quote asset $quoteAsset. The scanner analyzes it, but live BUY is disabled for non-fiat/non-stable quotes unless Non-EUR quote buys are enabled. SELL remains available when you hold $baseAsset.", "WARN")
@@ -477,7 +475,7 @@ class BotController(
                 if (heldBaseValue >= minimumOrderNotional) {
                     updateStatus("Trade blocked: BUY signal but free $quoteAsset is too low. You already have ${baseAsset}≈${heldBaseValue.setScale(2, RoundingMode.DOWN)} $quoteAsset available; the bot will wait for a SELL signal or you must add free $quoteAsset.", "WARN")
                 } else {
-                    updateStatus("Trade blocked: not enough free $quoteAsset to buy. API reports free $quoteAsset=${availableQuote?.stripTrailingZeros()?.toPlainString() ?: "unknown"}.", "WARN")
+                    updateStatus("Trade blocked: not enough free $quoteAsset to buy. API reports free $quoteAsset=${availableQuote.stripTrailingZeros().toPlainString()}.", "WARN")
                 }
                 return ExecutionAttemptResult(false)
             }
@@ -536,13 +534,26 @@ class BotController(
     }
 
     private fun freeBalanceForAsset(balances: Map<String, BigDecimal>, asset: String): BigDecimal {
-        val key = asset.uppercase()
-        return balances[key] ?: when (key) {
-            "EUR" -> balances["ZEUR"] ?: BigDecimal.ZERO
-            "BTC", "XBT" -> balances["XXBT"] ?: balances["XBT"] ?: BigDecimal.ZERO
-            "ETH" -> balances["XETH"] ?: BigDecimal.ZERO
-            else -> BigDecimal.ZERO
+        val key = asset.uppercase().trim()
+        if (key.isBlank()) return BigDecimal.ZERO
+
+        // Kraken can expose balances using funding/internal asset codes while trading pairs
+        // use human quote/base assets. For a Belgian SEPA top-up the spendable cash is EUR,
+        // but Kraken may report that balance as ZEUR. Treat these as the same cash bucket.
+        val aliases = when (key) {
+            "EUR", "ZEUR" -> listOf("EUR", "ZEUR")
+            "USD", "ZUSD" -> listOf("USD", "ZUSD")
+            "GBP", "ZGBP" -> listOf("GBP", "ZGBP")
+            "CHF", "ZCHF" -> listOf("CHF", "ZCHF")
+            "CAD", "ZCAD" -> listOf("CAD", "ZCAD")
+            "AUD", "ZAUD" -> listOf("AUD", "ZAUD")
+            "JPY", "ZJPY" -> listOf("JPY", "ZJPY")
+            "BTC", "XBT", "XXBT" -> listOf("BTC", "XBT", "XXBT")
+            "ETH", "XETH" -> listOf("ETH", "XETH")
+            else -> listOf(key, "X$key", "Z$key")
         }
+
+        return aliases.firstNotNullOfOrNull { balances[it] } ?: BigDecimal.ZERO
     }
 
     private fun quoteReserveAmount(settings: BotSettings, freeQuote: BigDecimal): BigDecimal {

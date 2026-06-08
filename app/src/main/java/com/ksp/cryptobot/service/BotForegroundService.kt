@@ -83,7 +83,7 @@ class BotForegroundService : Service() {
     }
 
     private fun notification(text: String): Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-        .setContentTitle("KSP Crypto Bot")
+        .setContentTitle("Crypto TradeStation")
         .setContentText(text.take(90))
         .setStyle(NotificationCompat.BigTextStyle().bigText(text))
         .setSmallIcon(android.R.drawable.stat_notify_sync)

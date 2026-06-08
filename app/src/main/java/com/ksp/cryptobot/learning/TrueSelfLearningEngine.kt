@@ -3,10 +3,13 @@ package com.ksp.cryptobot.learning
 import com.ksp.cryptobot.core.AiDecision
 import com.ksp.cryptobot.core.BotSettings
 import com.ksp.cryptobot.core.MarketTicker
+import com.ksp.cryptobot.core.OrderSide
+import com.ksp.cryptobot.core.PositionInfo
 import com.ksp.cryptobot.core.SignalAction
 import com.ksp.cryptobot.core.StrategyMode
 import com.ksp.cryptobot.data.AppDao
 import com.ksp.cryptobot.data.LearnedStrategyProfileEntity
+import com.ksp.cryptobot.data.LearnedHoldProfileEntity
 import com.ksp.cryptobot.data.LearnedSymbolProfileEntity
 import com.ksp.cryptobot.data.LearningFeatureSnapshotEntity
 import com.ksp.cryptobot.data.SelfLearningAuditEntity
@@ -30,7 +33,14 @@ class TrueSelfLearningEngine {
         val symbolProfiles: List<LearnedSymbolProfileEntity>,
         val strategyProfiles: List<LearnedStrategyProfileEntity>,
         val audit: List<SelfLearningAuditEntity>,
-        val summaryLine: String
+        val summaryLine: String,
+        val holdProfiles: List<LearnedHoldProfileEntity> = emptyList()
+    )
+
+    data class LearnedHoldExitDecision(
+        val shouldHold: Boolean,
+        val profile: LearnedHoldProfileEntity?,
+        val explanation: String
     )
 
     data class DecisionLearningResult(
@@ -73,11 +83,18 @@ class TrueSelfLearningEngine {
             buildStrategyProfile(strategy, rows, settings, now).also { profile -> dao.upsertLearnedStrategyProfile(profile) }
         }
 
+        val holdProfiles = trades.groupBy { it.symbol.uppercase() }.map { (symbol, rows) ->
+            buildHoldProfile(symbol, rows, settings, now).also { profile ->
+                dao.upsertLearnedHoldProfile(profile)
+                dao.insertSelfLearningAudit(SelfLearningAuditEntity(timestampEpochMs = now, eventType = "HOLD_PROFILE_UPDATE", symbol = symbol, message = profile.explanation))
+            }
+        }
+
         val audit = dao.selfLearningAudit(40)
         val liveCount = trades.count { !it.paper }
         val paperCount = trades.count { it.paper }
-        val summary = "Learning refreshed: symbols=${symbolProfiles.size}, strategies=${strategyProfiles.size}, trades=${trades.size}, live=$liveCount, paper=$paperCount. Min sample=${settings.selfLearningMinSamples}."
-        return LearningSummary(true, symbolProfiles.sortedByDescending { it.updatedAtEpochMs }, strategyProfiles, audit, summary)
+        val summary = "Learning refreshed: symbols=${symbolProfiles.size}, strategies=${strategyProfiles.size}, holdProfiles=${holdProfiles.size}, trades=${trades.size}, live=$liveCount, paper=$paperCount. Min sample=${settings.selfLearningMinSamples}."
+        return LearningSummary(true, symbolProfiles.sortedByDescending { it.updatedAtEpochMs }, strategyProfiles, audit, summary, holdProfiles.sortedByDescending { it.updatedAtEpochMs })
     }
 
     suspend fun adjustDecision(dao: AppDao, decision: AiDecision, ticker: MarketTicker, settings: BotSettings): DecisionLearningResult {
@@ -224,6 +241,50 @@ class TrueSelfLearningEngine {
         )
     }
 
+
+    suspend fun evaluateLearnedHoldExit(
+        dao: AppDao,
+        settings: BotSettings,
+        position: PositionInfo,
+        proposedExitReason: String,
+        decision: AiDecision?
+    ): LearnedHoldExitDecision {
+        if (!settings.trueSelfLearningEnabled || !settings.learnedHoldForProfitEnabled) {
+            return LearnedHoldExitDecision(false, null, "Learned hold disabled.")
+        }
+        val reason = proposedExitReason.lowercase()
+        if ("stop-loss" in reason || "risk-off" in reason || "emergency" in reason) {
+            return LearnedHoldExitDecision(false, null, "Learned hold will not override protective exits: $proposedExitReason.")
+        }
+        if ("bearish" in reason && !settings.learnedHoldAllowBearishOverride) {
+            return LearnedHoldExitDecision(false, null, "Learned hold will not override bearish AI exits unless explicitly enabled.")
+        }
+        if ("take-profit" in reason && !settings.learnedHoldAllowTakeProfitDeferral) {
+            return LearnedHoldExitDecision(false, null, "Take-profit deferral disabled.")
+        }
+        if ("trailing" in reason && !settings.learnedHoldAllowTrailingDeferral) {
+            return LearnedHoldExitDecision(false, null, "Trailing-exit deferral disabled.")
+        }
+        if (position.unrealizedPnlPercent < settings.learnedHoldMinProfitPercent) {
+            return LearnedHoldExitDecision(false, null, "Current profit ${position.unrealizedPnlPercent.setScale(2, RoundingMode.HALF_UP)}% is below learned-hold minimum ${settings.learnedHoldMinProfitPercent}%.")
+        }
+        val profile = dao.learnedHoldProfile(position.symbol.uppercase())
+            ?: return LearnedHoldExitDecision(false, null, "No learned hold profile for ${position.symbol} yet.")
+        if (profile.sampleSize < settings.learnedHoldMinSamples) {
+            return LearnedHoldExitDecision(false, profile, "Learned hold warm-up for ${position.symbol}: ${profile.sampleSize}/${settings.learnedHoldMinSamples} samples.")
+        }
+        val holdConfidence = profile.holdConfidencePercent
+        val continuation = profile.continuationWinRatePercent.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val strongCurrentDecision = (decision?.finalScore ?: 0) >= settings.minStrategyScoreToBuy
+        val shouldHold = holdConfidence >= settings.learnedHoldConfidenceThresholdPercent && continuation >= BigDecimal("55.00") && strongCurrentDecision
+        val explanation = if (shouldHold) {
+            "Learned hold ACTIVE for ${position.symbol}: confidence=${holdConfidence}%, continuationWin=${profile.continuationWinRatePercent}%, avgHold=${profile.averageHoldMinutes}m, currentPnL=${position.unrealizedPnlPercent.setScale(2, RoundingMode.HALF_UP)}%. Deferring exit '$proposedExitReason' to try to capture further upside."
+        } else {
+            "Learned hold not strong enough for ${position.symbol}: confidence=${holdConfidence}/${settings.learnedHoldConfidenceThresholdPercent}, continuationWin=${profile.continuationWinRatePercent}%, decisionScore=${decision?.finalScore ?: 0}."
+        }
+        return LearnedHoldExitDecision(shouldHold, profile, explanation)
+    }
+
     suspend fun recordDecisionSnapshot(
         dao: AppDao,
         settings: BotSettings,
@@ -267,12 +328,13 @@ class TrueSelfLearningEngine {
         val profiles = dao.learnedSymbolProfilesSnapshot()
         val strategies = dao.learnedStrategyProfilesSnapshot()
         val audit = dao.selfLearningAudit(30)
+        val holdProfiles = dao.learnedHoldProfilesSnapshot()
         val line = if (profiles.isEmpty()) {
             "No learned profiles yet. Run PAPER or LIVE trades until at least ${settings.selfLearningMinSamples} samples exist per symbol."
         } else {
             "Profiles=${profiles.size}. Best=${profiles.maxByOrNull { it.scoreAdjustment }?.symbol ?: "n/a"}, weakest=${profiles.minByOrNull { it.scoreAdjustment }?.symbol ?: "n/a"}."
         }
-        return LearningSummary(settings.trueSelfLearningEnabled, profiles, strategies, audit, line)
+        return LearningSummary(settings.trueSelfLearningEnabled, profiles, strategies, audit, line, holdProfiles)
     }
 
     private fun buildSymbolProfile(symbol: String, rows: List<TradeEntity>, settings: BotSettings, now: Long): LearnedSymbolProfileEntity {
@@ -333,6 +395,80 @@ class TrueSelfLearningEngine {
             preferredStrategy = preferred.name,
             disabledUntilEpochMs = disabledUntil,
             confidence = confidence.toPlainString(),
+            explanation = explanation
+        )
+    }
+
+
+    private fun buildHoldProfile(symbol: String, rows: List<TradeEntity>, settings: BotSettings, now: Long): LearnedHoldProfileEntity {
+        val sorted = rows.sortedBy { it.timestampEpochMs }
+        val paired = mutableListOf<Pair<TradeEntity, TradeEntity>>()
+        var openBuy: TradeEntity? = null
+        sorted.forEach { trade ->
+            when (trade.side.uppercase()) {
+                OrderSide.BUY.name -> if (openBuy == null) openBuy = trade
+                OrderSide.SELL.name -> {
+                    val buy = openBuy
+                    if (buy != null) {
+                        paired += buy to trade
+                        openBuy = null
+                    }
+                }
+            }
+        }
+        val pnls = paired.map { (buy, sell) ->
+            sell.realizedPnlEur.toBigDecimalOrNull()?.takeIf { it != BigDecimal.ZERO } ?: run {
+                val qty = sell.quantity.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                val sellPx = sell.priceEur.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                val buyPx = buy.priceEur.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                sellPx.subtract(buyPx).multiply(qty)
+            }
+        }
+        val holdMinutes = paired.map { (buy, sell) ->
+            ((sell.timestampEpochMs - buy.timestampEpochMs).coerceAtLeast(0L) / 60000L).toBigDecimal()
+        }
+        val wins = pnls.count { it > BigDecimal.ZERO }
+        val losses = pnls.count { it < BigDecimal.ZERO }
+        val net = pnls.fold(BigDecimal.ZERO, BigDecimal::add)
+        val avgPnl = if (pnls.isNotEmpty()) net.divide(BigDecimal(pnls.size), 6, RoundingMode.HALF_UP) else BigDecimal.ZERO
+        val avgHold = if (holdMinutes.isNotEmpty()) holdMinutes.fold(BigDecimal.ZERO, BigDecimal::add).divide(BigDecimal(holdMinutes.size), 2, RoundingMode.HALF_UP) else BigDecimal.ZERO
+        val continuationWin = if (paired.isNotEmpty()) BigDecimal(wins * 100).divide(BigDecimal(paired.size), 2, RoundingMode.HALF_UP) else BigDecimal.ZERO
+        val enough = paired.size >= settings.learnedHoldMinSamples
+        val confidence = if (!enough) {
+            (paired.size * 100 / settings.learnedHoldMinSamples.coerceAtLeast(1)).coerceIn(0, 99)
+        } else when {
+            continuationWin >= BigDecimal("68") && avgPnl > BigDecimal.ZERO -> 85
+            continuationWin >= BigDecimal("60") && avgPnl > BigDecimal.ZERO -> 70
+            continuationWin >= BigDecimal("55") && net > BigDecimal.ZERO -> 60
+            else -> 35
+        }
+        val holdMultiplier = when {
+            confidence >= 80 -> BigDecimal("1.50")
+            confidence >= 70 -> BigDecimal("1.25")
+            confidence >= 60 -> BigDecimal("1.10")
+            else -> BigDecimal.ONE
+        }
+        val deferTp = enough && confidence >= settings.learnedHoldConfidenceThresholdPercent && avgPnl > BigDecimal.ZERO
+        val deferTrail = deferTp && continuationWin >= BigDecimal("62")
+        val explanation = if (!enough) {
+            "Learned hold warm-up: $symbol has ${paired.size}/${settings.learnedHoldMinSamples} completed entry→exit samples. No hold deferral yet."
+        } else {
+            "Learned hold $symbol: samples=${paired.size}, continuationWin=$continuationWin%, avgHold=${avgHold}m, avgPnl=${avgPnl.setScale(4, RoundingMode.HALF_UP)}, confidence=$confidence%, hold×$holdMultiplier, deferTP=$deferTp, deferTrail=$deferTrail."
+        }
+        return LearnedHoldProfileEntity(
+            symbol = symbol,
+            updatedAtEpochMs = now,
+            sampleSize = paired.size,
+            profitableExits = wins,
+            losingExits = losses,
+            continuationWinRatePercent = continuationWin.toPlainString(),
+            averageHoldMinutes = avgHold.toPlainString(),
+            averagePnlEur = avgPnl.toPlainString(),
+            netPnlEur = net.toPlainString(),
+            holdConfidencePercent = confidence,
+            holdMultiplier = holdMultiplier.toPlainString(),
+            shouldDeferTakeProfit = deferTp,
+            shouldDeferTrailingExit = deferTrail,
             explanation = explanation
         )
     }
