@@ -86,3 +86,70 @@ data class TaxReportEntity(
     val realizedGainEur: String,
     val note: String
 )
+
+@Entity(tableName = "learning_feature_snapshots")
+data class LearningFeatureSnapshotEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestampEpochMs: Long,
+    val symbol: String,
+    val strategyMode: String,
+    val mode: String,
+    val action: String,
+    val finalScore: Int,
+    val technicalScore: Int,
+    val newsScore: Int,
+    val memoryScore: Int,
+    val spreadPercent: String,
+    val volume24h: String,
+    val priceChange24hPercent: String,
+    val allowedToTrade: Boolean,
+    val traded: Boolean,
+    val orderSide: String = "",
+    val orderType: String = "",
+    val notionalQuote: String = "0.00",
+    val reason: String = ""
+)
+
+@Entity(tableName = "learned_symbol_profiles")
+data class LearnedSymbolProfileEntity(
+    @PrimaryKey val symbol: String,
+    val updatedAtEpochMs: Long,
+    val sampleSize: Int,
+    val wins: Int,
+    val losses: Int,
+    val winRatePercent: String,
+    val profitFactor: String,
+    val averagePnlEur: String,
+    val netPnlEur: String,
+    val scoreAdjustment: Int,
+    val minScoreAdjustment: Int,
+    val positionMultiplier: String,
+    val cooldownMultiplier: String,
+    val preferredStrategy: String,
+    val disabledUntilEpochMs: Long,
+    val confidence: String,
+    val explanation: String
+)
+
+@Entity(tableName = "learned_strategy_profiles")
+data class LearnedStrategyProfileEntity(
+    @PrimaryKey val strategyKey: String,
+    val updatedAtEpochMs: Long,
+    val sampleSize: Int,
+    val wins: Int,
+    val losses: Int,
+    val winRatePercent: String,
+    val profitFactor: String,
+    val scoreAdjustment: Int,
+    val positionMultiplier: String,
+    val explanation: String
+)
+
+@Entity(tableName = "self_learning_audit")
+data class SelfLearningAuditEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestampEpochMs: Long,
+    val eventType: String,
+    val symbol: String,
+    val message: String
+)

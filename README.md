@@ -1,57 +1,34 @@
-# KSP Crypto AI — v1.6.4 Balance-Aware Rotation
+# KSP Crypto AI — v1.7.1 Adaptive Multi-Strategy Learning
 
-This is a truth-audited Kraken live build. It focuses on live Kraken trading, automatic symbol discovery, live portfolio/orders, diagnostics, and paper/manual modes. See `docs/live/FEATURE_COMPLETION_AUDIT.md` before assuming every advanced module is production-live.
+Android-only crypto trading bot focused on Kraken live trading, paper trading with live Kraken public market data, auto symbol discovery, rotation safety, editable advanced settings, and now a bounded persistent self-learning engine.
 
-This release is intentionally focused on **working live functionality** instead of exposing unfinished placeholder systems.
+## v1.7.1 highlights
 
-## Working modes
+- Persistent learned symbol profiles.
+- Persistent learned strategy profiles.
+- Learning feature snapshots for every scanned decision.
+- Score adjustment based on real/paper trade outcomes.
+- Position-size multiplier hints based on learned profitability.
+- Sample-size protection before strong adjustments are applied.
+- Self-learning audit trail.
+- New Self Learning tab.
+- Advanced Settings controls for self-learning limits.
 
-- **PAPER** — local simulated trading. No exchange order is sent.
-- **KRAKEN** — live Kraken spot trading through authenticated REST API calls.
-- **MANUAL** — signal/trade-plan mode where you place orders yourself.
-- **BINANCE_READ_ONLY** — market-data/signal mode only for Belgium restrictions.
+The self-learning engine does not bypass exchange, legal, API, balance, quote, reserve, cooldown, spread, market-order or risk guards. It only adjusts score/sizing hints inside bounded limits.
 
-Coinbase Advanced and Bitvavo code slots are kept in source for future development, but they are hidden from the main provider picker and are not presented as live-working connectors.
+## Build
 
-## Working live Kraken features
+Use GitHub Actions or run:
 
-- Secure local API-key storage through Android Keystore-backed encryption.
-- Kraken ticker and OHLC candles.
-- Kraken AssetPairs auto-discovery.
-- Symbol validation, minimum order size, price precision and quantity precision handling.
-- Live balance and portfolio reading.
-- Live open-order reading.
-- Manual cancel of open Kraken orders.
-- Limit orders.
-- Optional market orders with spread/slippage guard.
-- Automatic BUY and SELL decisions when enabled.
-- Free EUR check before buys.
-- Free base-asset check before sells.
-- Live status timeline explaining every block/attempt/failure.
-- Local trade/decision history.
-- Lifecycle/position snapshots from Kraken balances and order history.
+```bash
+gradle --no-daemon clean :app:assembleDebug
+```
 
-## Important limits
+## Safe testing order
 
-No trading bot can guarantee profit or sell at the maximum possible top. This app uses profit-lock, take-profit, stop-loss, trailing-exit, bearish-signal and risk guards, but market risk remains.
-
-Only use API keys with withdrawals disabled. Start with small sizes and inspect the Live Status tab before leaving the bot running.
-
-## v1.6.4 trade-unblock highlights
-
-- Kraken live trading remains the primary path.
-- Bitvavo REST live connector added.
-- Coinbase Advanced JWT connector added.
-- Kraken WebSocket ticker feed added.
-- Strategy optimizer, shadow comparison, remote notifier, watchdog, and Belgian tax CSV exporter added.
-- Impossible/refused items remain documented: no guaranteed profits, no regulatory bypass, no withdrawal automation.
-
-
-## v1.6.8 Paper Live Kraken Data
-
-- PAPER mode now uses Kraken public AssetPairs/Ticker/OHLC data for analysis and symbol discovery.
-- PAPER mode still uses a fake local wallet and never sends private Kraken orders.
-
-## v1.6.6 Paper Mode Fix
-
-The Android UI now includes an **Advanced Settings** tab. This exposes the controls that were previously internal only: AI score threshold, timeframe agreement, symbol rotation size, quote assets, max trades, reserve guards, spread guards, cooldowns, market-order controls, and quick configuration profiles.
+1. Build/install the APK.
+2. Select `PAPER` provider.
+3. Confirm Paper mode uses Kraken public data in Live Status.
+4. Run paper mode until enough completed trades exist.
+5. Open Self Learning tab and confirm profiles appear.
+6. Only then test small live Kraken trades.

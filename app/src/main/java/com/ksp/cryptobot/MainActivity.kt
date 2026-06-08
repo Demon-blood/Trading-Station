@@ -80,6 +80,7 @@ import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
+import com.ksp.cryptobot.learning.TrueSelfLearningEngine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import java.math.BigDecimal
@@ -169,6 +170,9 @@ class MainActivity : ComponentActivity() {
                         },
                         onRemoteCommand = { settings, command, callback ->
                             callback(controller.parseRemoteCommand(command, settings))
+                        },
+                        onLoadSelfLearning = { settings, callback ->
+                            lifecycleScope.launch { callback(controller.loadSelfLearningSummary(settings)) }
                         }
                     )
                 }
@@ -207,6 +211,7 @@ private enum class AppTab(val label: String) {
     ORDERS("Orders"),
     POSITIONS("Positions"),
     AUTONOMOUS("Autonomous"),
+    SELF_LEARNING("Self Learning"),
     PRO("Pro Systems"),
     PORTFOLIO("Portfolio"),
     NEWS("News Intel"),
@@ -232,7 +237,8 @@ private fun AdvancedBotApp(
     onValidateSymbols: (BotSettings) -> Unit,
     onDiscoverSymbols: (BotSettings, (List<SymbolDiscoveryCandidate>) -> Unit) -> Unit,
     onExportTax: (BotSettings, (TaxExportSummary) -> Unit) -> Unit,
-    onRemoteCommand: (BotSettings, String, (RemoteCommandResult) -> Unit) -> Unit
+    onRemoteCommand: (BotSettings, String, (RemoteCommandResult) -> Unit) -> Unit,
+    onLoadSelfLearning: (BotSettings, (TrueSelfLearningEngine.LearningSummary) -> Unit) -> Unit
 ) {
     var settings by remember { mutableStateOf(store.load()) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
@@ -247,6 +253,7 @@ private fun AdvancedBotApp(
     var taxExportSummary by remember { mutableStateOf<TaxExportSummary?>(null) }
     var remoteCommand by remember { mutableStateOf("/status") }
     var remoteResult by remember { mutableStateOf<RemoteCommandResult?>(null) }
+    var selfLearningSummary by remember { mutableStateOf<TrueSelfLearningEngine.LearningSummary?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -284,6 +291,13 @@ private fun AdvancedBotApp(
                 symbolCandidates = result
                 statusStore.write("Auto symbol scanner loaded. Candidates=${result.size}, enabled=${result.count { it.enabledForRotation }}")
                 status = "Symbol scanner loaded: ${result.count { it.enabledForRotation }} enabled"
+            }
+        }
+        if (currentTab == AppTab.SELF_LEARNING) {
+            onLoadSelfLearning(settings) { result ->
+                selfLearningSummary = result
+                statusStore.write("Self-learning dashboard loaded. ${result.summaryLine}")
+                status = "Self-learning loaded"
             }
         }
     }
@@ -432,6 +446,17 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
+                AppTab.SELF_LEARNING -> SelfLearningScreen(
+                    settings = settings,
+                    summary = selfLearningSummary,
+                    onRefresh = {
+                        onLoadSelfLearning(settings) { result ->
+                            selfLearningSummary = result
+                            statusStore.write("Self-learning manual refresh complete. ${result.summaryLine}")
+                            status = "Self-learning refreshed"
+                        }
+                    }
+                )
                 AppTab.PRO -> ProSystemsScreen(settings = settings)
                 AppTab.PORTFOLIO -> PortfolioScreen(
                     settings = settings,
@@ -534,7 +559,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.6.8 Paper Live Data", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.7.1 Adaptive Strategies", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1380,6 +1405,95 @@ private fun AutonomousScreen(
     }
 }
 
+
+@Composable
+private fun SelfLearningScreen(
+    settings: BotSettings,
+    summary: TrueSelfLearningEngine.LearningSummary?,
+    onRefresh: () -> Unit
+) {
+    val profiles = summary?.symbolProfiles.orEmpty()
+    val strategies = summary?.strategyProfiles.orEmpty()
+    val audit = summary?.audit.orEmpty()
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("v1.7 True Self-Learning", "Persistent symbol/strategy profiles that learn from paper and live trade outcomes.") }
+        item {
+            HeroCard(
+                title = if (settings.trueSelfLearningEnabled) "Self-Learning ON" else "Self-Learning OFF",
+                subtitle = summary?.summaryLine ?: "Press Refresh Learning to load persisted profiles and audit events.",
+                primaryButton = "Refresh Learning",
+                secondaryButton = "Min samples: ${settings.selfLearningMinSamples}",
+                onPrimary = onRefresh,
+                onSecondary = {}
+            )
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Profiles", profiles.size.toString(), "Learned symbols", Electric) }
+                item { MetricCard("Strategies", strategies.size.toString(), "Learned strategy keys", Mint) }
+                item { MetricCard("Max Boost", settings.selfLearningMaxScoreBoost.toString(), "Score cap", Amber) }
+                item { MetricCard("Max Penalty", settings.selfLearningMaxScorePenalty.toString(), "Risk cap", Danger) }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Learning Controls", "These settings bound the bot's adaptation so it cannot become uncontrolled.")
+                ToggleInfo("True self-learning", settings.trueSelfLearningEnabled)
+                ToggleInfo("Position-size learning", settings.selfLearningPositionSizingEnabled)
+                ToggleInfo("Auto-disable bad symbols", settings.selfLearningAutoDisableEnabled)
+                ToggleInfo("Paper/live separation", settings.selfLearningPaperAndLiveSeparated)
+                ToggleInfo("Explain every learned decision", settings.selfLearningExplainEveryDecision)
+                Text("Lookback: ${settings.selfLearningLookbackTrades} trades • Minimum samples: ${settings.selfLearningMinSamples} per symbol", color = Muted)
+            }
+        }
+        if (profiles.isEmpty()) {
+            item { WarningCard("No learned profiles yet. Run PAPER mode or live mode until enough completed trades exist. The engine will stay neutral until sample-size protection is satisfied.") }
+        } else {
+            item { SectionTitle("Learned Symbol Profiles", "Score adjustment, position multiplier and preferred strategy per symbol.") }
+            items(profiles.take(30)) { profile ->
+                GlassCard {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(profile.symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                            Text("samples=${profile.sampleSize} • wins=${profile.wins} • losses=${profile.losses}", color = Muted)
+                        }
+                        val adjColor = if (profile.scoreAdjustment >= 0) Mint else Danger
+                        StatusPill("${if (profile.scoreAdjustment >= 0) "+" else ""}${profile.scoreAdjustment}", adjColor)
+                    }
+                    Text("Win ${profile.winRatePercent}% • PF ${profile.profitFactor} • Net €${profile.netPnlEur} • Avg €${profile.averagePnlEur}", color = Muted)
+                    Text("Strategy=${profile.preferredStrategy} • size×${profile.positionMultiplier} • confidence=${profile.confidence}%", color = Muted)
+                    if (profile.disabledUntilEpochMs > System.currentTimeMillis()) Text("Temporarily disabled by learning guard until ${profile.disabledUntilEpochMs}", color = Danger)
+                    Text(profile.explanation, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (strategies.isNotEmpty()) {
+            item { SectionTitle("Learned Strategy Profiles", "Strategy-level performance memory.") }
+            items(strategies.take(12)) { strategy ->
+                GlassCard {
+                    Text(strategy.strategyKey, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("samples=${strategy.sampleSize} • win=${strategy.winRatePercent}% • PF=${strategy.profitFactor} • scoreAdj=${strategy.scoreAdjustment} • size×${strategy.positionMultiplier}", color = Muted)
+                    Text(strategy.explanation, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (audit.isNotEmpty()) {
+            item { SectionTitle("Learning Audit", "Recent profile updates and learning decisions.") }
+            items(audit.take(20)) { row ->
+                GlassCard {
+                    Text("${row.eventType} • ${row.symbol}", fontWeight = FontWeight.Bold)
+                    Text(row.message, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item { WarningCard("Self-learning changes scores and sizing hints only. It does not bypass exchange, balance, reserve, cooldown, spread, market-order or Belgian compliance guards.") }
+    }
+}
+
 @Composable
 private fun ProSystemsScreen(settings: BotSettings) {
     val pro = remember { ProAutomationSuite() }
@@ -1467,6 +1581,137 @@ private fun AdvancedSettingsScreen(
     var fallbackToLimit by remember(settings) { mutableStateOf(settings.fallbackToLimitWhenMarketBlocked) }
     var nonEurBuys by remember(settings) { mutableStateOf(settings.nonEurQuoteBuyEnabled) }
     var liquidityBlacklist by remember(settings) { mutableStateOf(settings.liquidityBlacklistEnabled) }
+    var autoDisableBadSymbols by remember(settings) { mutableStateOf(settings.autoDisableBadSymbolsEnabled) }
+    var trueSelfLearning by remember(settings) { mutableStateOf(settings.trueSelfLearningEnabled) }
+    var learningMinSamples by remember(settings) { mutableStateOf(settings.selfLearningMinSamples.toString()) }
+    var learningLookback by remember(settings) { mutableStateOf(settings.selfLearningLookbackTrades.toString()) }
+    var learningMaxBoost by remember(settings) { mutableStateOf(settings.selfLearningMaxScoreBoost.toString()) }
+    var learningMaxPenalty by remember(settings) { mutableStateOf(settings.selfLearningMaxScorePenalty.toString()) }
+    var learningPositionSizing by remember(settings) { mutableStateOf(settings.selfLearningPositionSizingEnabled) }
+    var learningAutoDisable by remember(settings) { mutableStateOf(settings.selfLearningAutoDisableEnabled) }
+
+    fun smallBalanceSettings(): BotSettings = settings.copy(
+        minStrategyScoreToBuy = 68,
+        minTrendAgreement = 2,
+        allowedQuoteAssetsCsv = "EUR",
+        autoSymbolCandidateLimit = 250,
+        autoSymbolActiveLimit = 15,
+        maxNewTradesPerScan = 1,
+        maxTradesPerHour = 3,
+        maxSimultaneousLivePositions = 3,
+        maxPositionEur = BigDecimal("5"),
+        minimumQuoteReserveAmount = BigDecimal("3"),
+        minimumQuoteReservePercent = BigDecimal("5"),
+        maxSpreadPercent = BigDecimal("0.50"),
+        marketOrderSlippageWarningPercent = BigDecimal("0.25"),
+        cooldownAfterBuyMinutes = 15,
+        cooldownAfterSellMinutes = 30,
+        cooldownAfterLossMinutes = 120,
+        autoSymbolDiscoveryEnabled = true,
+        autoTradeMultipleSymbolsPerScan = true,
+        enableMarketOrders = true,
+        fallbackToLimitWhenMarketBlocked = true,
+        nonEurQuoteBuyEnabled = false,
+        liquidityBlacklistEnabled = true,
+        autoDisableBadSymbolsEnabled = false,
+        trueSelfLearningEnabled = true,
+        selfLearningMinSamples = 10,
+        selfLearningPositionSizingEnabled = true,
+        selfLearningAutoDisableEnabled = true
+    )
+
+    fun balancedSettings(): BotSettings = settings.copy(
+        minStrategyScoreToBuy = 72,
+        minTrendAgreement = 2,
+        allowedQuoteAssetsCsv = "EUR,USD,USDT,USDC",
+        autoSymbolCandidateLimit = 250,
+        autoSymbolActiveLimit = 20,
+        maxNewTradesPerScan = 2,
+        maxTradesPerHour = 3,
+        maxSimultaneousLivePositions = 3,
+        maxPositionEur = BigDecimal("10"),
+        minimumQuoteReserveAmount = BigDecimal("10"),
+        minimumQuoteReservePercent = BigDecimal("20"),
+        maxSpreadPercent = BigDecimal("0.35"),
+        marketOrderSlippageWarningPercent = BigDecimal("0.25"),
+        cooldownAfterBuyMinutes = 15,
+        cooldownAfterSellMinutes = 30,
+        cooldownAfterLossMinutes = 120,
+        autoSymbolDiscoveryEnabled = true,
+        autoTradeMultipleSymbolsPerScan = true,
+        enableMarketOrders = true,
+        fallbackToLimitWhenMarketBlocked = true,
+        nonEurQuoteBuyEnabled = false,
+        liquidityBlacklistEnabled = true,
+        autoDisableBadSymbolsEnabled = false,
+        trueSelfLearningEnabled = true,
+        selfLearningMinSamples = 10,
+        selfLearningPositionSizingEnabled = true,
+        selfLearningAutoDisableEnabled = true
+    )
+
+    fun aggressiveSettings(): BotSettings = settings.copy(
+        minStrategyScoreToBuy = 63,
+        minTrendAgreement = 2,
+        allowedQuoteAssetsCsv = "ALL",
+        autoSymbolCandidateLimit = 350,
+        autoSymbolActiveLimit = 30,
+        maxNewTradesPerScan = 3,
+        maxTradesPerHour = 6,
+        maxSimultaneousLivePositions = 5,
+        maxPositionEur = BigDecimal("10"),
+        minimumQuoteReserveAmount = BigDecimal("2"),
+        minimumQuoteReservePercent = BigDecimal("3"),
+        maxSpreadPercent = BigDecimal("0.75"),
+        marketOrderSlippageWarningPercent = BigDecimal("0.35"),
+        cooldownAfterBuyMinutes = 5,
+        cooldownAfterSellMinutes = 10,
+        cooldownAfterLossMinutes = 60,
+        autoSymbolDiscoveryEnabled = true,
+        autoTradeMultipleSymbolsPerScan = true,
+        enableMarketOrders = true,
+        fallbackToLimitWhenMarketBlocked = true,
+        nonEurQuoteBuyEnabled = false,
+        liquidityBlacklistEnabled = true,
+        autoDisableBadSymbolsEnabled = false,
+        trueSelfLearningEnabled = true,
+        selfLearningMinSamples = 10,
+        selfLearningPositionSizingEnabled = true,
+        selfLearningAutoDisableEnabled = true
+    )
+
+    fun applyToFields(profile: BotSettings) {
+        minAiScore = profile.minStrategyScoreToBuy.toString()
+        timeframeAgreement = profile.minTrendAgreement.toString()
+        allowedQuotes = profile.allowedQuoteAssetsCsv
+        candidateLimit = profile.autoSymbolCandidateLimit.toString()
+        activeLimit = profile.autoSymbolActiveLimit.toString()
+        maxNewTrades = profile.maxNewTradesPerScan.toString()
+        maxTradesHour = profile.maxTradesPerHour.toString()
+        maxLivePositions = profile.maxSimultaneousLivePositions.toString()
+        maxPosition = profile.maxPositionEur.toPlainString()
+        minReserveAmount = profile.minimumQuoteReserveAmount.toPlainString()
+        minReservePercent = profile.minimumQuoteReservePercent.toPlainString()
+        maxLimitSpread = profile.maxSpreadPercent.toPlainString()
+        maxMarketSpread = profile.marketOrderSlippageWarningPercent.toPlainString()
+        buyCooldown = profile.cooldownAfterBuyMinutes.toString()
+        sellCooldown = profile.cooldownAfterSellMinutes.toString()
+        lossCooldown = profile.cooldownAfterLossMinutes.toString()
+        autoDiscovery = profile.autoSymbolDiscoveryEnabled
+        multiSymbol = profile.autoTradeMultipleSymbolsPerScan
+        marketOrders = profile.enableMarketOrders
+        fallbackToLimit = profile.fallbackToLimitWhenMarketBlocked
+        nonEurBuys = profile.nonEurQuoteBuyEnabled
+        liquidityBlacklist = profile.liquidityBlacklistEnabled
+        autoDisableBadSymbols = profile.autoDisableBadSymbolsEnabled
+        trueSelfLearning = profile.trueSelfLearningEnabled
+        learningMinSamples = profile.selfLearningMinSamples.toString()
+        learningLookback = profile.selfLearningLookbackTrades.toString()
+        learningMaxBoost = profile.selfLearningMaxScoreBoost.toString()
+        learningMaxPenalty = profile.selfLearningMaxScorePenalty.toString()
+        learningPositionSizing = profile.selfLearningPositionSizingEnabled
+        learningAutoDisable = profile.selfLearningAutoDisableEnabled
+    }
 
     fun editedSettings(): BotSettings = settings.copy(
         minStrategyScoreToBuy = minAiScore.toIntOrNull()?.coerceIn(1, 100) ?: settings.minStrategyScoreToBuy,
@@ -1490,7 +1735,15 @@ private fun AdvancedSettingsScreen(
         enableMarketOrders = marketOrders,
         fallbackToLimitWhenMarketBlocked = fallbackToLimit,
         nonEurQuoteBuyEnabled = nonEurBuys,
-        liquidityBlacklistEnabled = liquidityBlacklist
+        liquidityBlacklistEnabled = liquidityBlacklist,
+        autoDisableBadSymbolsEnabled = autoDisableBadSymbols,
+        trueSelfLearningEnabled = trueSelfLearning,
+        selfLearningMinSamples = learningMinSamples.toIntOrNull()?.coerceIn(3, 200) ?: settings.selfLearningMinSamples,
+        selfLearningLookbackTrades = learningLookback.toIntOrNull()?.coerceIn(20, 5000) ?: settings.selfLearningLookbackTrades,
+        selfLearningMaxScoreBoost = learningMaxBoost.toIntOrNull()?.coerceIn(0, 30) ?: settings.selfLearningMaxScoreBoost,
+        selfLearningMaxScorePenalty = learningMaxPenalty.toIntOrNull()?.coerceIn(0, 40) ?: settings.selfLearningMaxScorePenalty,
+        selfLearningPositionSizingEnabled = learningPositionSizing,
+        selfLearningAutoDisableEnabled = learningAutoDisable
     )
 
     LazyColumn(
@@ -1501,29 +1754,23 @@ private fun AdvancedSettingsScreen(
         item { SectionTitle("Advanced Editable Settings", "These are the controls that were previously hidden inside the bot logic. Save after changing values.") }
         item {
             GlassCard {
-                SectionTitle("Quick Profiles", "Use these to fill the fields, then press Save Advanced Settings.")
+                SectionTitle("Quick Profiles", "These apply and save immediately. You do not need to press Save after using a profile.")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     item { Button(onClick = {
-                        minAiScore = "68"; timeframeAgreement = "2"; allowedQuotes = "EUR"; candidateLimit = "250"; activeLimit = "15"
-                        maxNewTrades = "1"; maxTradesHour = "3"; maxLivePositions = "3"; maxPosition = "5"
-                        minReserveAmount = "3"; minReservePercent = "5"; maxLimitSpread = "0.50"; maxMarketSpread = "0.25"
-                        buyCooldown = "15"; sellCooldown = "30"; lossCooldown = "120"
-                        autoDiscovery = true; multiSymbol = true; marketOrders = true; fallbackToLimit = true; nonEurBuys = false; liquidityBlacklist = true
-                    }) { Text("Small Balance Active") } }
+                        val profile = smallBalanceSettings()
+                        applyToFields(profile)
+                        onApply(profile)
+                    }) { Text("Apply Small Balance") } }
                     item { OutlinedButton(onClick = {
-                        minAiScore = "72"; timeframeAgreement = "2"; allowedQuotes = "EUR,USD,USDT,USDC"; candidateLimit = "250"; activeLimit = "20"
-                        maxNewTrades = "2"; maxTradesHour = "3"; maxLivePositions = "3"; maxPosition = "10"
-                        minReserveAmount = "10"; minReservePercent = "20"; maxLimitSpread = "0.35"; maxMarketSpread = "0.25"
-                        buyCooldown = "15"; sellCooldown = "30"; lossCooldown = "120"
-                        autoDiscovery = true; multiSymbol = true; marketOrders = true; fallbackToLimit = true; nonEurBuys = false; liquidityBlacklist = true
-                    }) { Text("Balanced Safe") } }
+                        val profile = balancedSettings()
+                        applyToFields(profile)
+                        onApply(profile)
+                    }) { Text("Apply Balanced") } }
                     item { OutlinedButton(onClick = {
-                        minAiScore = "63"; timeframeAgreement = "2"; allowedQuotes = "ALL"; candidateLimit = "350"; activeLimit = "30"
-                        maxNewTrades = "3"; maxTradesHour = "6"; maxLivePositions = "5"; maxPosition = "10"
-                        minReserveAmount = "2"; minReservePercent = "3"; maxLimitSpread = "0.75"; maxMarketSpread = "0.35"
-                        buyCooldown = "5"; sellCooldown = "10"; lossCooldown = "60"
-                        autoDiscovery = true; multiSymbol = true; marketOrders = true; fallbackToLimit = true; nonEurBuys = false; liquidityBlacklist = true
-                    }) { Text("Aggressive") } }
+                        val profile = aggressiveSettings()
+                        applyToFields(profile)
+                        onApply(profile)
+                    }) { Text("Apply Aggressive") } }
                 }
             }
         }
@@ -1562,6 +1809,7 @@ private fun AdvancedSettingsScreen(
                 ToggleRow("Allow market orders", marketOrders) { marketOrders = it }
                 ToggleRow("Fallback to limit when market is unsafe", fallbackToLimit) { fallbackToLimit = it }
                 ToggleRow("Liquidity blacklist", liquidityBlacklist) { liquidityBlacklist = it }
+                ToggleRow("Auto-disable bad symbols", autoDisableBadSymbols) { autoDisableBadSymbols = it }
                 OutlinedTextField(value = maxMarketSpread, onValueChange = { maxMarketSpread = it }, label = { Text("Max market spread %") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = maxLimitSpread, onValueChange = { maxLimitSpread = it }, label = { Text("Max limit spread %") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = buyCooldown, onValueChange = { buyCooldown = it }, label = { Text("Buy cooldown minutes") }, modifier = Modifier.fillMaxWidth())
@@ -1570,8 +1818,20 @@ private fun AdvancedSettingsScreen(
             }
         }
         item {
+            GlassCard {
+                SectionTitle("True Self-Learning", "Persistent learning from completed PAPER and LIVE trades. Bounded score/sizing changes only.")
+                ToggleRow("Enable true self-learning", trueSelfLearning) { trueSelfLearning = it }
+                ToggleRow("Use learned position sizing", learningPositionSizing) { learningPositionSizing = it }
+                ToggleRow("Allow learned auto-disable", learningAutoDisable) { learningAutoDisable = it }
+                OutlinedTextField(value = learningMinSamples, onValueChange = { learningMinSamples = it }, label = { Text("Minimum samples per symbol") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = learningLookback, onValueChange = { learningLookback = it }, label = { Text("Learning lookback trades") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = learningMaxBoost, onValueChange = { learningMaxBoost = it }, label = { Text("Maximum score boost") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = learningMaxPenalty, onValueChange = { learningMaxPenalty = it }, label = { Text("Maximum score penalty") }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        item {
             Button(onClick = { onApply(editedSettings()) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Save Advanced Settings")
+                Text("Save Advanced Settings Now")
             }
         }
         item { WarningCard("Use EUR-only and small position sizes until the Live Status tab confirms that the bot has free quote balance and is submitting orders as expected.") }

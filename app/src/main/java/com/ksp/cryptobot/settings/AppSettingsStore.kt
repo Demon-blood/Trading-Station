@@ -105,7 +105,7 @@ class AppSettingsStore(context: Context) {
             bearishAutoSellScore = prefs.getInt("bearish_auto_sell_score", 45),
             autonomousStrategyPerSymbolEnabled = prefs.getBoolean("autonomous_strategy_per_symbol_enabled", true),
             selfOptimizationEnabled = prefs.getBoolean("self_optimization_enabled", true),
-            autoDisableBadSymbolsEnabled = prefs.getBoolean("auto_disable_bad_symbols_enabled", true),
+            autoDisableBadSymbolsEnabled = prefs.getBoolean("auto_disable_bad_symbols_enabled", false),
             shadowPaperComparisonEnabled = prefs.getBoolean("shadow_paper_comparison_enabled", true),
             tradeReplayEnabled = prefs.getBoolean("trade_replay_enabled", true),
             remoteCommandParserEnabled = prefs.getBoolean("remote_command_parser_enabled", true),
@@ -141,6 +141,23 @@ class AppSettingsStore(context: Context) {
             liveVerificationPanelEnabled = prefs.getBoolean("live_verification_panel_enabled", true),
             nonEurQuoteBuyEnabled = prefs.getBoolean("non_eur_quote_buy_enabled", false),
             maxNonEurQuoteSpendPercent = prefs.getString("max_non_eur_quote_spend_percent", "5.0")!!.toBigDecimalOrNull() ?: BigDecimal("5.0"),
+            trueSelfLearningEnabled = prefs.getBoolean("true_self_learning_enabled", true),
+            selfLearningMinSamples = prefs.getInt("self_learning_min_samples", 10),
+            selfLearningLookbackTrades = prefs.getInt("self_learning_lookback_trades", 500),
+            selfLearningMaxScoreBoost = prefs.getInt("self_learning_max_score_boost", 10),
+            selfLearningMaxScorePenalty = prefs.getInt("self_learning_max_score_penalty", 15),
+            selfLearningPositionSizingEnabled = prefs.getBoolean("self_learning_position_sizing_enabled", true),
+            selfLearningAutoDisableEnabled = prefs.getBoolean("self_learning_auto_disable_enabled", true),
+            selfLearningPaperAndLiveSeparated = prefs.getBoolean("self_learning_paper_and_live_separated", true),
+            selfLearningExplainEveryDecision = prefs.getBoolean("self_learning_explain_every_decision", true),
+            adaptiveStrategyLearningEnabled = prefs.getBoolean("adaptive_strategy_learning_enabled", true),
+            adaptiveStrategyMinSamples = prefs.getInt("adaptive_strategy_min_samples", 8),
+            adaptiveStrategySwitchConfidencePercent = prefs.getInt("adaptive_strategy_switch_confidence_percent", 55),
+            adaptiveStrategyMaxScoreBoost = prefs.getInt("adaptive_strategy_max_score_boost", 12),
+            adaptiveStrategyMaxScorePenalty = prefs.getInt("adaptive_strategy_max_score_penalty", 16),
+            adaptiveStrategyPreferSymbolProfile = prefs.getBoolean("adaptive_strategy_prefer_symbol_profile", true),
+            adaptiveStrategyAllowLiveLearning = prefs.getBoolean("adaptive_strategy_allow_live_learning", true),
+            adaptiveStrategyAllowPaperLearning = prefs.getBoolean("adaptive_strategy_allow_paper_learning", true),
             taxExportYear = prefs.getInt("tax_export_year", 2026)
         )
     }
@@ -273,8 +290,25 @@ class AppSettingsStore(context: Context) {
             .putBoolean("live_verification_panel_enabled", settings.liveVerificationPanelEnabled)
             .putBoolean("non_eur_quote_buy_enabled", settings.nonEurQuoteBuyEnabled)
             .putString("max_non_eur_quote_spend_percent", settings.maxNonEurQuoteSpendPercent.toPlainString())
+            .putBoolean("true_self_learning_enabled", settings.trueSelfLearningEnabled)
+            .putInt("self_learning_min_samples", settings.selfLearningMinSamples)
+            .putInt("self_learning_lookback_trades", settings.selfLearningLookbackTrades)
+            .putInt("self_learning_max_score_boost", settings.selfLearningMaxScoreBoost)
+            .putInt("self_learning_max_score_penalty", settings.selfLearningMaxScorePenalty)
+            .putBoolean("self_learning_position_sizing_enabled", settings.selfLearningPositionSizingEnabled)
+            .putBoolean("self_learning_auto_disable_enabled", settings.selfLearningAutoDisableEnabled)
+            .putBoolean("self_learning_paper_and_live_separated", settings.selfLearningPaperAndLiveSeparated)
+            .putBoolean("self_learning_explain_every_decision", settings.selfLearningExplainEveryDecision)
+            .putBoolean("adaptive_strategy_learning_enabled", settings.adaptiveStrategyLearningEnabled)
+            .putInt("adaptive_strategy_min_samples", settings.adaptiveStrategyMinSamples)
+            .putInt("adaptive_strategy_switch_confidence_percent", settings.adaptiveStrategySwitchConfidencePercent)
+            .putInt("adaptive_strategy_max_score_boost", settings.adaptiveStrategyMaxScoreBoost)
+            .putInt("adaptive_strategy_max_score_penalty", settings.adaptiveStrategyMaxScorePenalty)
+            .putBoolean("adaptive_strategy_prefer_symbol_profile", settings.adaptiveStrategyPreferSymbolProfile)
+            .putBoolean("adaptive_strategy_allow_live_learning", settings.adaptiveStrategyAllowLiveLearning)
+            .putBoolean("adaptive_strategy_allow_paper_learning", settings.adaptiveStrategyAllowPaperLearning)
             .putInt("tax_export_year", settings.taxExportYear)
-            .apply()
+            .commit()
     }
 
     fun saveBinanceKeys(apiKey: String, secretKey: String) {

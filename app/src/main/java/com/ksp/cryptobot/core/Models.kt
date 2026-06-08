@@ -125,7 +125,7 @@ data class BotSettings(
     // keeping all live orders behind the existing exchange, balance and risk guards.
     val autonomousStrategyPerSymbolEnabled: Boolean = true,
     val selfOptimizationEnabled: Boolean = true,
-    val autoDisableBadSymbolsEnabled: Boolean = true,
+    val autoDisableBadSymbolsEnabled: Boolean = false,
     val shadowPaperComparisonEnabled: Boolean = true,
     val tradeReplayEnabled: Boolean = true,
     val remoteCommandParserEnabled: Boolean = true,
@@ -169,6 +169,30 @@ data class BotSettings(
 
     val nonEurQuoteBuyEnabled: Boolean = false,
     val maxNonEurQuoteSpendPercent: BigDecimal = BigDecimal("5.0"),
+
+    // v1.7 true self-learning. These settings make learning persistent, bounded and explainable.
+    val trueSelfLearningEnabled: Boolean = true,
+    val selfLearningMinSamples: Int = 10,
+    val selfLearningLookbackTrades: Int = 500,
+    val selfLearningMaxScoreBoost: Int = 10,
+    val selfLearningMaxScorePenalty: Int = 15,
+    val selfLearningPositionSizingEnabled: Boolean = true,
+    val selfLearningAutoDisableEnabled: Boolean = true,
+    val selfLearningPaperAndLiveSeparated: Boolean = true,
+    val selfLearningExplainEveryDecision: Boolean = true,
+
+    // v1.7.1 adaptive multi-strategy learning. When enabled, the bot can learn
+    // which strategy performs best per symbol and market context, then use that
+    // strategy automatically instead of always relying on the static global mode.
+    val adaptiveStrategyLearningEnabled: Boolean = true,
+    val adaptiveStrategyMinSamples: Int = 8,
+    val adaptiveStrategySwitchConfidencePercent: Int = 55,
+    val adaptiveStrategyMaxScoreBoost: Int = 12,
+    val adaptiveStrategyMaxScorePenalty: Int = 16,
+    val adaptiveStrategyPreferSymbolProfile: Boolean = true,
+    val adaptiveStrategyAllowLiveLearning: Boolean = true,
+    val adaptiveStrategyAllowPaperLearning: Boolean = true,
+
     val taxExportYear: Int = 2026
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }

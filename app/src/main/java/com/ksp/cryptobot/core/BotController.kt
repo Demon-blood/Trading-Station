@@ -25,6 +25,7 @@ import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.autonomous.AutonomousIntelligencePack
 import com.ksp.cryptobot.completion.LiveVerificationEngine
 import com.ksp.cryptobot.completion.LiveVerificationResult
+import com.ksp.cryptobot.learning.TrueSelfLearningEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.math.BigDecimal
@@ -48,6 +49,7 @@ class BotController(
     private val proAutomationSuite = ProAutomationSuite(appContext)
     private val autonomousPack = AutonomousIntelligencePack(appContext)
     private val liveVerificationEngine = LiveVerificationEngine()
+    private val selfLearningEngine = TrueSelfLearningEngine()
     private val _status = MutableStateFlow("Stopped")
     val status: StateFlow<String> = _status
 
@@ -105,7 +107,14 @@ class BotController(
         val reservedByQuoteThisScan = mutableMapOf<String, BigDecimal>()
         var submittedOrdersThisScan = 0
         val newsClient = createNewsClient(settings)
-        val recentTrades = dao.recentTradesSnapshot(100)
+        val recentTrades = dao.recentTradesSnapshot(settings.selfLearningLookbackTrades.coerceAtLeast(100))
+        if (settings.trueSelfLearningEnabled) {
+            val learningSummary = selfLearningEngine.refreshFromTradeHistory(dao, settings)
+            updateStatus("Self-learning refresh: ${learningSummary.summaryLine}", "INFO")
+            learningSummary.symbolProfiles.take(8).forEach { profile ->
+                updateStatus("Learned profile ${profile.symbol}: samples=${profile.sampleSize}, win=${profile.winRatePercent}%, pf=${profile.profitFactor}, scoreAdj=${profile.scoreAdjustment}, size×${profile.positionMultiplier}. ${profile.explanation.take(140)}", if (profile.scoreAdjustment < 0) "WARN" else "INFO")
+            }
+        }
         val configuredSymbols = selectSymbolUniverse(settings, exchange, liveBalances)
         val symbols = configuredSymbols.mapNotNull { rawSymbol ->
             val autonomousAssessment = autonomousPack.assessSymbol(rawSymbol, recentTrades, settings)
@@ -147,7 +156,15 @@ class BotController(
                 val news = newsClient.latestCryptoNews(symbol)
                 val baseDecision = aiDecisionEngine.decide(rec, news, recentTrades, settings)
                 val riskState = advancedRiskManager.riskState(settings)
-                val autoDecision = advancedAutomationEngine.decide(ticker, candlesByTimeframe, news, recentTrades, settings, riskState)
+                val adaptiveStrategy = selfLearningEngine.selectAdaptiveStrategyMode(dao, symbol, settings.strategyMode, settings)
+                val strategySettings = if (settings.strategyMode == StrategyMode.AUTO && adaptiveStrategy.selectedStrategy != StrategyMode.AUTO) {
+                    settings.copy(strategyMode = adaptiveStrategy.selectedStrategy)
+                } else settings
+                updateStatus("[$symbol] Adaptive strategy selector: selected=${adaptiveStrategy.selectedStrategy}, source=${adaptiveStrategy.source}, confidence=${adaptiveStrategy.confidencePercent}%, scoreAdj=${adaptiveStrategy.scoreAdjustment}. ${adaptiveStrategy.explanation.take(180)}", "INFO")
+                val baseAutoDecision = advancedAutomationEngine.decide(ticker, candlesByTimeframe, news, recentTrades, strategySettings, riskState)
+                val adaptiveAutomation = selfLearningEngine.adaptAutomationDecision(dao, baseAutoDecision, ticker, strategySettings, adaptiveStrategy)
+                val autoDecision = adaptiveAutomation.decision
+                updateStatus("[$symbol] ${adaptiveAutomation.explanation.take(220)}", "INFO")
                 val rawDecision = baseDecision.copy(
                     finalAction = autoDecision.finalAction,
                     finalScore = autoDecision.finalScore,
@@ -157,7 +174,10 @@ class BotController(
                     explanation = autoDecision.explanation
                 )
                 val autonomousAssessment = autonomousPack.assessSymbol(symbol, recentTrades, settings)
-                val decision = autonomousPack.enrichDecision(rawDecision, ticker, settings, autonomousAssessment)
+                val autonomousDecision = autonomousPack.enrichDecision(rawDecision, ticker, settings, autonomousAssessment)
+                val learningResult = selfLearningEngine.adjustDecision(dao, autonomousDecision, ticker, settings)
+                val decision = learningResult.decision
+                if (settings.trueSelfLearningEnabled) updateStatus("[$symbol] ${learningResult.explanation.take(220)}", "INFO")
                 val replay = autonomousPack.buildTradeReplay(decision, ticker, settings)
                 val netCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
                 val whyLine = proAutomationSuite.explainTrade(ticker, decision, symbolRank, netCheck)
@@ -165,6 +185,7 @@ class BotController(
                 updateStatus("[$symbol] Decision=${decision.finalAction}, score=${decision.finalScore}, allowed=${decision.allowedToTrade}. ${decision.explanation.take(180)}")
                 updateStatus("[$symbol] Why/edge: ${whyLine.take(240)}", if (netCheck.allowed) "INFO" else "WARN")
                 if (settings.tradeReplayEnabled) updateStatus("[$symbol] Trade replay snapshot: ${replay.mirrorExitComparison}", "INFO")
+                var tradedThisSymbol = false
                 if (execute) {
                     if (settings.autoTradeMultipleSymbolsPerScan && submittedOrdersThisScan >= settings.maxNewTradesPerScan.coerceAtLeast(1)) {
                         updateStatus("[$symbol] Execution skipped: max new trades per scan reached (${submittedOrdersThisScan}/${settings.maxNewTradesPerScan}). Signal saved only.", "WARN")
@@ -174,6 +195,7 @@ class BotController(
                         val result = executeDecisionIfAllowed(settings, exchange, ticker, decision, liveBalances, reservedByQuoteThisScan.toMap())
                         if (result.submitted) {
                             submittedOrdersThisScan += 1
+                            tradedThisSymbol = true
                         }
                         if (result.reservedAmount > BigDecimal.ZERO) {
                             val current = reservedByQuoteThisScan[result.quoteAsset] ?: BigDecimal.ZERO
@@ -182,6 +204,7 @@ class BotController(
                         }
                     }
                 }
+                selfLearningEngine.recordDecisionSnapshot(dao, settings, ticker, decision, tradedThisSymbol, strategyMode = autoDecision.selectedStrategy)
                 decision
             }.getOrElse { error ->
                 updateStatus("[$symbol] Scan failed: ${error.message}", "ERROR")
@@ -584,6 +607,12 @@ class BotController(
         val trades = dao.allTradesSnapshot()
         val summary = autonomousPack.exportBelgianTaxCsv(settings.taxExportYear, rows, trades)
         updateStatus("Belgian tax export ready: rows=${summary.rowCount}, realized≈€${summary.realizedGainEur.setScale(2, RoundingMode.HALF_UP)}", "INFO")
+        return summary
+    }
+
+    suspend fun loadSelfLearningSummary(settings: BotSettings = settingsStore.load()): TrueSelfLearningEngine.LearningSummary {
+        val summary = selfLearningEngine.dashboard(dao, settings)
+        updateStatus("Self-learning dashboard loaded: ${summary.summaryLine}", "INFO")
         return summary
     }
 

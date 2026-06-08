@@ -14,6 +14,10 @@ interface AppDao {
     @Insert suspend fun insertTaxLot(lot: TaxLotEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPosition(position: PositionEntity)
     @Insert suspend fun insertTaxReportRow(row: TaxReportEntity)
+    @Insert suspend fun insertLearningFeatureSnapshot(snapshot: LearningFeatureSnapshotEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLearnedSymbolProfile(profile: LearnedSymbolProfileEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLearnedStrategyProfile(profile: LearnedStrategyProfileEntity)
+    @Insert suspend fun insertSelfLearningAudit(row: SelfLearningAuditEntity)
 
     @Query("SELECT * FROM trades ORDER BY timestampEpochMs DESC LIMIT 100")
     fun recentTrades(): Flow<List<TradeEntity>>
@@ -53,4 +57,19 @@ interface AppDao {
 
     @Query("SELECT * FROM trades ORDER BY timestampEpochMs DESC")
     suspend fun allTradesSnapshot(): List<TradeEntity>
+
+    @Query("SELECT * FROM learned_symbol_profiles WHERE symbol = :symbol LIMIT 1")
+    suspend fun learnedSymbolProfile(symbol: String): LearnedSymbolProfileEntity?
+
+    @Query("SELECT * FROM learned_symbol_profiles ORDER BY updatedAtEpochMs DESC")
+    suspend fun learnedSymbolProfilesSnapshot(): List<LearnedSymbolProfileEntity>
+
+    @Query("SELECT * FROM learned_strategy_profiles ORDER BY updatedAtEpochMs DESC")
+    suspend fun learnedStrategyProfilesSnapshot(): List<LearnedStrategyProfileEntity>
+
+    @Query("SELECT * FROM learning_feature_snapshots ORDER BY timestampEpochMs DESC LIMIT :limit")
+    suspend fun learningFeatureSnapshots(limit: Int = 200): List<LearningFeatureSnapshotEntity>
+
+    @Query("SELECT * FROM self_learning_audit ORDER BY timestampEpochMs DESC LIMIT :limit")
+    suspend fun selfLearningAudit(limit: Int = 100): List<SelfLearningAuditEntity>
 }
