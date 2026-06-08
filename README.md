@@ -32,3 +32,8 @@ gradle --no-daemon clean :app:assembleDebug
 4. Run paper mode until enough completed trades exist.
 5. Open Self Learning tab and confirm profiles appear.
 6. Only then test small live Kraken trades.
+
+
+## v1.7.3 GitHub Actions SDK fix
+
+This build removes android-actions/setup-android@v3 from the workflows and uses the preinstalled Android SDK/sdmanager directly. It installs only platform-tools, Android 35 platform, and build-tools 35.0.0, avoiding the failing Android Emulator package download.
