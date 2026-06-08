@@ -61,17 +61,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.animation.core.animateFloatAsState
-
-import androidx.compose.animation.core.tween
-
-import androidx.compose.foundation.Image
-
-import androidx.compose.ui.draw.alpha
-
-import androidx.compose.ui.draw.scale
-
-import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.lifecycleScope
 import com.ksp.cryptobot.core.AiDecision
 import com.ksp.cryptobot.core.BotController
@@ -327,32 +316,7 @@ private fun AdvancedBotApp(
         status = "Settings saved"
     }
 
-    var showSplash by remember { mutableStateOf(true) }
-    var showOnboarding by remember { mutableStateOf(store.isOnboardingPending()) }
-
-    LaunchedEffect(Unit) {
-        delay(1400L)
-        showSplash = false
-    }
-
-    if (showSplash) {
-        PremiumSplashScreen()
-    } else if (showOnboarding) {
-        OnboardingScreen(
-            onGetStarted = {
-                store.setOnboardingCompleted(true)
-                showOnboarding = false
-                currentTab = AppTab.DASHBOARD
-                status = "Welcome to Crypto TradeStation"
-            },
-            onOpenSettings = {
-                store.setOnboardingCompleted(true)
-                showOnboarding = false
-                currentTab = AppTab.SETTINGS
-                status = "Open Settings to connect Kraken or start in PAPER mode"
-            }
-        )
-    } else Box(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
@@ -595,7 +559,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.8.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.8.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -2194,103 +2158,3 @@ private fun sampleDecisions(): List<AiDecision> = listOf(
         explanation = "Signal quality is acceptable for a small position under the current risk cap."
     )
 )
-
-
-@Composable
-private fun PremiumSplashScreen() {
-    var reveal by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { reveal = true }
-    val alpha by animateFloatAsState(if (reveal) 1f else 0f, animationSpec = tween(900), label = "splashAlpha")
-    val scale by animateFloatAsState(if (reveal) 1f else 0.84f, animationSpec = tween(900), label = "splashScale")
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF081326), Color(0xFF0A1730), Color(0xFF050A14)))),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                contentDescription = "Crypto TradeStation",
-                modifier = Modifier
-                    .size(160.dp)
-                    .alpha(alpha)
-                    .scale(scale)
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Text("Crypto TradeStation", color = TextPrimary, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Adaptive crypto trading and market intelligence", color = Muted)
-            Spacer(modifier = Modifier.height(28.dp))
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp))
-        }
-    }
-}
-
-@Composable
-private fun OnboardingScreen(
-    onGetStarted: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF081326), Color(0xFF0B1428), Color(0xFF070A12))))
-    ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-                Image(
-                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                    contentDescription = "Crypto TradeStation",
-                    modifier = Modifier.size(120.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Welcome to Crypto TradeStation", color = TextPrimary, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("A cleaner way to run paper trading, live Kraken automation, symbol discovery, and self-learning strategies.", color = Muted)
-            }
-            item {
-                FeatureCard("Live & Paper Trading", "Switch between live Kraken execution and a fully simulated paper wallet using Kraken public data.")
-            }
-            item {
-                FeatureCard("Adaptive Intelligence", "Use self-learning, adaptive multi-strategy selection, spike timing, and learned hold behavior.")
-            }
-            item {
-                FeatureCard("Safer Setup", "Use EUR as your main quote balance, control risk, and inspect Live Status before enabling live orders.")
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ElevatedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f), colors = ButtonDefaults.elevatedButtonColors(containerColor = PanelAlt)) {
-                        Text("Open Settings")
-                    }
-                    Button(onClick = onGetStarted, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
-                        Text("Get Started")
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Tip: Start in PAPER mode first, let the bot learn, then move to live trading with small amounts.", color = Muted)
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun FeatureCard(title: String, body: String) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Panel),
-        border = BorderStroke(1.dp, Stroke),
-        shape = RoundedCornerShape(22.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
-            Text(title, color = TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(body, color = Muted)
-        }
-    }
-}

@@ -2,14 +2,8 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/launcher_background" />
     <item>
-        <inset
-            android:insetLeft="72dp"
-            android:insetTop="180dp"
-            android:insetRight="72dp"
-            android:insetBottom="180dp">
-            <bitmap
-                android:gravity="center"
-                android:src="@drawable/ic_launcher_foreground" />
-        </inset>
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/ic_launcher_foreground" />
     </item>
 </layer-list>

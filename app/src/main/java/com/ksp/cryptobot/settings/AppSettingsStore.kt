@@ -184,17 +184,6 @@ class AppSettingsStore(context: Context) {
         )
     }
 
-
-    fun isOnboardingPending(): Boolean = prefs.getBoolean("onboarding_pending", true)
-
-    fun setOnboardingCompleted(completed: Boolean) {
-        prefs.edit().putBoolean("onboarding_pending", !completed).commit()
-    }
-
-    fun resetOnboarding() {
-        prefs.edit().putBoolean("onboarding_pending", true).commit()
-    }
-
     fun save(settings: BotSettings) {
         prefs.edit()
             .putString("mode", settings.mode.name)
