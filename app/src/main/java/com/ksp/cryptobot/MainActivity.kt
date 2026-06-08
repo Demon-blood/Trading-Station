@@ -559,7 +559,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.7.1 Adaptive Strategies", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.7.4 Learning Tab Fix", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -580,12 +580,19 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
             AppTab.BOT,
             AppTab.SYMBOLS,
             AppTab.AI,
+            AppTab.SELF_LEARNING,
             AppTab.STRATEGY,
+            AppTab.AUTONOMOUS,
+            AppTab.PRO,
             AppTab.ORDERS,
             AppTab.POSITIONS,
             AppTab.PORTFOLIO,
             AppTab.TAX,
             AppTab.RISK,
+            AppTab.BACKTEST,
+            AppTab.REGIME,
+            AppTab.NEWS,
+            AppTab.HISTORY,
             AppTab.ADVANCED_SETTINGS,
             AppTab.SETTINGS
         )
