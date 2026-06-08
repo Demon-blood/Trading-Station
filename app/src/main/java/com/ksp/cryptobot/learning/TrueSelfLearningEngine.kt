@@ -230,6 +230,7 @@ class TrueSelfLearningEngine {
         ticker: MarketTicker,
         decision: AiDecision,
         traded: Boolean,
+        strategyMode: StrategyMode = settings.strategyMode,
         orderSide: String = "",
         orderType: String = "",
         notionalQuote: BigDecimal = BigDecimal.ZERO
