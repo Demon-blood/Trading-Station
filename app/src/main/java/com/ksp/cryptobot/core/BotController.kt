@@ -26,6 +26,7 @@ import com.ksp.cryptobot.autonomous.AutonomousIntelligencePack
 import com.ksp.cryptobot.completion.LiveVerificationEngine
 import com.ksp.cryptobot.completion.LiveVerificationResult
 import com.ksp.cryptobot.learning.TrueSelfLearningEngine
+import com.ksp.cryptobot.performance.PerformanceLabEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.math.BigDecimal
@@ -773,4 +774,8 @@ class BotController(
         explanation = explanation,
         timestampEpochMs = createdAt.toEpochMilli()
     )
+    fun loadPerformanceLabSnapshot(settings: BotSettings): PerformanceLabSnapshot {
+        return PerformanceLabEngine().buildSnapshot(settings)
+    }
+
 }

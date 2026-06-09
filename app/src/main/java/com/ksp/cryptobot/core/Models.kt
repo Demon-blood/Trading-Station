@@ -578,3 +578,36 @@ data class TaxReportRow(
     val realizedGainEur: BigDecimal,
     val note: String
 )
+
+
+data class StrategyPromotionCandidate(
+    val symbol: String,
+    val strategy: StrategyMode,
+    val paperTrades: Int,
+    val paperWinRatePercent: Int,
+    val paperProfitFactor: BigDecimal,
+    val paperMaxDrawdownPercent: BigDecimal,
+    val liveTrades: Int,
+    val liveWinRatePercent: Int,
+    val liveProfitFactor: BigDecimal,
+    val liveMaxDrawdownPercent: BigDecimal,
+    val performanceScore: Int,
+    val status: PromotionStatus,
+    val recommendedPositionEur: BigDecimal,
+    val reason: String
+)
+
+enum class PromotionStatus {
+    APPROVED,
+    WATCH,
+    BLOCKED
+}
+
+data class PerformanceLabSnapshot(
+    val generatedAtEpochMs: Long,
+    val candidates: List<StrategyPromotionCandidate>,
+    val approvedCount: Int,
+    val watchCount: Int,
+    val blockedCount: Int,
+    val summaryLine: String
+)

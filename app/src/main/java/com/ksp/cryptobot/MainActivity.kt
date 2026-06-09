@@ -76,6 +76,9 @@ import com.ksp.cryptobot.core.RemoteCommandResult
 import com.ksp.cryptobot.core.LiveOrderInfo
 import com.ksp.cryptobot.core.LifecycleSnapshot
 import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
+import com.ksp.cryptobot.core.StrategyPromotionCandidate
+import com.ksp.cryptobot.core.PromotionStatus
+import com.ksp.cryptobot.core.PerformanceLabSnapshot
 import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
@@ -173,6 +176,9 @@ class MainActivity : ComponentActivity() {
                         },
                         onLoadSelfLearning = { settings, callback ->
                             lifecycleScope.launch { callback(controller.loadSelfLearningSummary(settings)) }
+                        },
+                        onLoadPerformanceLab = { settings, callback ->
+                            lifecycleScope.launch { callback(controller.loadPerformanceLabSnapshot(settings)) }
                         }
                     )
                 }
@@ -212,6 +218,7 @@ private enum class AppTab(val label: String) {
     POSITIONS("Positions"),
     AUTONOMOUS("Autonomous"),
     SELF_LEARNING("Self Learning"),
+    PERFORMANCE("Performance Lab"),
     PRO("Pro Systems"),
     PORTFOLIO("Portfolio"),
     NEWS("News Intel"),
@@ -238,7 +245,8 @@ private fun AdvancedBotApp(
     onDiscoverSymbols: (BotSettings, (List<SymbolDiscoveryCandidate>) -> Unit) -> Unit,
     onExportTax: (BotSettings, (TaxExportSummary) -> Unit) -> Unit,
     onRemoteCommand: (BotSettings, String, (RemoteCommandResult) -> Unit) -> Unit,
-    onLoadSelfLearning: (BotSettings, (TrueSelfLearningEngine.LearningSummary) -> Unit) -> Unit
+    onLoadSelfLearning: (BotSettings, (TrueSelfLearningEngine.LearningSummary) -> Unit) -> Unit,
+    onLoadPerformanceLab: (BotSettings, (PerformanceLabSnapshot) -> Unit) -> Unit
 ) {
     var settings by remember { mutableStateOf(store.load()) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
@@ -254,6 +262,7 @@ private fun AdvancedBotApp(
     var remoteCommand by remember { mutableStateOf("/status") }
     var remoteResult by remember { mutableStateOf<RemoteCommandResult?>(null) }
     var selfLearningSummary by remember { mutableStateOf<TrueSelfLearningEngine.LearningSummary?>(null) }
+    var performanceLabSnapshot by remember { mutableStateOf<PerformanceLabSnapshot?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -298,6 +307,13 @@ private fun AdvancedBotApp(
                 selfLearningSummary = result
                 statusStore.write("Self-learning dashboard loaded. ${result.summaryLine}")
                 status = "Self-learning loaded"
+            }
+        }
+        if (currentTab == AppTab.PERFORMANCE) {
+            onLoadPerformanceLab(settings) { result ->
+                performanceLabSnapshot = result
+                statusStore.write(result.summaryLine)
+                status = "Performance Lab loaded"
             }
         }
     }
@@ -559,7 +575,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.8.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.8.4 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -581,6 +597,7 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
             AppTab.SYMBOLS,
             AppTab.AI,
             AppTab.SELF_LEARNING,
+            AppTab.PERFORMANCE,
             AppTab.STRATEGY,
             AppTab.AUTONOMOUS,
             AppTab.PRO,
@@ -2132,6 +2149,129 @@ private fun actionColor(action: SignalAction): Color = when (action) {
     SignalAction.STRONG_AVOID, SignalAction.AVOID, SignalAction.SELL -> Danger
     SignalAction.WAIT, SignalAction.WATCH -> Amber
     SignalAction.SMALL_BUY, SignalAction.BUY -> Mint
+}
+
+
+@Composable
+private fun PerformanceLabScreen(
+    snapshot: PerformanceLabSnapshot?,
+    settings: BotSettings,
+    onRefresh: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = 24.dp)
+    ) {
+        item {
+            GlassCard {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Performance Lab", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "Paper vs live comparison with automatic strategy promotion gates.",
+                        color = Muted
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatusPill("Approved ${snapshot?.approvedCount ?: 0}", Mint)
+                        StatusPill("Watch ${snapshot?.watchCount ?: 0}", Amber)
+                        StatusPill("Blocked ${snapshot?.blockedCount ?: 0}", Danger)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    ElevatedButton(onClick = onRefresh) {
+                        Text("Refresh Performance Lab")
+                    }
+                }
+            }
+        }
+
+        item {
+            GlassCard {
+                Column {
+                    Text("Promotion Rules", fontWeight = FontWeight.Bold)
+                    Text("Approved strategies can be trusted for small live size first.", color = Muted)
+                    Text("Watch strategies remain paper-first or reduced size.", color = Muted)
+                    Text("Blocked strategies should not be live-promoted yet.", color = Muted)
+                    Text("Current max live size setting: €${settings.maxPositionEur}", color = Mint, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        val candidates = snapshot?.candidates.orEmpty()
+        if (candidates.isEmpty()) {
+            item {
+                GlassCard {
+                    Text("No performance snapshot loaded yet. Press Refresh Performance Lab.", color = Muted)
+                }
+            }
+        } else {
+            items(candidates) { candidate ->
+                PerformanceCandidateCard(candidate)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PerformanceCandidateCard(candidate: StrategyPromotionCandidate) {
+    val color = when (candidate.status) {
+        PromotionStatus.APPROVED -> Mint
+        PromotionStatus.WATCH -> Amber
+        PromotionStatus.BLOCKED -> Danger
+    }
+
+    GlassCard {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("${candidate.symbol} — ${candidate.strategy.name}", fontWeight = FontWeight.ExtraBold)
+                    Text(candidate.reason, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+                StatusPill(candidate.status.name, color)
+            }
+
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = candidate.performanceScore / 100f,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+            Text("Performance score: ${candidate.performanceScore}/100", color = color, fontWeight = FontWeight.Bold)
+
+            Spacer(Modifier.height(10.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricBox("Paper trades", candidate.paperTrades.toString(), Modifier.weight(1f))
+                MetricBox("Paper win", "${candidate.paperWinRatePercent}%", Modifier.weight(1f))
+                MetricBox("Paper PF", candidate.paperProfitFactor.toPlainString(), Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricBox("Live trades", candidate.liveTrades.toString(), Modifier.weight(1f))
+                MetricBox("Live win", if (candidate.liveTrades == 0) "N/A" else "${candidate.liveWinRatePercent}%", Modifier.weight(1f))
+                MetricBox("Live PF", if (candidate.liveTrades == 0) "N/A" else candidate.liveProfitFactor.toPlainString(), Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Recommended position: €${candidate.recommendedPositionEur} | Paper DD: ${candidate.paperMaxDrawdownPercent}% | Live DD: ${candidate.liveMaxDrawdownPercent}%",
+                color = Muted
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetricBox(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = PanelAlt),
+        border = BorderStroke(1.dp, Stroke),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(label, color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text(value, color = TextPrimary, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 
 private fun sampleDecisions(): List<AiDecision> = listOf(
