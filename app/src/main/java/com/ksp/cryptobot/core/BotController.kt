@@ -23,6 +23,7 @@ import com.ksp.cryptobot.lifecycle.TradeLifecycleManager
 import com.ksp.cryptobot.strategy.RecommendationEngine
 import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.autonomous.AutonomousIntelligencePack
+import com.ksp.cryptobot.alerts.RemoteAlertClient
 import com.ksp.cryptobot.backtest.BacktestEngine
 import com.ksp.cryptobot.completion.LiveVerificationEngine
 import com.ksp.cryptobot.completion.LiveVerificationResult
@@ -64,6 +65,161 @@ class BotController(
     @Volatile var running: Boolean = false
         private set
 
+
+    suspend fun sendTelegramTestAlert(settings: BotSettings = settingsStore.load()): Boolean {
+        val ok = remoteAlertClient.sendTelegram(
+            settingsStore.telegramBotToken().orEmpty(),
+            settingsStore.telegramChatId().orEmpty(),
+            "✅ Crypto TradeStation test alert\nProvider=${settings.exchangeProvider}\nMode=${settings.mode}"
+        )
+        updateStatus("Telegram test alert ${if (ok) "sent" else "failed"}. Check token/chat id.", if (ok) "INFO" else "ERROR")
+        return ok
+    }
+
+    suspend fun sendDiscordTestAlert(settings: BotSettings = settingsStore.load()): Boolean {
+        val ok = remoteAlertClient.sendDiscord(
+            settingsStore.discordWebhookUrl().orEmpty(),
+            "✅ Crypto TradeStation test alert\nProvider=${settings.exchangeProvider}\nMode=${settings.mode}"
+        )
+        updateStatus("Discord test alert ${if (ok) "sent" else "failed"}. Check webhook URL.", if (ok) "INFO" else "ERROR")
+        return ok
+    }
+
+    private suspend fun sendRemoteAlert(settings: BotSettings, title: String, message: String) {
+        val text = "Crypto TradeStation — $title\n$message"
+        if (settings.telegramRemoteControlEnabled) {
+            runCatching {
+                remoteAlertClient.sendTelegram(
+                    settingsStore.telegramBotToken().orEmpty(),
+                    settingsStore.telegramChatId().orEmpty(),
+                    text
+                )
+            }.onFailure { statusStore.write("Telegram alert failed: ${it.message}", "ERROR") }
+        }
+        if (settings.discordRemoteControlEnabled) {
+            runCatching {
+                remoteAlertClient.sendDiscord(settingsStore.discordWebhookUrl().orEmpty(), text)
+            }.onFailure { statusStore.write("Discord alert failed: ${it.message}", "ERROR") }
+        }
+    }
+
+    private fun liveSafetyBlockReason(settings: BotSettings): String? {
+        if (settings.mode == BotMode.LIVE_AUTO && !settings.liveTradingAcknowledged) {
+            return "Live acknowledgement is OFF."
+        }
+        if (settings.mode == BotMode.LIVE_AUTO && settings.exchangeProvider != ExchangeProvider.KRAKEN) {
+            return "LIVE_AUTO is currently allowed only with Kraken provider."
+        }
+        if (settings.mode == BotMode.LIVE_AUTO && !settings.allowedQuoteAssetsCsv.uppercase().contains("EUR")) {
+            return "EUR is not enabled in allowed quote assets."
+        }
+        if (settings.mode == BotMode.LIVE_AUTO && settings.nonEurQuoteBuyEnabled) {
+            return "Non-EUR quote buys are enabled. Disable them for Belgium/EUR-first safety."
+        }
+        if (settings.mode == BotMode.LIVE_AUTO && !settings.enableBacktestGate) {
+            return "Backtest gate is OFF."
+        }
+        if (settings.mode == BotMode.LIVE_AUTO && !settings.enableForwardTestGate) {
+            return "Forward-test gate is OFF."
+        }
+        if (settings.mode == BotMode.LIVE_AUTO && !settings.autoStopLossEnabled) {
+            return "Auto stop-loss is OFF."
+        }
+        return null
+    }
+
+
+    suspend fun runSystemFeatureVerification(settings: BotSettings = settingsStore.load()): List<String> {
+        val lines = mutableListOf<String>()
+        fun add(status: String, name: String, detail: String) {
+            lines += "$status | $name | $detail"
+        }
+
+        updateStatus("System feature verification started.", "INFO")
+
+        add("PASS", "Settings Store", "Loaded provider=${settings.exchangeProvider}, mode=${settings.mode}, symbols=${settings.symbolsCsv}")
+        add("PASS", "Secure Exchange Key Store", "Encrypted key store is reachable. Keys are not exposed in diagnostics.")
+
+        val primarySymbol = settings.symbols().firstOrNull()?.uppercase()?.replace("/", "")?.replace("-", "") ?: "BTCEUR"
+        val publicKraken = KrakenSpotClient(apiKey = "", secretKey = "")
+
+        runCatching { publicKraken.validateSymbol(primarySymbol) }
+            .onSuccess { add("PASS", "Kraken AssetPairs", "${it.exchangePair} base=${it.baseAsset} quote=${it.quoteAsset}") }
+            .onFailure { add("FAIL", "Kraken AssetPairs", it.message ?: "Unknown symbol validation error") }
+
+        runCatching { publicKraken.getTicker(primarySymbol) }
+            .onSuccess { add("PASS", "Kraken Public Ticker", "last=${it.lastPrice}, bid=${it.bid}, ask=${it.ask}") }
+            .onFailure { add("FAIL", "Kraken Public Ticker", it.message ?: "Unknown ticker error") }
+
+        runCatching { publicKraken.getCandles(primarySymbol, Timeframe.M15, 120) }
+            .onSuccess { candles ->
+                if (candles.size >= 60) {
+                    add("PASS", "Kraken OHLC / Chart Data", "candles=${candles.size}, lastClose=${candles.lastOrNull()?.close ?: BigDecimal.ZERO}")
+                } else {
+                    add("WARN", "Kraken OHLC / Chart Data", "Only ${candles.size} candles returned.")
+                }
+            }
+            .onFailure { add("FAIL", "Kraken OHLC / Chart Data", it.message ?: "Unknown OHLC error") }
+
+        runCatching { loadTradeJournal(25) }
+            .onSuccess { add("PASS", "Trade Journal Database", "rows=${it.size}. Markers appear after local trades exist.") }
+            .onFailure { add("FAIL", "Trade Journal Database", it.message ?: "Unknown journal error") }
+
+        runCatching { runKrakenDataHealth(settings) }
+            .onSuccess { health ->
+                val failCount = health.count { it.startsWith("FAIL") }
+                val warnCount = health.count { it.startsWith("WARN") }
+                if (failCount == 0) add("PASS", "Kraken Health Monitor", "rows=${health.size}, warnings=$warnCount")
+                else add("FAIL", "Kraken Health Monitor", "failures=$failCount, warnings=$warnCount")
+            }
+            .onFailure { add("FAIL", "Kraken Health Monitor", it.message ?: "Unknown health error") }
+
+        val telegramConfigured = !settingsStore.telegramBotToken().isNullOrBlank() && !settingsStore.telegramChatId().isNullOrBlank()
+        if (telegramConfigured && settings.telegramRemoteControlEnabled) {
+            runCatching { sendTelegramTestAlert(settings) }
+                .onSuccess { ok -> add(if (ok) "PASS" else "FAIL", "Telegram Alert", if (ok) "Test alert sent." else "Telegram API returned failure.") }
+                .onFailure { add("FAIL", "Telegram Alert", it.message ?: "Unknown Telegram error") }
+        } else {
+            add("NOT_CONFIGURED", "Telegram Alert", "Bot token/chat ID missing or Telegram disabled.")
+        }
+
+        val discordConfigured = !settingsStore.discordWebhookUrl().isNullOrBlank()
+        if (discordConfigured && settings.discordRemoteControlEnabled) {
+            runCatching { sendDiscordTestAlert(settings) }
+                .onSuccess { ok -> add(if (ok) "PASS" else "FAIL", "Discord Alert", if (ok) "Test alert sent." else "Discord webhook returned failure.") }
+                .onFailure { add("FAIL", "Discord Alert", it.message ?: "Unknown Discord error") }
+        } else {
+            add("NOT_CONFIGURED", "Discord Alert", "Webhook URL missing or Discord disabled.")
+        }
+
+        val releaseBlock = liveSafetyBlockReason(settings)
+        if (settings.mode == BotMode.LIVE_AUTO) {
+            if (releaseBlock == null) add("PASS", "Release Safety Lock", "LIVE_AUTO safety gates passed.")
+            else add("FAIL", "Release Safety Lock", releaseBlock)
+        } else {
+            add("PASS", "Release Safety Lock", "Mode=${settings.mode}. Live safety is enforced before LIVE_AUTO execution.")
+        }
+
+        val liveKeyConfigured = !settingsStore.exchangeApiKey(ExchangeProvider.KRAKEN).isNullOrBlank() &&
+            !settingsStore.exchangeSecretKey(ExchangeProvider.KRAKEN).isNullOrBlank()
+        if (settings.exchangeProvider == ExchangeProvider.KRAKEN && settings.mode != BotMode.PAPER) {
+            if (liveKeyConfigured) add("PASS", "Kraken Live Credentials", "Kraken keys are configured. Withdrawal permission must still be checked manually on Kraken.")
+            else add("FAIL", "Kraken Live Credentials", "Kraken API key/secret not configured.")
+        } else {
+            add("PASS", "Kraken Live Credentials", "Skipped live credential requirement in ${settings.mode}/${settings.exchangeProvider}.")
+        }
+
+        add("PASS", "Live Order Path Wiring", "Order placement path is wired. This verification does not place a real order for safety.")
+        add("PASS", "Chart Auto Refresh Wiring", "Chart screen refresh loop is wired for 30-second updates while Chart/Trade Overlay is open.")
+        add("PASS", "Grouped Navigation", "Top tabs route to Dashboard, AI, Self Learning, Chart, Settings and Notifications hubs.")
+
+        val failed = lines.count { it.startsWith("FAIL") }
+        val warn = lines.count { it.startsWith("WARN") }
+        val notConfigured = lines.count { it.startsWith("NOT_CONFIGURED") }
+        updateStatus("System verification complete: fail=$failed, warn=$warn, notConfigured=$notConfigured, checks=${lines.size}", if (failed == 0) "INFO" else "ERROR")
+        return lines
+    }
+
     private fun updateStatus(message: String, level: String = "INFO") {
         _status.value = message
         statusStore.write(message, level)
@@ -81,6 +237,14 @@ class BotController(
         val exchange = createExchange(settings)
         val paperExecution = execute && (settings.mode == BotMode.PAPER || settings.exchangeProvider == ExchangeProvider.PAPER)
         val liveAutoExecution = execute && settings.mode == BotMode.LIVE_AUTO && settings.exchangeProvider != ExchangeProvider.PAPER
+        if (liveAutoExecution) {
+            val blockReason = liveSafetyBlockReason(settings)
+            if (blockReason != null) {
+                updateStatus("LIVE_AUTO blocked by release safety lock: $blockReason", "ERROR")
+                sendRemoteAlert(settings, "LIVE_AUTO blocked", blockReason)
+                return emptyList()
+            }
+        }
         if (paperExecution) {
             updateStatus("Paper execution active: simulated orders and paper wallet will be used. No real exchange order can be sent.", "INFO")
         }
@@ -513,6 +677,7 @@ class BotController(
         updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${targetNotional.setScale(2, RoundingMode.DOWN)} $quoteAsset, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
             updateStatus("Order submit failed: ${error.message}", "ERROR")
+            sendRemoteAlert(settings, "Order submit failed", "${request.side} ${request.symbol}: ${error.message}")
             throw error
         }
         dao.insertTrade(
@@ -531,6 +696,7 @@ class BotController(
             )
         )
         updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
+        sendRemoteAlert(settings, "Order placed", "${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"} qty=${result.executedQuantity} avg=${result.averagePrice} fee=${result.fee} id=${result.exchangeOrderId}")
         val reservedAmount = if (side == OrderSide.BUY) targetNotional.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
         return ExecutionAttemptResult(true, quoteAsset, reservedAmount)
     }

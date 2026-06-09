@@ -210,6 +210,21 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 callback(controller.runKrakenDataHealth(settings))
                             }
+                        },
+                        onRunSystemTest = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.runSystemFeatureVerification(settings))
+                            }
+                        },
+                        onTestTelegram = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.sendTelegramTestAlert(settings))
+                            }
+                        },
+                        onTestDiscord = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.sendDiscordTestAlert(settings))
+                            }
                         }
                     )
                 }
@@ -241,8 +256,10 @@ private enum class AppTab(val label: String) {
     DASHBOARD("Dashboard"),
     STATUS("Live Status"),
     BOT("Bot"),
-    AI("AI Signals"),
+    AI("AI"),
+    AI_SIGNALS("AI Signals"),
     CHART("Chart"),
+    CHART_MAIN("Live Chart"),
     TRADE_OVERLAY("Trade Overlay"),
     REPLAY("Trade Replay"),
     TRADE_JOURNAL("Trade Journal"),
@@ -254,6 +271,7 @@ private enum class AppTab(val label: String) {
     POSITIONS("Positions"),
     AUTONOMOUS("Autonomous"),
     SELF_LEARNING("Self Learning"),
+    SELF_LEARNING_MAIN("Learning Summary"),
     LEARNING_INSPECTOR("Learning DB"),
     PERFORMANCE("Performance Lab"),
     PRO("Pro Systems"),
@@ -268,8 +286,12 @@ private enum class AppTab(val label: String) {
     RISK("Risk Center"),
     HISTORY("History"),
     SETTINGS("Settings"),
+    BASIC_SETTINGS("Basic Settings"),
+    SYSTEM_TEST("System Test"),
     HEALTH("Build Health"),
     NOTIFICATIONS("Notifications"),
+    NOTIFICATION_LOGS("Event Logs"),
+    REMOTE_ALERTS("Remote Alerts"),
     BACKUP("Backup/Restore"),
     ADVANCED_SETTINGS("Advanced Settings"),
     SYMBOLS("Symbol Scanner")
@@ -295,7 +317,10 @@ private fun AdvancedBotApp(
     onRunHistoricalBacktest: (BotSettings, String, Timeframe, StrategyMode, Int, (BacktestReport) -> Unit) -> Unit,
     onLoadChartCandles: (BotSettings, String, Timeframe, Int, (List<Candle>) -> Unit) -> Unit,
     onLoadTradeJournal: (Int, (List<TradeEntity>) -> Unit) -> Unit,
-    onRunKrakenHealth: (BotSettings, (List<String>) -> Unit) -> Unit
+    onRunKrakenHealth: (BotSettings, (List<String>) -> Unit) -> Unit,
+    onRunSystemTest: (BotSettings, (List<String>) -> Unit) -> Unit,
+    onTestTelegram: (BotSettings, (Boolean) -> Unit) -> Unit,
+    onTestDiscord: (BotSettings, (Boolean) -> Unit) -> Unit
 ) {
     var settings by remember { mutableStateOf(store.load()) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
@@ -317,6 +342,11 @@ private fun AdvancedBotApp(
     var chartTimeframe by remember { mutableStateOf(Timeframe.M15) }
     var tradeJournal by remember { mutableStateOf<List<TradeEntity>>(emptyList()) }
     var krakenHealthLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    var systemTestLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    var telegramBotToken by remember { mutableStateOf(store.telegramBotToken().orEmpty()) }
+    var telegramChatId by remember { mutableStateOf(store.telegramChatId().orEmpty()) }
+    var discordWebhookUrl by remember { mutableStateOf(store.discordWebhookUrl().orEmpty()) }
+    var liveChartAutoRefresh by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -370,11 +400,16 @@ private fun AdvancedBotApp(
                 status = "Performance Lab loaded"
             }
         }
-        if (currentTab == AppTab.CHART) {
-            onLoadChartCandles(settings, chartSymbol, chartTimeframe, 180) { result ->
-                chartCandles = result
-                statusStore.write("Chart data auto-loaded. Symbol=$chartSymbol timeframe=${chartTimeframe.name} candles=${result.size}")
-                status = "Chart loaded: $chartSymbol ${chartTimeframe.name}"
+        if (currentTab == AppTab.CHART || currentTab == AppTab.TRADE_OVERLAY) {
+            while (currentTab == AppTab.CHART || currentTab == AppTab.TRADE_OVERLAY) {
+                onLoadChartCandles(settings, chartSymbol, chartTimeframe, 240) { result ->
+                    chartCandles = result
+                    statusStore.write("Live chart auto-refreshed. Symbol=$chartSymbol timeframe=${chartTimeframe.name} candles=${result.size}")
+                    status = "Live chart refreshed: $chartSymbol ${chartTimeframe.name}"
+                }
+                onLoadTradeJournal(200) { result -> tradeJournal = result }
+                if (!liveChartAutoRefresh) break
+                delay(30_000L)
             }
         }
         if (currentTab == AppTab.TRADE_JOURNAL || currentTab == AppTab.CHART || currentTab == AppTab.REPLAY) {
@@ -483,14 +518,46 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
-                AppTab.AI -> AiSignalsScreen(decisions = decisions, settings = settings)
-                AppTab.CHART -> ChartScreen(
+                AppTab.AI -> AiHubScreen(
+                    decisions = decisions,
+                    settings = settings,
+                    performanceLabSnapshot = performanceLabSnapshot,
+                    onOpen = { currentTab = it },
+                    onRefreshPerformance = {
+                        onLoadPerformanceLab(settings) { result ->
+                            performanceLabSnapshot = result
+                            statusStore.write(result.summaryLine)
+                            status = "Performance Lab refreshed"
+                        }
+                    }
+                )
+                AppTab.AI_SIGNALS -> AiSignalsScreen(decisions = decisions, settings = settings)
+                AppTab.CHART -> ChartHubScreen(
+                    settings = settings,
+                    candles = chartCandles,
+                    trades = tradeJournal,
+                    selectedSymbol = chartSymbol,
+                    selectedTimeframe = chartTimeframe,
+                    latestDecision = decisions.firstOrNull { it.symbol.equals(chartSymbol, ignoreCase = true) },
+                    autoRefresh = liveChartAutoRefresh,
+                    onOpen = { currentTab = it },
+                    onRefresh = {
+                        onLoadChartCandles(settings, chartSymbol, chartTimeframe, 240) { result ->
+                            chartCandles = result
+                            status = "Chart refreshed"
+                        }
+                        onLoadTradeJournal(200) { result -> tradeJournal = result }
+                    }
+                )
+                AppTab.CHART_MAIN -> ChartScreen(
                     settings = settings,
                     candles = chartCandles,
                     selectedSymbol = chartSymbol,
                     selectedTimeframe = chartTimeframe,
                     latestDecision = decisions.firstOrNull { it.symbol.equals(chartSymbol, ignoreCase = true) },
                     trades = tradeJournal.filter { it.symbol.equals(chartSymbol, ignoreCase = true) },
+                    autoRefresh = liveChartAutoRefresh,
+                    onAutoRefreshChange = { liveChartAutoRefresh = it },
                     onSymbolChange = { symbol ->
                         chartSymbol = symbol
                         onLoadChartCandles(settings, symbol, chartTimeframe, 180) { result ->
@@ -603,7 +670,19 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
-                AppTab.SELF_LEARNING -> SelfLearningScreen(
+                AppTab.SELF_LEARNING -> SelfLearningHubScreen(
+                    settings = settings,
+                    summary = selfLearningSummary,
+                    onOpen = { currentTab = it },
+                    onRefresh = {
+                        onLoadSelfLearning(settings) { result ->
+                            selfLearningSummary = result
+                            statusStore.write("Self-learning refreshed from hub. ${result.summaryLine}")
+                            status = "Self-learning refreshed"
+                        }
+                    }
+                )
+                AppTab.SELF_LEARNING_MAIN -> SelfLearningScreen(
                     settings = settings,
                     summary = selfLearningSummary,
                     onRefresh = {
@@ -702,7 +781,51 @@ private fun AdvancedBotApp(
                         status = "Advanced settings saved"
                     }
                 )
-                AppTab.SETTINGS -> SettingsScreen(
+                AppTab.SETTINGS -> SettingsHubScreen(
+                    settings = settings,
+                    systemTestLines = systemTestLines,
+                    onOpen = { currentTab = it },
+                    onRunSystemTest = {
+                        onRunSystemTest(settings) { result ->
+                            systemTestLines = result
+                            statusStore.write("System test completed from Settings hub. rows=${result.size}", "INFO")
+                            status = "System test complete"
+                        }
+                    },
+                    onApplySafeDefaults = {
+                        val safe = settings.copy(
+                            exchangeProvider = ExchangeProvider.PAPER,
+                            mode = BotMode.PAPER,
+                            manualExecutionMode = false,
+                            allowedQuoteAssetsCsv = "EUR",
+                            autoSymbolQuoteAsset = "ALL",
+                            nonEurQuoteBuyEnabled = false,
+                            maxNewTradesPerScan = 1,
+                            maxTradesPerHour = 3,
+                            maxSimultaneousLivePositions = 3,
+                            minimumQuoteReservePercent = BigDecimal("20.0"),
+                            trueSelfLearningEnabled = true,
+                            spikeProfitTimingEnabled = true,
+                            enableBacktestGate = true,
+                            enableForwardTestGate = true
+                        )
+                        persistSettings(safe)
+                        statusStore.write("Clean Settings hub applied safe Belgium defaults.", "INFO")
+                        status = "Safe defaults applied"
+                    }
+                )
+                AppTab.SYSTEM_TEST -> SystemTestScreen(
+                    settings = settings,
+                    lines = systemTestLines,
+                    onRun = {
+                        onRunSystemTest(settings) { result ->
+                            systemTestLines = result
+                            statusStore.write("System test manually completed. rows=${result.size}", "INFO")
+                            status = "System test complete"
+                        }
+                    }
+                )
+                AppTab.BASIC_SETTINGS -> SettingsScreen(
                     apiKey = apiKey,
                     secretKey = secretKey,
                     newsKey = newsKey,
@@ -756,7 +879,42 @@ private fun AdvancedBotApp(
                         status = "Safe defaults applied"
                     }
                 )
-                AppTab.NOTIFICATIONS -> NotificationCenterScreen(history = statusHistory, settings = settings)
+                AppTab.NOTIFICATIONS -> NotificationsHubScreen(
+                    history = statusHistory,
+                    settings = settings,
+                    onOpen = { currentTab = it }
+                )
+                AppTab.NOTIFICATION_LOGS -> NotificationCenterScreen(history = statusHistory, settings = settings)
+                AppTab.REMOTE_ALERTS -> RemoteAlertsScreen(
+                    settings = settings,
+                    telegramBotToken = telegramBotToken,
+                    telegramChatId = telegramChatId,
+                    discordWebhookUrl = discordWebhookUrl,
+                    onTelegramBotToken = { telegramBotToken = it },
+                    onTelegramChatId = { telegramChatId = it },
+                    onDiscordWebhookUrl = { discordWebhookUrl = it },
+                    onSave = {
+                        store.saveTelegramConfig(telegramBotToken, telegramChatId)
+                        store.saveDiscordWebhook(discordWebhookUrl)
+                        val updated = settings.copy(
+                            telegramRemoteControlEnabled = telegramBotToken.isNotBlank() && telegramChatId.isNotBlank(),
+                            discordRemoteControlEnabled = discordWebhookUrl.isNotBlank()
+                        )
+                        persistSettings(updated)
+                        statusStore.write("Remote alert settings saved. Telegram=${updated.telegramRemoteControlEnabled}, Discord=${updated.discordRemoteControlEnabled}", "INFO")
+                        status = "Remote alerts saved"
+                    },
+                    onTestTelegram = {
+                        onTestTelegram(settings.copy(telegramRemoteControlEnabled = true)) { ok ->
+                            status = if (ok) "Telegram test sent" else "Telegram test failed"
+                        }
+                    },
+                    onTestDiscord = {
+                        onTestDiscord(settings.copy(discordRemoteControlEnabled = true)) { ok ->
+                            status = if (ok) "Discord test sent" else "Discord test failed"
+                        }
+                    }
+                )
                 AppTab.BACKUP -> BackupRestoreScreen(
                     settings = settings,
                     onApplySafeDefaults = {
@@ -804,7 +962,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.9.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.0.2 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -821,38 +979,10 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
     ) {
         val liveTabs = listOf(
             AppTab.DASHBOARD,
-            AppTab.STATUS,
-            AppTab.BOT,
-            AppTab.SYMBOLS,
             AppTab.AI,
-            AppTab.CHART,
-            AppTab.TRADE_OVERLAY,
-            AppTab.REPLAY,
-            AppTab.TRADE_JOURNAL,
             AppTab.SELF_LEARNING,
-            AppTab.LEARNING_INSPECTOR,
-            AppTab.PERFORMANCE,
-            AppTab.STRATEGY,
-            AppTab.SANDBOX,
-            AppTab.AUTONOMOUS,
-            AppTab.PRO,
-            AppTab.KRAKEN_HEALTH,
-            AppTab.SMART_EXIT,
-            AppTab.PORTFOLIO_ROTATION,
-            AppTab.AUTO_TUNER,
-            AppTab.RELEASE_SAFETY,
-            AppTab.ORDERS,
-            AppTab.POSITIONS,
-            AppTab.PORTFOLIO,
-            AppTab.TAX,
-            AppTab.RISK,
-            AppTab.BACKTEST,
-            AppTab.REGIME,
-            AppTab.NEWS,
-            AppTab.HISTORY,
-            AppTab.ADVANCED_SETTINGS,
+            AppTab.CHART,
             AppTab.SETTINGS,
-            AppTab.HEALTH,
             AppTab.NOTIFICATIONS
         )
         liveTabs.forEach { tab ->
@@ -1187,6 +1317,324 @@ private fun StrategyScreen(settings: BotSettings, onToggleStrategy: (Boolean) ->
 
 
 
+
+@Composable
+private fun HubActionCard(
+    title: String,
+    subtitle: String,
+    buttonText: String,
+    onClick: () -> Unit
+) {
+    GlassCard {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.width(10.dp))
+            Button(onClick = onClick, colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
+                Text(buttonText)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiHubScreen(
+    decisions: List<AiDecision>,
+    settings: BotSettings,
+    performanceLabSnapshot: PerformanceLabSnapshot?,
+    onOpen: (AppTab) -> Unit,
+    onRefreshPerformance: () -> Unit
+) {
+    val buySignals = decisions.count { it.finalAction == SignalAction.BUY || it.finalAction == SignalAction.SMALL_BUY }
+    val sellSignals = decisions.count { it.finalAction == SignalAction.SELL || it.finalAction == SignalAction.AVOID || it.finalAction == SignalAction.STRONG_AVOID }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("AI Center", "Signals, strategies, backtests, performance, rotation, auto-tuning and live safety in one place.") }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("AI decisions", decisions.size.toString(), "Latest scan", Electric) }
+                item { MetricCard("Buy pressure", buySignals.toString(), "BUY/SMALL_BUY", Mint) }
+                item { MetricCard("Exit pressure", sellSignals.toString(), "SELL/AVOID", Danger) }
+                item { MetricCard("Strategy", settings.strategyMode.name, "Selected mode", Amber) }
+            }
+        }
+        item { HubActionCard("AI Signals", "Latest combined AI decisions and explanations.", "Open", { onOpen(AppTab.AI_SIGNALS) }) }
+        item { HubActionCard("Strategy Lab", "Technical strategy, scoring logic and strategy controls.", "Open", { onOpen(AppTab.STRATEGY) }) }
+        item { HubActionCard("Backtest Lab", "Run Kraken OHLC backtests and forward tests.", "Open", { onOpen(AppTab.BACKTEST) }) }
+        item { HubActionCard("Regime Detection", "Trend, volatility and market regime behavior.", "Open", { onOpen(AppTab.REGIME) }) }
+        item { HubActionCard("Performance Lab", performanceLabSnapshot?.summaryLine ?: "Paper/live strategy promotion overview.", "Open", { onOpen(AppTab.PERFORMANCE) }) }
+        item { HubActionCard("Strategy Sandbox", "Compare strategy candidates before applying live risk.", "Open", { onOpen(AppTab.SANDBOX) }) }
+        item { HubActionCard("Portfolio Rotation", "EUR-first allocation and rotation policy.", "Open", { onOpen(AppTab.PORTFOLIO_ROTATION) }) }
+        item { HubActionCard("Strategy Auto-Tuner", "Test multiple strategies and recommend the strongest candidate.", "Open", { onOpen(AppTab.AUTO_TUNER) }) }
+        item { HubActionCard("Release Safety", "Final LIVE_AUTO safety checklist.", "Open", { onOpen(AppTab.RELEASE_SAFETY) }) }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Refresh AI performance", fontWeight = FontWeight.ExtraBold)
+                        Text("Reloads the Performance Lab summary without changing tabs.", color = Muted)
+                    }
+                    OutlinedButton(onClick = onRefreshPerformance) { Text("Refresh") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChartHubScreen(
+    settings: BotSettings,
+    candles: List<Candle>,
+    trades: List<TradeEntity>,
+    selectedSymbol: String,
+    selectedTimeframe: Timeframe,
+    latestDecision: AiDecision?,
+    autoRefresh: Boolean,
+    onOpen: (AppTab) -> Unit,
+    onRefresh: () -> Unit
+) {
+    val symbolTrades = trades.filter { it.symbol.equals(selectedSymbol, ignoreCase = true) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Chart Center", "Live Kraken chart, trade markers, replay and journal tools grouped together.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("$selectedSymbol $selectedTimeframe", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+                        Text("Candles=${candles.size} • Trades=${symbolTrades.size} • Auto-refresh=${if (autoRefresh) "ON" else "OFF"}", color = Muted)
+                    }
+                    StatusPill(latestDecision?.finalAction?.name ?: "WAIT", actionColor(latestDecision?.finalAction ?: SignalAction.WAIT))
+                }
+                Spacer(Modifier.height(12.dp))
+                CandlestickChart(candles = candles, settings = settings, trades = symbolTrades, windowSize = 72, panOffset = 0, showVolume = true)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onRefresh, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text("Refresh") }
+                    OutlinedButton(onClick = { onOpen(AppTab.CHART_MAIN) }) { Text("Full Chart") }
+                }
+            }
+        }
+        item { HubActionCard("Live Chart", "Candlesticks, volume, zoom/pan, live auto-refresh and TP/SL overlays.", "Open", { onOpen(AppTab.CHART_MAIN) }) }
+        item { HubActionCard("Trade Overlay", "Actual BUY/SELL markers and position overlay.", "Open", { onOpen(AppTab.TRADE_OVERLAY) }) }
+        item { HubActionCard("Trade Replay", "Replay candles step-by-step.", "Open", { onOpen(AppTab.REPLAY) }) }
+        item { HubActionCard("Trade Journal", "Local paper/live trade database with fees, AI score and P/L.", "Open", { onOpen(AppTab.TRADE_JOURNAL) }) }
+    }
+}
+
+@Composable
+private fun SelfLearningHubScreen(
+    settings: BotSettings,
+    summary: TrueSelfLearningEngine.LearningSummary?,
+    onOpen: (AppTab) -> Unit,
+    onRefresh: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Self Learning Center", "All learning, adaptive strategy, learned hold and spike-timing tools grouped together.") }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Learning", if (settings.trueSelfLearningEnabled) "ON" else "OFF", "Global", Mint) }
+                item { MetricCard("Profiles", (summary?.symbolProfiles?.size ?: 0).toString(), "Symbols", Electric) }
+                item { MetricCard("Strategies", (summary?.strategyProfiles?.size ?: 0).toString(), "Strategies", Amber) }
+                item { MetricCard("Hold profiles", (summary?.holdProfiles?.size ?: 0).toString(), "Learned hold", Mint) }
+            }
+        }
+        item {
+            GlassCard {
+                Text(summary?.summaryLine ?: "No self-learning summary loaded yet.", color = Muted)
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = onRefresh, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text("Refresh Learning") }
+            }
+        }
+        item { HubActionCard("Learning Summary", "Self-learning summary and refresh controls.", "Open", { onOpen(AppTab.SELF_LEARNING_MAIN) }) }
+        item { HubActionCard("Learning DB Inspector", "Symbol profiles, strategy profiles, confidence, boost and penalty logic.", "Open", { onOpen(AppTab.LEARNING_INSPECTOR) }) }
+        item { HubActionCard("Smart Exit v2", "Learned hold, spike timing, trailing and profit-lock behavior.", "Open", { onOpen(AppTab.SMART_EXIT) }) }
+    }
+}
+
+
+@Composable
+private fun SystemTestScreen(
+    settings: BotSettings,
+    lines: List<String>,
+    onRun: () -> Unit
+) {
+    val pass = lines.count { it.startsWith("PASS") }
+    val fail = lines.count { it.startsWith("FAIL") }
+    val warn = lines.count { it.startsWith("WARN") }
+    val notConfigured = lines.count { it.startsWith("NOT_CONFIGURED") }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("System Test + Feature Verification", "On-device checks for live wiring, Kraken data, alerts, chart feed, trade journal and release safety.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Feature verification", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+                        Text("Provider=${settings.exchangeProvider} • Mode=${settings.mode}", color = Muted)
+                    }
+                    Button(onClick = onRun, colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
+                        Text("Run Tests")
+                    }
+                }
+            }
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("PASS", pass.toString(), "Working", Mint) }
+                item { MetricCard("FAIL", fail.toString(), "Needs fix", Danger) }
+                item { MetricCard("WARN", warn.toString(), "Check", Amber) }
+                item { MetricCard("Not configured", notConfigured.toString(), "Setup needed", Muted) }
+            }
+        }
+        if (lines.isEmpty()) {
+            item {
+                GlassCard {
+                    Text("No system test has been run yet.", color = Muted)
+                    Text("Press Run Tests. Telegram/Discord tests only run when credentials are configured and enabled.", color = Amber)
+                    Text("The live order path is verified as wired, but this test does not place a real order for safety.", color = Amber)
+                }
+            }
+        } else {
+            items(lines) { row ->
+                val parts = row.split("|").map { it.trim() }
+                val status = parts.getOrNull(0) ?: "INFO"
+                val name = parts.getOrNull(1) ?: "Check"
+                val detail = parts.drop(2).joinToString(" | ").ifBlank { row }
+                val color = when (status) {
+                    "PASS" -> Mint
+                    "FAIL" -> Danger
+                    "WARN" -> Amber
+                    "NOT_CONFIGURED" -> Muted
+                    else -> Electric
+                }
+                GlassCard {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(name, fontWeight = FontWeight.ExtraBold)
+                            Text(detail, color = Muted)
+                        }
+                        StatusPill(status, color)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsHubScreen(
+    settings: BotSettings,
+    systemTestLines: List<String>,
+    onOpen: (AppTab) -> Unit,
+    onRunSystemTest: () -> Unit,
+    onApplySafeDefaults: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Settings Center", "All editable settings, API keys, alerts, backups and safety controls grouped together.") }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Provider", settings.exchangeProvider.name, "Exchange", Electric) }
+                item { MetricCard("Mode", settings.mode.name, "Trading", Mint) }
+                item { MetricCard("Quotes", settings.allowedQuoteAssetsCsv, "Allowed", Amber) }
+                item { MetricCard("Max position", "€${settings.maxPositionEur}", "Risk", Danger) }
+            }
+        }
+        item { HubActionCard("Basic Settings", "Provider, Kraken/API keys, symbols and main risk fields.", "Open", { onOpen(AppTab.BASIC_SETTINGS) }) }
+        item {
+            GlassCard {
+                val failures = systemTestLines.count { it.startsWith("FAIL") }
+                val warnings = systemTestLines.count { it.startsWith("WARN") }
+                val notConfigured = systemTestLines.count { it.startsWith("NOT_CONFIGURED") }
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("System Test + Feature Verification", fontWeight = FontWeight.ExtraBold)
+                        Text("Checks Kraken data, chart feed, trade journal, alerts, safety lock and live wiring.", color = Muted)
+                        Text("Last result: fail=$failures, warn=$warnings, not configured=$notConfigured, rows=${systemTestLines.size}", color = if (failures == 0) Mint else Danger)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Button(onClick = onRunSystemTest, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text("Run") }
+                        TextButton(onClick = { onOpen(AppTab.SYSTEM_TEST) }) { Text("Details") }
+                    }
+                }
+            }
+        }
+        item { HubActionCard("Advanced Settings", "Editable strategy, risk, symbol discovery and execution controls.", "Open", { onOpen(AppTab.ADVANCED_SETTINGS) }) }
+        item { HubActionCard("Remote Alerts", "Telegram bot token, Telegram chat ID and Discord webhook.", "Open", { onOpen(AppTab.REMOTE_ALERTS) }) }
+        item { HubActionCard("Backup / Restore", "Export safe text backup and restore safe defaults.", "Open", { onOpen(AppTab.BACKUP) }) }
+        item { HubActionCard("Build Health", "Pre-push status and app health checklist.", "Open", { onOpen(AppTab.HEALTH) }) }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Safe Belgium/Kraken defaults", fontWeight = FontWeight.ExtraBold)
+                        Text("Applies PAPER mode, EUR quote, safety gates, and conservative live-risk defaults.", color = Muted)
+                    }
+                    Button(onClick = onApplySafeDefaults, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text("Apply") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationsHubScreen(
+    history: List<String>,
+    settings: BotSettings,
+    onOpen: (AppTab) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Notifications + Logs", "Remote alerts, local event history, status, orders and Kraken diagnostics grouped together.") }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Events", history.size.toString(), "Recent logs", Electric) }
+                item { MetricCard("Telegram", if (settings.telegramRemoteControlEnabled) "ON" else "OFF", "Remote", Mint) }
+                item { MetricCard("Discord", if (settings.discordRemoteControlEnabled) "ON" else "OFF", "Webhook", Amber) }
+                item { MetricCard("Watchdog", if (settings.watchdogEnabled) "ON" else "OFF", "Safety", Danger) }
+            }
+        }
+        item {
+            GlassCard {
+                Text("Latest events", fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(8.dp))
+                history.take(8).forEach {
+                    Text("• $it", color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        item { HubActionCard("Event Logs", "Full notification center and recent bot event feed.", "Open", { onOpen(AppTab.NOTIFICATION_LOGS) }) }
+        item { HubActionCard("Remote Alerts", "Telegram and Discord setup/testing.", "Open", { onOpen(AppTab.REMOTE_ALERTS) }) }
+        item { HubActionCard("Live Status", "Current bot/service status.", "Open", { onOpen(AppTab.STATUS) }) }
+        item { HubActionCard("Orders", "Open orders, cancel tools and live order status.", "Open", { onOpen(AppTab.ORDERS) }) }
+        item { HubActionCard("Kraken Health", "Public/private API diagnostics and balance checks.", "Open", { onOpen(AppTab.KRAKEN_HEALTH) }) }
+        item { HubActionCard("History", "Saved history, tax, logs and previous activity.", "Open", { onOpen(AppTab.HISTORY) }) }
+    }
+}
+
 @Composable
 private fun ChartScreen(
     settings: BotSettings,
@@ -1195,11 +1643,15 @@ private fun ChartScreen(
     selectedTimeframe: Timeframe,
     latestDecision: AiDecision?,
     trades: List<TradeEntity>,
+    autoRefresh: Boolean,
+    onAutoRefreshChange: (Boolean) -> Unit,
     onSymbolChange: (String) -> Unit,
     onTimeframeChange: (Timeframe) -> Unit,
     onRefresh: () -> Unit
 ) {
     val symbols = settings.symbols().ifEmpty { listOf("BTCEUR", "ETHEUR") }
+    var windowSize by remember { mutableStateOf(72) }
+    var panOffset by remember { mutableStateOf(0) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
@@ -1235,7 +1687,18 @@ private fun ChartScreen(
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    ElevatedButton(onClick = onRefresh) { Text("Refresh Kraken Chart") }
+                    ToggleRow("Live auto-refresh every 30 seconds", autoRefresh, onAutoRefreshChange)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ElevatedButton(onClick = onRefresh) { Text("Refresh Kraken Chart") }
+                        OutlinedButton(onClick = { windowSize = (windowSize - 24).coerceAtLeast(24) }) { Text("Zoom In") }
+                        OutlinedButton(onClick = { windowSize = (windowSize + 24).coerceAtMost(180) }) { Text("Zoom Out") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { panOffset = (panOffset + 12).coerceAtMost(240) }) { Text("Pan Left") }
+                        OutlinedButton(onClick = { panOffset = (panOffset - 12).coerceAtLeast(0) }) { Text("Pan Right") }
+                    }
                 }
             }
         }
@@ -1251,7 +1714,7 @@ private fun ChartScreen(
                         StatusPill(latestDecision?.finalAction?.name ?: "NO SIGNAL", actionColor(latestDecision?.finalAction ?: SignalAction.WAIT))
                     }
                     Spacer(Modifier.height(12.dp))
-                    CandlestickChart(candles = candles, settings = settings, trades = trades)
+                    CandlestickChart(candles = candles, settings = settings, trades = trades, windowSize = windowSize, panOffset = panOffset, showVolume = true)
                     Spacer(Modifier.height(12.dp))
                     ChartStats(candles = candles, decision = latestDecision, settings = settings)
                 }
@@ -1470,8 +1933,81 @@ private fun NotificationCenterScreen(history: List<String>, settings: BotSetting
 }
 
 
+
 @Composable
-private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trades: List<TradeEntity> = emptyList()) {
+private fun RemoteAlertsScreen(
+    settings: BotSettings,
+    telegramBotToken: String,
+    telegramChatId: String,
+    discordWebhookUrl: String,
+    onTelegramBotToken: (String) -> Unit,
+    onTelegramChatId: (String) -> Unit,
+    onDiscordWebhookUrl: (String) -> Unit,
+    onSave: () -> Unit,
+    onTestTelegram: () -> Unit,
+    onTestDiscord: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Telegram + Discord Live Alerts", "Configure real remote alerts for live/paper orders, blocked live mode and exchange errors.") }
+        item {
+            GlassCard {
+                SectionTitle("Telegram", "Create a Telegram bot with BotFather, then paste the bot token and chat ID.")
+                OutlinedTextField(
+                    value = telegramBotToken,
+                    onValueChange = onTelegramBotToken,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Telegram bot token") },
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                OutlinedTextField(
+                    value = telegramChatId,
+                    onValueChange = onTelegramChatId,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Telegram chat ID") }
+                )
+                ToggleInfo("Telegram enabled after save", settings.telegramRemoteControlEnabled)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onSave, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text("Save Alerts") }
+                    OutlinedButton(onClick = onTestTelegram) { Text("Test Telegram") }
+                }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Discord", "Paste a Discord webhook URL from your server channel integrations.")
+                OutlinedTextField(
+                    value = discordWebhookUrl,
+                    onValueChange = onDiscordWebhookUrl,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Discord webhook URL") },
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                ToggleInfo("Discord enabled after save", settings.discordRemoteControlEnabled)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onSave, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text("Save Alerts") }
+                    OutlinedButton(onClick = onTestDiscord) { Text("Test Discord") }
+                }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Live alert events", "These are now wired into the live execution path.")
+                Text("• Order placed", color = Muted)
+                Text("• Order submit failed", color = Muted)
+                Text("• LIVE_AUTO blocked by release safety lock", color = Muted)
+                Text("• Telegram/Discord test alerts", color = Muted)
+                Text("Live alerts require internet access and valid Telegram/Discord credentials.", color = Amber)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trades: List<TradeEntity> = emptyList(), windowSize: Int = 72, panOffset: Int = 0, showVolume: Boolean = true) {
     val upColor = Mint
     val downColor = Danger
     val tpColor = Amber
@@ -1491,7 +2027,7 @@ private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trade
         return
     }
 
-    val visible = candles.takeLast(72)
+    val visible = candles.dropLast(panOffset.coerceAtLeast(0)).takeLast(windowSize.coerceIn(24, 240)).ifEmpty { candles.takeLast(windowSize.coerceIn(24, 240)) }
     val minPrice = visible.minOf { it.low }
     val maxPrice = visible.maxOf { it.high }
     val range = (maxPrice - minPrice).takeIf { it > BigDecimal.ZERO } ?: BigDecimal.ONE
@@ -1570,6 +2106,25 @@ private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trade
         val lastX = w - rightPad
         val lastY = priceToY(last)
         drawCircle(color = Electric, radius = 7f, center = Offset(lastX, lastY))
+
+        if (showVolume) {
+            val maxVolume = visible.maxOfOrNull { it.volume } ?: BigDecimal.ONE
+            val volHeight = chartH * 0.22f
+            val baseY = h - bottomPad
+            visible.forEachIndexed { idx, candle ->
+                val x = leftPad + candleSlot * idx + candleSlot / 2f
+                val normalized = if (maxVolume > BigDecimal.ZERO) candle.volume.divide(maxVolume, 8, RoundingMode.HALF_UP).toFloat() else 0f
+                val barH = (volHeight * normalized).coerceAtLeast(1f)
+                val color = if (candle.close >= candle.open) upColor.copy(alpha = 0.45f) else downColor.copy(alpha = 0.45f)
+                drawLine(
+                    color = color,
+                    start = Offset(x, baseY),
+                    end = Offset(x, baseY - barH),
+                    strokeWidth = (candleSlot * 0.45f).coerceAtLeast(2f),
+                    cap = StrokeCap.Round
+                )
+            }
+        }
     }
 }
 

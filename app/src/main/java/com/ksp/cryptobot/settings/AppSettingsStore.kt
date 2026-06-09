@@ -374,5 +374,21 @@ class AppSettingsStore(context: Context) {
     fun binanceSecretKey(): String? = exchangeSecretKey(ExchangeProvider.BINANCE_READ_ONLY)
 
     fun saveNewsApiKey(apiKey: String) = secure.saveEncryptedString("news_api_key", apiKey.trim())
+
+    fun saveTelegramConfig(botToken: String, chatId: String) {
+        secure.saveEncryptedString("telegram_bot_token", botToken.trim())
+        secure.saveEncryptedString("telegram_chat_id", chatId.trim())
+    }
+
+    fun telegramBotToken(): String? = secure.readEncryptedString("telegram_bot_token")?.takeIf { it.isNotBlank() }
+
+    fun telegramChatId(): String? = secure.readEncryptedString("telegram_chat_id")?.takeIf { it.isNotBlank() }
+
+    fun saveDiscordWebhook(webhookUrl: String) {
+        secure.saveEncryptedString("discord_webhook_url", webhookUrl.trim())
+    }
+
+    fun discordWebhookUrl(): String? = secure.readEncryptedString("discord_webhook_url")?.takeIf { it.isNotBlank() }
+
     fun newsApiKey(): String? = secure.readEncryptedString("news_api_key")?.takeIf { it.isNotBlank() }
 }
