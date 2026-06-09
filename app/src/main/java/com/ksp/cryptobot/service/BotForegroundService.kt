@@ -30,12 +30,14 @@ class BotForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> stopBot()
-            else -> startBot()
+            ACTION_START_BACKGROUND_AUTO -> startBot(backgroundAuto = true)
+            ACTION_START -> startBot(backgroundAuto = false)
+            else -> startBot(backgroundAuto = true)
         }
         return START_STICKY
     }
 
-    private fun startBot() {
+    private fun startBot(backgroundAuto: Boolean = true) {
         if (controller.running) {
             val already = "Bot service is already running."
             statusStore.write(already, "WARN")
@@ -44,11 +46,11 @@ class BotForegroundService : Service() {
         }
         val settings = settingsStore.load()
         val text = when (settings.mode) {
-            BotMode.PAPER -> "Bot running in PAPER mode"
-            BotMode.LIVE_CONFIRM -> "Bot scanning in LIVE_CONFIRM mode"
-            BotMode.LIVE_AUTO -> "Bot running in LIVE_AUTO mode"
+            BotMode.PAPER -> "Background auto bot running in PAPER mode"
+            BotMode.LIVE_CONFIRM -> "Background bot scanning in LIVE_CONFIRM mode"
+            BotMode.LIVE_AUTO -> "Background auto bot running in LIVE_AUTO mode"
         }
-        statusStore.write("Foreground service starting. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}")
+        statusStore.write("Background auto bot service starting. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}, backgroundAuto=$backgroundAuto")
         startForeground(NOTIFICATION_ID, notification(text))
         controller.start()
         scope.launch {
@@ -115,6 +117,7 @@ class BotForegroundService : Service() {
 
     companion object {
         const val ACTION_START = "com.ksp.cryptobot.START"
+        const val ACTION_START_BACKGROUND_AUTO = "com.ksp.cryptobot.START_BACKGROUND_AUTO"
         const val ACTION_STOP = "com.ksp.cryptobot.STOP"
         private const val CHANNEL_ID = "bot_status"
         private const val CHANNEL_TRADES = "trade_executions"

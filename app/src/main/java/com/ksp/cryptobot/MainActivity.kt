@@ -134,8 +134,9 @@ class MainActivity : ComponentActivity() {
                         statusStore = statusStore,
                         onStart = {
                             startForegroundService(Intent(this, BotForegroundService::class.java).apply {
-                                action = BotForegroundService.ACTION_START
+                                action = BotForegroundService.ACTION_START_BACKGROUND_AUTO
                             })
+                            statusStore.write("Background auto bot start requested from Dashboard.", "INFO")
                         },
                         onStop = {
                             startService(Intent(this, BotForegroundService::class.java).apply {
@@ -962,7 +963,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.0.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.0.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -982,6 +983,7 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
             AppTab.AI,
             AppTab.SELF_LEARNING,
             AppTab.CHART,
+            AppTab.PORTFOLIO,
             AppTab.SETTINGS,
             AppTab.NOTIFICATIONS
         )
@@ -1015,7 +1017,7 @@ private fun DashboardScreen(
                 title = "Live AI Trading Console",
                 subtitle = "Auto strategy selection, backtest gate, regime detection, smart orders, tax guard, trade memory and news intelligence in one Android app.",
                 primaryButton = "Scan Market",
-                secondaryButton = "Execute Pass",
+                secondaryButton = "Execute Once",
                 onPrimary = onScan,
                 onSecondary = onExecute
             )
@@ -1030,11 +1032,18 @@ private fun DashboardScreen(
         }
         item {
             GlassCard {
-                SectionTitle("Quick Controls", "Use these when you want to actively supervise the bot.")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item { ElevatedButton(onClick = onStart, colors = ButtonDefaults.elevatedButtonColors(containerColor = Mint, contentColor = Color(0xFF06130F))) { Text("Start") } }
-                    item { OutlinedButton(onClick = onStop) { Text("Stop") } }
-                    item { Button(onClick = onScan) { Text("Scan") } }
+                SectionTitle("Bot Start Controls", "Start Background Auto Bot keeps scanning/executing automatically while the persistent Android service is running.")
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = onStart,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Color(0xFF06130F))
+                    ) { Text("Start Background Auto Bot") }
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        item { OutlinedButton(onClick = onStop) { Text("Stop Bot") } }
+                        item { Button(onClick = onScan) { Text("Scan Once") } }
+                        item { OutlinedButton(onClick = onExecute) { Text("Execute Once") } }
+                    }
                 }
             }
         }
@@ -1158,7 +1167,7 @@ private fun BotControlScreen(
                 Spacer(Modifier.height(10.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     item { Button(onClick = onSave) { Text("Save Symbols") } }
-                    item { OutlinedButton(onClick = onStart) { Text("Start Service") } }
+                    item { Button(onClick = onStart, colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Color(0xFF06130F))) { Text("Start Background Auto Bot") } }
                     item { OutlinedButton(onClick = onStop) { Text("Stop") } }
                 }
             }
