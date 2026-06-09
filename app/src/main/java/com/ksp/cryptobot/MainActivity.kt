@@ -804,7 +804,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.9.2 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.9.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1550,87 +1550,22 @@ private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trade
             val y = priceToY(price)
             drawLine(color = color, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 2f)
         }
-private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trades: List<TradeEntity> = emptyList()) {
-    val upColor = Mint
-    val downColor = Danger
-    val tpColor = Amber
-    val slColor = Danger
-    val gridColor = Stroke
-
-    if (candles.size < 2) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(240.dp)
-                .background(PanelAlt, RoundedCornerShape(18.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("No chart data yet. Press Refresh Kraken Chart.", color = Muted)
-        }
-        return
-    }
-
-    val visible = candles.takeLast(72)
-    val minPrice = visible.minOf { it.low }
-    val maxPrice = visible.maxOf { it.high }
-    val range = (maxPrice - minPrice).takeIf { it > BigDecimal.ZERO } ?: BigDecimal.ONE
-    val last = visible.last().close
-    val tp = last.multiply(BigDecimal.ONE.add(settings.takeProfitPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
-    val sl = last.multiply(BigDecimal.ONE.subtract(settings.stopLossPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(260.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(PanelAlt)
-            .padding(8.dp)
-    ) {
-        val w = size.width
-        val h = size.height
-        val leftPad = 12f
-        val rightPad = 12f
-        val topPad = 16f
-        val bottomPad = 20f
-        val chartW = w - leftPad - rightPad
-        val chartH = h - topPad - bottomPad
-        val candleSlot = chartW / visible.size.coerceAtLeast(1)
-        val bodyWidth = (candleSlot * 0.55f).coerceAtLeast(3f)
-
-        repeat(4) { idx ->
-            val y = topPad + chartH * idx / 3f
-            drawLine(color = gridColor, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 1f)
-        }
-
-        fun priceToY(price: BigDecimal): Float {
-            val normalized = price.subtract(minPrice).divide(range, 8, RoundingMode.HALF_UP).toFloat()
-            return topPad + chartH * (1f - normalized)
-        }
-
-        visible.forEachIndexed { idx, candle ->
-            val x = leftPad + candleSlot * idx + candleSlot / 2f
-            val color = if (candle.close >= candle.open) upColor else downColor
-            val highY = priceToY(candle.high)
-            val lowY = priceToY(candle.low)
-            val openY = priceToY(candle.open)
-            val closeY = priceToY(candle.close)
-            drawLine(color = color, start = Offset(x, highY), end = Offset(x, lowY), strokeWidth = 2f)
-            drawLine(
-                color = color,
-                start = Offset(x, openY),
-                end = Offset(x, closeY),
-                strokeWidth = bodyWidth,
-                cap = StrokeCap.Round
-            )
-        }
-
-        fun overlayLine(price: BigDecimal, color: Color) {
-            if (price < minPrice || price > maxPrice) return
-            val y = priceToY(price)
-            drawLine(color = color, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 2f)
-        }
         overlayLine(tp, tpColor)
         overlayLine(sl, slColor)
+
+        if (trades.isNotEmpty()) {
+            val firstTime = visible.first().openTimeEpochMs
+            val lastTime = visible.last().openTimeEpochMs
+            val timeRange = (lastTime - firstTime).coerceAtLeast(1L)
+            trades.takeLast(40).forEach { trade: TradeEntity ->
+                val tradeTime = trade.timestampEpochMs.coerceIn(firstTime, lastTime)
+                val x = leftPad + chartW * ((tradeTime - firstTime).toFloat() / timeRange.toFloat())
+                val tradePrice = trade.priceEur.toBigDecimalOrNull() ?: last
+                val y = priceToY(tradePrice.coerceIn(minPrice, maxPrice))
+                val markerColor = if (trade.side.uppercase().contains("BUY")) Mint else Danger
+                drawCircle(color = markerColor, radius = 6f, center = Offset(x, y))
+            }
+        }
 
         val lastX = w - rightPad
         val lastY = priceToY(last)
