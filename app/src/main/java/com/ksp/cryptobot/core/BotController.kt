@@ -777,6 +777,47 @@ class BotController(
     )
 
 
+
+    suspend fun loadTradeJournal(limit: Int = 100): List<TradeEntity> {
+        updateStatus("Trade journal refresh requested. limit=$limit", "INFO")
+        return runCatching { dao.recentTradesSnapshot(limit) }
+            .onSuccess { updateStatus("Trade journal loaded. rows=${it.size}", "INFO") }
+            .onFailure { updateStatus("Trade journal failed: ${it.message}", "ERROR") }
+            .getOrElse { emptyList() }
+    }
+
+    suspend fun runKrakenDataHealth(settings: BotSettings = settingsStore.load()): List<String> {
+        val selectedSymbol = settings.symbols().firstOrNull() ?: "BTCEUR"
+        val lines = mutableListOf<String>()
+        updateStatus("Kraken data health check started for $selectedSymbol.", "INFO")
+        val publicKraken = KrakenSpotClient(apiKey = "", secretKey = "")
+        runCatching { publicKraken.validateSymbol(selectedSymbol) }
+            .onSuccess { lines += "PASS Public AssetPairs: ${it.exchangePair} base=${it.baseAsset} quote=${it.quoteAsset}" }
+            .onFailure { lines += "FAIL Public AssetPairs: ${it.message}" }
+        runCatching { publicKraken.getTicker(selectedSymbol) }
+            .onSuccess { lines += "PASS Public ticker: last=${it.lastPrice}, bid=${it.bid}, ask=${it.ask}" }
+            .onFailure { lines += "FAIL Public ticker: ${it.message}" }
+        runCatching { publicKraken.getCandles(selectedSymbol, Timeframe.M15, 120) }
+            .onSuccess { lines += "PASS Public OHLC: candles=${it.size}, lastClose=${it.lastOrNull()?.close ?: BigDecimal.ZERO}" }
+            .onFailure { lines += "FAIL Public OHLC: ${it.message}" }
+        val selected = createExchange(settings)
+        if (settings.exchangeProvider == ExchangeProvider.KRAKEN && settings.mode != BotMode.PAPER) {
+            runCatching { selected.getAvailableBalances() }
+                .onSuccess { balances ->
+                    val eur = balances["EUR"] ?: balances["ZEUR"] ?: BigDecimal.ZERO
+                    lines += "PASS Private balance permission: EUR/ZEUR available=${eur.setScale(2, RoundingMode.DOWN)}"
+                }
+                .onFailure { lines += "WARN Private balance permission: ${it.message}" }
+            runCatching { selected.getOpenOrders() }
+                .onSuccess { lines += "PASS Private open orders permission: openOrders=${it.size}" }
+                .onFailure { lines += "WARN Private open orders permission: ${it.message}" }
+        } else {
+            lines += "INFO Private checks skipped: provider=${settings.exchangeProvider}, mode=${settings.mode}"
+        }
+        updateStatus("Kraken data health complete. ${lines.count { it.startsWith("PASS") }} pass, ${lines.count { it.startsWith("FAIL") || it.startsWith("WARN") }} warn/fail.", "INFO")
+        return lines
+    }
+
     suspend fun loadKrakenChartCandles(
         settings: BotSettings = settingsStore.load(),
         symbol: String,

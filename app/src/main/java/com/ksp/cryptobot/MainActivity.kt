@@ -93,6 +93,7 @@ import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import com.ksp.cryptobot.learning.TrueSelfLearningEngine
+import com.ksp.cryptobot.data.TradeEntity
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import java.math.BigDecimal
@@ -199,6 +200,16 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 callback(controller.loadKrakenChartCandles(settings, symbol, timeframe, limit))
                             }
+                        },
+                        onLoadTradeJournal = { limit, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.loadTradeJournal(limit))
+                            }
+                        },
+                        onRunKrakenHealth = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.runKrakenDataHealth(settings))
+                            }
                         }
                     )
                 }
@@ -232,7 +243,9 @@ private enum class AppTab(val label: String) {
     BOT("Bot"),
     AI("AI Signals"),
     CHART("Chart"),
+    TRADE_OVERLAY("Trade Overlay"),
     REPLAY("Trade Replay"),
+    TRADE_JOURNAL("Trade Journal"),
     STRATEGY("Strategy Lab"),
     SANDBOX("Strategy Sandbox"),
     BACKTEST("Backtest Lab"),
@@ -241,9 +254,14 @@ private enum class AppTab(val label: String) {
     POSITIONS("Positions"),
     AUTONOMOUS("Autonomous"),
     SELF_LEARNING("Self Learning"),
-    LEARNING_INSPECTOR("Learning Inspector"),
+    LEARNING_INSPECTOR("Learning DB"),
     PERFORMANCE("Performance Lab"),
     PRO("Pro Systems"),
+    KRAKEN_HEALTH("Kraken Health"),
+    SMART_EXIT("Smart Exit v2"),
+    PORTFOLIO_ROTATION("Rotation"),
+    AUTO_TUNER("Auto-Tuner"),
+    RELEASE_SAFETY("Release Safety"),
     PORTFOLIO("Portfolio"),
     NEWS("News Intel"),
     TAX("Belgium Tax"),
@@ -275,7 +293,9 @@ private fun AdvancedBotApp(
     onLoadSelfLearning: (BotSettings, (TrueSelfLearningEngine.LearningSummary) -> Unit) -> Unit,
     onLoadPerformanceLab: (BotSettings, (PerformanceLabSnapshot) -> Unit) -> Unit,
     onRunHistoricalBacktest: (BotSettings, String, Timeframe, StrategyMode, Int, (BacktestReport) -> Unit) -> Unit,
-    onLoadChartCandles: (BotSettings, String, Timeframe, Int, (List<Candle>) -> Unit) -> Unit
+    onLoadChartCandles: (BotSettings, String, Timeframe, Int, (List<Candle>) -> Unit) -> Unit,
+    onLoadTradeJournal: (Int, (List<TradeEntity>) -> Unit) -> Unit,
+    onRunKrakenHealth: (BotSettings, (List<String>) -> Unit) -> Unit
 ) {
     var settings by remember { mutableStateOf(store.load()) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
@@ -295,6 +315,8 @@ private fun AdvancedBotApp(
     var chartCandles by remember { mutableStateOf<List<Candle>>(emptyList()) }
     var chartSymbol by remember { mutableStateOf(settings.symbols().firstOrNull() ?: "BTCEUR") }
     var chartTimeframe by remember { mutableStateOf(Timeframe.M15) }
+    var tradeJournal by remember { mutableStateOf<List<TradeEntity>>(emptyList()) }
+    var krakenHealthLines by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -353,6 +375,19 @@ private fun AdvancedBotApp(
                 chartCandles = result
                 statusStore.write("Chart data auto-loaded. Symbol=$chartSymbol timeframe=${chartTimeframe.name} candles=${result.size}")
                 status = "Chart loaded: $chartSymbol ${chartTimeframe.name}"
+            }
+        }
+        if (currentTab == AppTab.TRADE_JOURNAL || currentTab == AppTab.CHART || currentTab == AppTab.REPLAY) {
+            onLoadTradeJournal(100) { result ->
+                tradeJournal = result
+                statusStore.write("Trade journal auto-loaded. rows=${result.size}")
+            }
+        }
+        if (currentTab == AppTab.KRAKEN_HEALTH) {
+            onRunKrakenHealth(settings) { result ->
+                krakenHealthLines = result
+                statusStore.write("Kraken health loaded. rows=${result.size}")
+                status = "Kraken health check complete"
             }
         }
     }
@@ -455,6 +490,7 @@ private fun AdvancedBotApp(
                     selectedSymbol = chartSymbol,
                     selectedTimeframe = chartTimeframe,
                     latestDecision = decisions.firstOrNull { it.symbol.equals(chartSymbol, ignoreCase = true) },
+                    trades = tradeJournal.filter { it.symbol.equals(chartSymbol, ignoreCase = true) },
                     onSymbolChange = { symbol ->
                         chartSymbol = symbol
                         onLoadChartCandles(settings, symbol, chartTimeframe, 180) { result ->
@@ -475,6 +511,18 @@ private fun AdvancedBotApp(
                             statusStore.write("Chart manually refreshed. Symbol=$chartSymbol timeframe=${chartTimeframe.name} candles=${result.size}")
                             status = "Chart refreshed"
                         }
+                        onLoadTradeJournal(100) { result -> tradeJournal = result }
+                    }
+                )
+                AppTab.TRADE_OVERLAY -> TradeOverlayScreen(
+                    settings = settings,
+                    candles = chartCandles,
+                    trades = tradeJournal,
+                    selectedSymbol = chartSymbol,
+                    onRefresh = {
+                        onLoadChartCandles(settings, chartSymbol, chartTimeframe, 240) { result -> chartCandles = result }
+                        onLoadTradeJournal(100) { result -> tradeJournal = result }
+                        status = "Trade overlay refreshed"
                     }
                 )
                 AppTab.REPLAY -> TradeReplayScreen(
@@ -486,6 +534,16 @@ private fun AdvancedBotApp(
                             chartCandles = result
                             statusStore.write("Trade replay data loaded. Symbol=$chartSymbol candles=${result.size}")
                             status = "Trade replay loaded"
+                        }
+                    }
+                )
+                AppTab.TRADE_JOURNAL -> TradeJournalScreen(
+                    trades = tradeJournal,
+                    onRefresh = {
+                        onLoadTradeJournal(200) { result ->
+                            tradeJournal = result
+                            statusStore.write("Trade journal manually refreshed. rows=${result.size}")
+                            status = "Trade journal refreshed"
                         }
                     }
                 )
@@ -579,6 +637,21 @@ private fun AdvancedBotApp(
                     }
                 )
                 AppTab.PRO -> ProSystemsScreen(settings = settings)
+                AppTab.KRAKEN_HEALTH -> KrakenHealthMonitorScreen(
+                    settings = settings,
+                    lines = krakenHealthLines,
+                    onRefresh = {
+                        onRunKrakenHealth(settings) { result ->
+                            krakenHealthLines = result
+                            statusStore.write("Kraken data health manually refreshed. rows=${result.size}")
+                            status = "Kraken data health refreshed"
+                        }
+                    }
+                )
+                AppTab.SMART_EXIT -> SmartExitV2Screen(settings = settings, trades = tradeJournal)
+                AppTab.PORTFOLIO_ROTATION -> PortfolioRotationEngineScreen(settings = settings, decisions = decisions, trades = tradeJournal)
+                AppTab.AUTO_TUNER -> StrategyAutoTunerScreen(settings = settings, onRunHistoricalBacktest = onRunHistoricalBacktest)
+                AppTab.RELEASE_SAFETY -> ReleaseSafetyLockScreen(settings = settings, healthLines = krakenHealthLines)
                 AppTab.PORTFOLIO -> PortfolioScreen(
                     settings = settings,
                     snapshot = portfolioSnapshot,
@@ -731,7 +804,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.9.0 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.9.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -753,7 +826,9 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
             AppTab.SYMBOLS,
             AppTab.AI,
             AppTab.CHART,
+            AppTab.TRADE_OVERLAY,
             AppTab.REPLAY,
+            AppTab.TRADE_JOURNAL,
             AppTab.SELF_LEARNING,
             AppTab.LEARNING_INSPECTOR,
             AppTab.PERFORMANCE,
@@ -761,6 +836,11 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
             AppTab.SANDBOX,
             AppTab.AUTONOMOUS,
             AppTab.PRO,
+            AppTab.KRAKEN_HEALTH,
+            AppTab.SMART_EXIT,
+            AppTab.PORTFOLIO_ROTATION,
+            AppTab.AUTO_TUNER,
+            AppTab.RELEASE_SAFETY,
             AppTab.ORDERS,
             AppTab.POSITIONS,
             AppTab.PORTFOLIO,
@@ -1114,6 +1194,7 @@ private fun ChartScreen(
     selectedSymbol: String,
     selectedTimeframe: Timeframe,
     latestDecision: AiDecision?,
+    trades: List<TradeEntity>,
     onSymbolChange: (String) -> Unit,
     onTimeframeChange: (Timeframe) -> Unit,
     onRefresh: () -> Unit
@@ -1170,7 +1251,7 @@ private fun ChartScreen(
                         StatusPill(latestDecision?.finalAction?.name ?: "NO SIGNAL", decisionColor(latestDecision?.finalAction ?: SignalAction.HOLD))
                     }
                     Spacer(Modifier.height(12.dp))
-                    CandlestickChart(candles = candles, settings = settings)
+                    CandlestickChart(candles = candles, settings = settings, trades = trades)
                     Spacer(Modifier.height(12.dp))
                     ChartStats(candles = candles, decision = latestDecision, settings = settings)
                 }
@@ -1259,6 +1340,17 @@ private fun PriceLineChart(candles: List<Candle>, settings: BotSettings) {
         }
         overlayLine(tp, tpColor)
         overlayLine(sl, slColor)
+
+        val firstTime = visible.first().openTimeEpochMs
+        val lastTime = visible.last().openTimeEpochMs
+        val timeRange = (lastTime - firstTime).coerceAtLeast(1L)
+        trades.takeLast(40).forEach { trade ->
+            val t = trade.timestampEpochMs.coerceIn(firstTime, lastTime)
+            val x = leftPad + chartW * ((t - firstTime).toFloat() / timeRange.toFloat())
+            val y = priceToY(trade.priceEur.toBigDecimalOrNull() ?: last)
+            val markerColor = if (trade.side.uppercase().contains("BUY")) Mint else Danger
+            drawCircle(color = markerColor, radius = 6f, center = Offset(x, y))
+        }
 
         val lastX = w - rightPad
         val lastY = priceToY(last)
@@ -1390,7 +1482,7 @@ private fun NotificationCenterScreen(history: List<String>, settings: BotSetting
 
 
 @Composable
-private fun CandlestickChart(candles: List<Candle>, settings: BotSettings) {
+private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trades: List<TradeEntity> = emptyList()) {
     val upColor = Mint
     val downColor = Danger
     val tpColor = Amber
@@ -1472,6 +1564,17 @@ private fun CandlestickChart(candles: List<Candle>, settings: BotSettings) {
         overlayLine(tp, tpColor)
         overlayLine(sl, slColor)
 
+        val firstTime = visible.first().openTimeEpochMs
+        val lastTime = visible.last().openTimeEpochMs
+        val timeRange = (lastTime - firstTime).coerceAtLeast(1L)
+        trades.takeLast(40).forEach { trade ->
+            val t = trade.timestampEpochMs.coerceIn(firstTime, lastTime)
+            val x = leftPad + chartW * ((t - firstTime).toFloat() / timeRange.toFloat())
+            val y = priceToY(trade.priceEur.toBigDecimalOrNull() ?: last)
+            val markerColor = if (trade.side.uppercase().contains("BUY")) Mint else Danger
+            drawCircle(color = markerColor, radius = 6f, center = Offset(x, y))
+        }
+
         val lastX = w - rightPad
         val lastY = priceToY(last)
         drawCircle(color = Electric, radius = 7f, center = Offset(lastX, lastY))
@@ -1519,7 +1622,7 @@ private fun TradeReplayScreen(
         }
         item {
             GlassCard {
-                CandlestickChart(candles = previous.ifEmpty { visible.take(1) }, settings = settings)
+                CandlestickChart(candles = previous.ifEmpty { visible.take(1) }, settings = settings, trades = emptyList())
                 Spacer(Modifier.height(12.dp))
                 if (current == null) {
                     Text("No replay candles loaded yet.", color = Muted)
@@ -1697,6 +1800,326 @@ private fun BackupRestoreScreen(
                 SectionTitle("Restore behavior", "This first restore layer intentionally avoids importing API keys.")
                 Text("API keys are not exported here. Keep withdrawal permission disabled on Kraken API keys.", color = Muted)
                 Text("Future version can add encrypted local backup/restore for learning profiles and trade history.", color = Muted)
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun TradeOverlayScreen(
+    settings: BotSettings,
+    candles: List<Candle>,
+    trades: List<TradeEntity>,
+    selectedSymbol: String,
+    onRefresh: () -> Unit
+) {
+    val symbolTrades = trades.filter { it.symbol.equals(selectedSymbol, ignoreCase = true) }
+    val buys = symbolTrades.count { it.side.uppercase().contains("BUY") }
+    val sells = symbolTrades.count { it.side.uppercase().contains("SELL") }
+    val realized = symbolTrades.mapNotNull { it.realizedPnlEur.toBigDecimalOrNull() }.fold(BigDecimal.ZERO) { a, b -> a + b }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Real Trade Marker + Position Overlay", "Shows actual trade history markers on the Kraken chart.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(selectedSymbol, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+                        Text("Markers are loaded from the local trade journal database.", color = Muted)
+                    }
+                    Button(onClick = onRefresh) { Text("Refresh") }
+                }
+                Spacer(Modifier.height(12.dp))
+                CandlestickChart(candles = candles, settings = settings, trades = symbolTrades)
+            }
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Buys", buys.toString(), "Journal markers", Mint) }
+                item { MetricCard("Sells", sells.toString(), "Journal markers", Danger) }
+                item { MetricCard("Realized", "€${realized.setScale(2, RoundingMode.HALF_UP)}", "Known P/L", if (realized >= BigDecimal.ZERO) Mint else Danger) }
+                item { MetricCard("TP/SL", "ON", "Overlay lines", Amber) }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Position overlay logic", "The chart now supports actual BUY/SELL dots, TP/SL overlay lines, and current price marker.")
+                Text("Next deeper layer: draw partial-sell markers, average-entry bands and position-size bubbles per fill.", color = Muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TradeJournalScreen(trades: List<TradeEntity>, onRefresh: () -> Unit) {
+    val realized = trades.mapNotNull { it.realizedPnlEur.toBigDecimalOrNull() }.fold(BigDecimal.ZERO) { a, b -> a + b }
+    val buyCount = trades.count { it.side.uppercase().contains("BUY") }
+    val sellCount = trades.count { it.side.uppercase().contains("SELL") }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item { SectionTitle("Real Trade Journal", "Every local paper/live trade with AI score, fees, reason and P/L.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Journal Summary", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+                        Text("Rows loaded: ${trades.size}", color = Muted)
+                    }
+                    Button(onClick = onRefresh) { Text("Refresh") }
+                }
+                Spacer(Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item { MetricCard("Buys", buyCount.toString(), "Entries", Mint) }
+                    item { MetricCard("Sells", sellCount.toString(), "Exits", Danger) }
+                    item { MetricCard("Realized P/L", "€${realized.setScale(2, RoundingMode.HALF_UP)}", "Known from DB", if (realized >= BigDecimal.ZERO) Mint else Danger) }
+                }
+            }
+        }
+        if (trades.isEmpty()) {
+            item { GlassCard { Text("No trade rows found yet. Run PAPER mode or sync live history first.", color = Muted) } }
+        } else {
+            items(trades.take(100)) { trade ->
+                GlassCard {
+                    Column {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("${trade.symbol} ${trade.side}", fontWeight = FontWeight.ExtraBold)
+                                Text("Qty ${trade.quantity} @ €${trade.priceEur} | Fee €${trade.feeEur}", color = Muted)
+                            }
+                            StatusPill(if (trade.paper) "PAPER" else "LIVE", if (trade.paper) Electric else Mint)
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text("P/L €${trade.realizedPnlEur} | AI ${trade.aiScore}", color = if ((trade.realizedPnlEur.toBigDecimalOrNull() ?: BigDecimal.ZERO) >= BigDecimal.ZERO) Mint else Danger)
+                        if (trade.aiReason.isNotBlank()) Text(trade.aiReason, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KrakenHealthMonitorScreen(settings: BotSettings, lines: List<String>, onRefresh: () -> Unit) {
+    val pass = lines.count { it.startsWith("PASS") }
+    val warn = lines.count { it.startsWith("WARN") }
+    val fail = lines.count { it.startsWith("FAIL") }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Kraken Live Data Health Monitor", "Diagnoses public market data, private permissions, balances and open orders.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Provider ${settings.exchangeProvider}", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+                        Text("Mode ${settings.mode} | Symbols ${settings.symbolsCsv}", color = Muted)
+                    }
+                    Button(onClick = onRefresh) { Text("Run Check") }
+                }
+                Spacer(Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item { MetricCard("PASS", pass.toString(), "Checks", Mint) }
+                    item { MetricCard("WARN", warn.toString(), "Warnings", Amber) }
+                    item { MetricCard("FAIL", fail.toString(), "Failures", Danger) }
+                }
+            }
+        }
+        if (lines.isEmpty()) {
+            item { GlassCard { Text("No health check loaded yet. Press Run Check.", color = Muted) } }
+        } else {
+            items(lines) { line ->
+                val color = when {
+                    line.startsWith("PASS") -> Mint
+                    line.startsWith("WARN") -> Amber
+                    line.startsWith("FAIL") -> Danger
+                    else -> Muted
+                }
+                GlassCard { Text(line, color = color) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmartExitV2Screen(settings: BotSettings, trades: List<TradeEntity>) {
+    val recentSells = trades.filter { it.side.uppercase().contains("SELL") }.take(30)
+    val avgPnl = if (recentSells.isEmpty()) BigDecimal.ZERO else {
+        recentSells.mapNotNull { it.realizedPnlEur.toBigDecimalOrNull() }.fold(BigDecimal.ZERO) { a, b -> a + b }
+            .divide(BigDecimal(recentSells.size), 4, RoundingMode.HALF_UP)
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Smart Exit Engine v2", "Partial scaling, spike-aware hold, profit-lock and trailing logic overview.") }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("TP", "${settings.takeProfitPercent}%", "Base target", Mint) }
+                item { MetricCard("SL", "${settings.stopLossPercent}%", "Hard protection", Danger) }
+                item { MetricCard("Trail", "${settings.trailingDistancePercent}%", "Base trailing", Amber) }
+                item { MetricCard("Avg sell P/L", "€${avgPnl.setScale(2, RoundingMode.HALF_UP)}", "Recent sells", if (avgPnl >= BigDecimal.ZERO) Mint else Danger) }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Exit decision stack", "Order of protection for sell decisions.")
+                ToggleInfo("Hard stop-loss never overridden", settings.autoStopLossEnabled)
+                ToggleInfo("Spike profit timing", settings.spikeProfitTimingEnabled)
+                ToggleInfo("Learned hold TP deferral", settings.learnedHoldAllowTakeProfitDeferral)
+                ToggleInfo("Learned hold trailing deferral", settings.learnedHoldAllowTrailingDeferral)
+                ToggleInfo("Smart profit lock", settings.smartProfitLockEnabled)
+                Text("v2 behavior: hold strong continuation candidates, scale/lock profits on exhaustion, and keep emergency exits above learned holds.", color = Muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortfolioRotationEngineScreen(settings: BotSettings, decisions: List<AiDecision>, trades: List<TradeEntity>) {
+    val symbols = settings.symbols()
+    val sellSignals = decisions.count { it.finalAction == SignalAction.SELL || it.finalAction == SignalAction.AVOID || it.finalAction == SignalAction.STRONG_AVOID }
+    val buySignals = decisions.count { it.finalAction == SignalAction.BUY || it.finalAction == SignalAction.SMALL_BUY }
+    val recentSymbols = trades.map { it.symbol }.distinct().take(6)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Portfolio Rotation Engine", "Ranks whether to hold EUR, hold current assets, or rotate into stronger symbols.") }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Universe", symbols.size.toString(), "Configured symbols", Electric) }
+                item { MetricCard("Buy signals", buySignals.toString(), "Current AI", Mint) }
+                item { MetricCard("Exit signals", sellSignals.toString(), "Current AI", Danger) }
+                item { MetricCard("Max positions", settings.maxSimultaneousLivePositions.toString(), "Risk cap", Amber) }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Rotation policy", "How the bot should think about capital allocation.")
+                Text("1. Keep EUR as primary cash for Belgium/Kraken deposits.", color = Muted)
+                Text("2. Prefer symbols with stronger AI score and approved Performance Lab status.", color = Muted)
+                Text("3. Reduce exposure when several holdings show SELL/AVOID.", color = Muted)
+                Text("4. Avoid crypto-to-crypto buys unless explicitly enabled.", color = Muted)
+                Text("Recently traded: ${recentSymbols.joinToString(", ").ifBlank { "none" }}", color = Mint)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StrategyAutoTunerScreen(
+    settings: BotSettings,
+    onRunHistoricalBacktest: (BotSettings, String, Timeframe, StrategyMode, Int, (BacktestReport) -> Unit) -> Unit
+) {
+    var reports by remember { mutableStateOf<List<BacktestReport>>(emptyList()) }
+    var running by remember { mutableStateOf(false) }
+    val symbol = settings.symbols().firstOrNull() ?: "BTCEUR"
+    val strategies = listOf(StrategyMode.SCALPING, StrategyMode.TREND, StrategyMode.BREAKOUT, StrategyMode.REVERSAL, StrategyMode.NEWS_MOMENTUM)
+
+    fun runAutoTune() {
+        running = true
+        reports = emptyList()
+        strategies.forEach { strategy ->
+            onRunHistoricalBacktest(settings, symbol, Timeframe.M15, strategy, 720) { report ->
+                reports = (reports + report).sortedWith(compareByDescending<BacktestReport> { it.passedLiveGate }.thenByDescending { it.profitFactor })
+                if (reports.size >= strategies.size) running = false
+            }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Strategy Auto-Tuner", "Tests strategies on Kraken OHLC and recommends the strongest candidate.") }
+        item {
+            HeroCard(
+                title = "Auto-tune $symbol",
+                subtitle = if (running) "Running OHLC tests..." else "Compares strategy candidates against live-gate thresholds.",
+                primaryButton = if (running) "Running..." else "Run Auto-Tune",
+                secondaryButton = "Clear",
+                onPrimary = { if (!running) runAutoTune() },
+                onSecondary = { reports = emptyList(); running = false }
+            )
+        }
+        if (reports.isNotEmpty()) {
+            val best = reports.first()
+            item {
+                GlassCard {
+                    Text("Recommended: ${best.strategy.name}", fontWeight = FontWeight.ExtraBold, color = Mint)
+                    Text("Profit factor ${best.profitFactor}, win ${best.winRatePercent}%, drawdown ${best.maxDrawdownPercent}%", color = Muted)
+                    Text("Use this as a recommendation only; settings are not auto-written yet.", color = Amber)
+                }
+            }
+            items(reports) { BacktestReportCard(title = "Auto-tune ${it.strategy.name}", report = it) }
+        } else {
+            item { GlassCard { Text("No auto-tune results yet.", color = Muted) } }
+        }
+    }
+}
+
+@Composable
+private fun ReleaseSafetyLockScreen(settings: BotSettings, healthLines: List<String>) {
+    val checks = listOf(
+        "Provider selected" to (settings.exchangeProvider != ExchangeProvider.MANUAL),
+        "Paper or live acknowledged" to (settings.mode == BotMode.PAPER || settings.liveTradingAcknowledged),
+        "EUR quote allowed" to settings.allowedQuoteAssetsCsv.uppercase().contains("EUR"),
+        "Non-EUR quote buys off" to !settings.nonEurQuoteBuyEnabled,
+        "Backtest gate enabled" to settings.enableBacktestGate,
+        "Forward-test gate enabled" to settings.enableForwardTestGate,
+        "Small position cap" to (settings.maxPositionEur <= BigDecimal("25.00")),
+        "Self-learning enabled" to settings.trueSelfLearningEnabled,
+        "Stop-loss enabled" to settings.autoStopLossEnabled,
+        "Kraken health has no FAIL" to healthLines.none { it.startsWith("FAIL") }
+    )
+    val passed = checks.count { it.second }
+    val liveReady = passed == checks.size
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SectionTitle("Release Mode / Safety Lock", "Final checklist before trusting live automation.") }
+        item {
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(if (liveReady) "LIVE READY" else "BLOCKED", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium, color = if (liveReady) Mint else Danger)
+                        Text("$passed/${checks.size} checks passed", color = Muted)
+                    }
+                    StatusPill(if (liveReady) "READY" else "FIX", if (liveReady) Mint else Danger)
+                }
+            }
+        }
+        items(checks) { check ->
+            GlassCard {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(check.first, modifier = Modifier.weight(1f), color = TextPrimary)
+                    StatusPill(if (check.second) "PASS" else "BLOCK", if (check.second) Mint else Danger)
+                }
+            }
+        }
+        item {
+            GlassCard {
+                Text("This safety lock cannot verify Kraken withdrawal permission from the API response. Confirm manually that withdrawal permission is disabled.", color = Amber)
             }
         }
     }
