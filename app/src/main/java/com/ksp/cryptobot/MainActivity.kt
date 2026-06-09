@@ -8,7 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.Canvas
@@ -804,7 +804,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.9.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.9.2 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1248,7 +1248,7 @@ private fun ChartScreen(
                             Text("$selectedSymbol ${selectedTimeframe.name}", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
                             Text("Candles loaded: ${candles.size}", color = Muted)
                         }
-                        StatusPill(latestDecision?.finalAction?.name ?: "NO SIGNAL", decisionColor(latestDecision?.finalAction ?: SignalAction.HOLD))
+                        StatusPill(latestDecision?.finalAction?.name ?: "NO SIGNAL", actionColor(latestDecision?.finalAction ?: SignalAction.WAIT))
                     }
                     Spacer(Modifier.height(12.dp))
                     CandlestickChart(candles = candles, settings = settings, trades = trades)
@@ -1331,7 +1331,7 @@ private fun PriceLineChart(candles: List<Candle>, settings: BotSettings) {
             val y = priceToY(close)
             if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
-        drawPath(path = path, color = lineColor, style = Stroke(width = 4f, cap = StrokeCap.Round))
+        drawPath(path = path, color = lineColor, style = DrawStroke(width = 4f, cap = StrokeCap.Round))
 
         fun overlayLine(price: BigDecimal, color: Color) {
             val bounded = price.coerceIn(minPrice, maxPrice)
@@ -1340,17 +1340,6 @@ private fun PriceLineChart(candles: List<Candle>, settings: BotSettings) {
         }
         overlayLine(tp, tpColor)
         overlayLine(sl, slColor)
-
-        val firstTime = visible.first().openTimeEpochMs
-        val lastTime = visible.last().openTimeEpochMs
-        val timeRange = (lastTime - firstTime).coerceAtLeast(1L)
-        trades.takeLast(40).forEach { trade ->
-            val t = trade.timestampEpochMs.coerceIn(firstTime, lastTime)
-            val x = leftPad + chartW * ((t - firstTime).toFloat() / timeRange.toFloat())
-            val y = priceToY(trade.priceEur.toBigDecimalOrNull() ?: last)
-            val markerColor = if (trade.side.uppercase().contains("BUY")) Mint else Danger
-            drawCircle(color = markerColor, radius = 6f, center = Offset(x, y))
-        }
 
         val lastX = w - rightPad
         val lastY = priceToY(last)
@@ -1373,7 +1362,7 @@ private fun ChartStats(candles: List<Candle>, decision: AiDecision?, settings: B
         item { MetricCard("Change", "${change}%", "Loaded candles", if (change >= BigDecimal.ZERO) Mint else Danger) }
         item { MetricCard("High", "€${high.setScale(2, RoundingMode.HALF_UP)}", "Window high", Amber) }
         item { MetricCard("Low", "€${low.setScale(2, RoundingMode.HALF_UP)}", "Window low", Danger) }
-        item { MetricCard("AI", decision?.finalAction?.name ?: "HOLD", "Score ${decision?.finalScore ?: 0}", decisionColor(decision?.finalAction ?: SignalAction.HOLD)) }
+        item { MetricCard("AI", decision?.finalAction?.name ?: "WAIT", "Score ${decision?.finalScore ?: 0}", actionColor(decision?.finalAction ?: SignalAction.WAIT)) }
     }
 }
 
@@ -1561,19 +1550,87 @@ private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trade
             val y = priceToY(price)
             drawLine(color = color, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 2f)
         }
+private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trades: List<TradeEntity> = emptyList()) {
+    val upColor = Mint
+    val downColor = Danger
+    val tpColor = Amber
+    val slColor = Danger
+    val gridColor = Stroke
+
+    if (candles.size < 2) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp)
+                .background(PanelAlt, RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No chart data yet. Press Refresh Kraken Chart.", color = Muted)
+        }
+        return
+    }
+
+    val visible = candles.takeLast(72)
+    val minPrice = visible.minOf { it.low }
+    val maxPrice = visible.maxOf { it.high }
+    val range = (maxPrice - minPrice).takeIf { it > BigDecimal.ZERO } ?: BigDecimal.ONE
+    val last = visible.last().close
+    val tp = last.multiply(BigDecimal.ONE.add(settings.takeProfitPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
+    val sl = last.multiply(BigDecimal.ONE.subtract(settings.stopLossPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(260.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(PanelAlt)
+            .padding(8.dp)
+    ) {
+        val w = size.width
+        val h = size.height
+        val leftPad = 12f
+        val rightPad = 12f
+        val topPad = 16f
+        val bottomPad = 20f
+        val chartW = w - leftPad - rightPad
+        val chartH = h - topPad - bottomPad
+        val candleSlot = chartW / visible.size.coerceAtLeast(1)
+        val bodyWidth = (candleSlot * 0.55f).coerceAtLeast(3f)
+
+        repeat(4) { idx ->
+            val y = topPad + chartH * idx / 3f
+            drawLine(color = gridColor, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 1f)
+        }
+
+        fun priceToY(price: BigDecimal): Float {
+            val normalized = price.subtract(minPrice).divide(range, 8, RoundingMode.HALF_UP).toFloat()
+            return topPad + chartH * (1f - normalized)
+        }
+
+        visible.forEachIndexed { idx, candle ->
+            val x = leftPad + candleSlot * idx + candleSlot / 2f
+            val color = if (candle.close >= candle.open) upColor else downColor
+            val highY = priceToY(candle.high)
+            val lowY = priceToY(candle.low)
+            val openY = priceToY(candle.open)
+            val closeY = priceToY(candle.close)
+            drawLine(color = color, start = Offset(x, highY), end = Offset(x, lowY), strokeWidth = 2f)
+            drawLine(
+                color = color,
+                start = Offset(x, openY),
+                end = Offset(x, closeY),
+                strokeWidth = bodyWidth,
+                cap = StrokeCap.Round
+            )
+        }
+
+        fun overlayLine(price: BigDecimal, color: Color) {
+            if (price < minPrice || price > maxPrice) return
+            val y = priceToY(price)
+            drawLine(color = color, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 2f)
+        }
         overlayLine(tp, tpColor)
         overlayLine(sl, slColor)
-
-        val firstTime = visible.first().openTimeEpochMs
-        val lastTime = visible.last().openTimeEpochMs
-        val timeRange = (lastTime - firstTime).coerceAtLeast(1L)
-        trades.takeLast(40).forEach { trade ->
-            val t = trade.timestampEpochMs.coerceIn(firstTime, lastTime)
-            val x = leftPad + chartW * ((t - firstTime).toFloat() / timeRange.toFloat())
-            val y = priceToY(trade.priceEur.toBigDecimalOrNull() ?: last)
-            val markerColor = if (trade.side.uppercase().contains("BUY")) Mint else Danger
-            drawCircle(color = markerColor, radius = 6f, center = Offset(x, y))
-        }
 
         val lastX = w - rightPad
         val lastY = priceToY(last)
@@ -2466,7 +2523,7 @@ private fun PositionCard(position: com.ksp.cryptobot.core.PositionInfo) {
             }
             StatusPill("${position.unrealizedPnlPercent.setScale(2, java.math.RoundingMode.HALF_UP)}%", pnlColor)
         }
-        LinearProgressIndicator(progress = { (position.unrealizedPnlPercent.abs().min(BigDecimal("10")).divide(BigDecimal("10"), 2, java.math.RoundingMode.HALF_UP).toFloat()).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp), color = pnlColor, trackColor = Stroke)
+        LinearProgressIndicator(progress = (position.unrealizedPnlPercent.abs().min(BigDecimal("10")).divide(BigDecimal("10"), 2, java.math.RoundingMode.HALF_UP).toFloat()).coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth().height(8.dp), color = pnlColor, trackColor = Stroke)
         Text("entry=${position.entryPrice.setScale(4, java.math.RoundingMode.DOWN)} • now=${position.currentPrice.setScale(4, java.math.RoundingMode.DOWN)} • high=${position.highestPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
         Text("TP=${position.takeProfitPrice.setScale(4, java.math.RoundingMode.DOWN)} • SL=${position.stopPrice.setScale(4, java.math.RoundingMode.DOWN)} • trail=${position.trailingStopPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
         Text("P/L≈€${position.unrealizedPnlEur.setScale(2, java.math.RoundingMode.HALF_UP)} • ${position.reason}", color = pnlColor)
@@ -2561,7 +2618,7 @@ private fun LiveBalanceRow(asset: com.ksp.cryptobot.core.BalanceInfo, progress: 
             }
             Text("€${asset.eurValue.setScale(2, java.math.RoundingMode.DOWN)}", color = Mint, fontWeight = FontWeight.Bold)
         }
-        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(8.dp), color = Mint, trackColor = Stroke)
+        LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(8.dp), color = Mint, trackColor = Stroke)
         val actionText = when {
             asset.asset == "EUR" && asset.free >= BigDecimal("5.00") -> "Available for automatic BUY orders."
             asset.asset == "EUR" -> "Too low for BUY orders. Deposit/convert to free EUR if you want buys."
@@ -3364,7 +3421,7 @@ private fun DecisionCard(decision: AiDecision, expanded: Boolean = false) {
             }
             StatusPill("${decision.confidencePercent}%", accent)
         }
-        LinearProgressIndicator(progress = { decision.finalScore.coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth().height(8.dp), color = accent, trackColor = Stroke)
+        LinearProgressIndicator(progress = decision.finalScore.coerceIn(0, 100) / 100f, modifier = Modifier.fillMaxWidth().height(8.dp), color = accent, trackColor = Stroke)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MiniScore("Tech", decision.technicalScore)
             MiniScore("News", decision.newsScore)
@@ -3392,7 +3449,7 @@ private fun AllocationRow(symbol: String, value: String, progress: Float) {
             Text(symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text(value, color = Mint, fontWeight = FontWeight.Bold)
         }
-        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(8.dp), color = Mint, trackColor = Stroke)
+        LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(8.dp), color = Mint, trackColor = Stroke)
     }
 }
 
