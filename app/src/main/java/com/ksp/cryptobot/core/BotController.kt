@@ -23,6 +23,7 @@ import com.ksp.cryptobot.lifecycle.TradeLifecycleManager
 import com.ksp.cryptobot.strategy.RecommendationEngine
 import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.autonomous.AutonomousIntelligencePack
+import com.ksp.cryptobot.backtest.BacktestEngine
 import com.ksp.cryptobot.completion.LiveVerificationEngine
 import com.ksp.cryptobot.completion.LiveVerificationResult
 import com.ksp.cryptobot.learning.TrueSelfLearningEngine
@@ -774,6 +775,59 @@ class BotController(
         explanation = explanation,
         timestampEpochMs = createdAt.toEpochMilli()
     )
+
+
+    suspend fun loadKrakenChartCandles(
+        settings: BotSettings = settingsStore.load(),
+        symbol: String,
+        timeframe: Timeframe,
+        limit: Int = 180
+    ): List<Candle> {
+        val cleanSymbol = symbol.uppercase().replace("/", "").replace("-", "").ifBlank { settings.symbols().firstOrNull() ?: "BTCEUR" }
+        updateStatus("Chart data refresh started: $cleanSymbol ${timeframe.name}, candles=$limit", "INFO")
+        return runCatching {
+            KrakenSpotClient(apiKey = "", secretKey = "").getCandles(cleanSymbol, timeframe, limit.coerceIn(60, 720))
+        }.onSuccess {
+            updateStatus("Chart data loaded: $cleanSymbol ${timeframe.name}, candles=${it.size}", "INFO")
+        }.onFailure {
+            updateStatus("Chart data failed for $cleanSymbol: ${it.message}", "ERROR")
+        }.getOrElse { emptyList() }
+    }
+
+    suspend fun runKrakenHistoricalBacktest(
+        settings: BotSettings = settingsStore.load(),
+        symbol: String,
+        timeframe: Timeframe,
+        strategy: StrategyMode,
+        limit: Int
+    ): BacktestReport {
+        val cleanSymbol = symbol.uppercase().replace("/", "").replace("-", "").ifBlank { "BTCEUR" }
+        val actualStrategy = if (strategy == StrategyMode.AUTO) StrategyMode.TREND else strategy
+        updateStatus("Kraken OHLC backtest started: $cleanSymbol ${timeframe.name}, candles=$limit, strategy=${actualStrategy.name}", "INFO")
+
+        return runCatching {
+            val candles = KrakenSpotClient(apiKey = "", secretKey = "").getCandles(cleanSymbol, timeframe, limit.coerceIn(80, 720))
+            val report = BacktestEngine().run(cleanSymbol, timeframe, actualStrategy, candles, settings)
+            updateStatus("Kraken OHLC backtest complete: ${report.symbol}, trades=${report.trades}, win=${report.winRatePercent}%, PF=${report.profitFactor}", if (report.passedLiveGate) "LIVE" else "WARN")
+            report
+        }.getOrElse { error ->
+            val msg = error.message ?: "Unknown Kraken OHLC error"
+            updateStatus("Kraken OHLC backtest failed for $cleanSymbol: $msg", "ERROR")
+            BacktestReport(
+                symbol = cleanSymbol,
+                strategy = actualStrategy,
+                timeframe = timeframe,
+                trades = 0,
+                winRatePercent = BigDecimal.ZERO,
+                profitFactor = BigDecimal.ZERO,
+                maxDrawdownPercent = BigDecimal.ZERO,
+                netReturnPercent = BigDecimal.ZERO,
+                passedLiveGate = false,
+                summary = "Kraken OHLC backtest failed: $msg"
+            )
+        }
+    }
+
     fun loadPerformanceLabSnapshot(settings: BotSettings): PerformanceLabSnapshot {
         return PerformanceLabEngine().buildSnapshot(settings)
     }

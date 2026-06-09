@@ -95,8 +95,15 @@ class BotForegroundService : Service() {
     }
 
     private fun createChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, "Bot status", NotificationManager.IMPORTANCE_LOW)
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val manager = getSystemService(NotificationManager::class.java)
+        val channels = listOf(
+            NotificationChannel(CHANNEL_ID, "Bot status", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_TRADES, "Trade executions", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CHANNEL_RISK, "Risk and blocked trades", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CHANNEL_LEARNING, "Learning and strategy changes", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_API, "Exchange/API status", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        manager.createNotificationChannels(channels)
     }
 
     override fun onDestroy() {
@@ -110,6 +117,10 @@ class BotForegroundService : Service() {
         const val ACTION_START = "com.ksp.cryptobot.START"
         const val ACTION_STOP = "com.ksp.cryptobot.STOP"
         private const val CHANNEL_ID = "bot_status"
+        private const val CHANNEL_TRADES = "trade_executions"
+        private const val CHANNEL_RISK = "risk_blocked_trades"
+        private const val CHANNEL_LEARNING = "learning_strategy_changes"
+        private const val CHANNEL_API = "exchange_api_status"
         private const val NOTIFICATION_ID = 1001
     }
 }
