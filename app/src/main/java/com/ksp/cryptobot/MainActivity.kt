@@ -786,6 +786,14 @@ private fun AdvancedBotApp(
                     settings = settings,
                     systemTestLines = systemTestLines,
                     onOpen = { currentTab = it },
+                    onModeChange = { mode ->
+                        persistSettings(settings.copy(
+                            mode = mode,
+                            manualExecutionMode = if (mode == BotMode.LIVE_AUTO) false else settings.manualExecutionMode
+                        ))
+                        statusStore.write("Trading mode changed to $mode from Settings hub.", "INFO")
+                        status = "Mode changed to $mode"
+                    },
                     onRunSystemTest = {
                         onRunSystemTest(settings) { result ->
                             systemTestLines = result
@@ -840,6 +848,14 @@ private fun AdvancedBotApp(
                             mode = if (provider == ExchangeProvider.PAPER) BotMode.PAPER else settings.mode,
                             manualExecutionMode = provider == ExchangeProvider.MANUAL || provider == ExchangeProvider.BINANCE_READ_ONLY
                         ))
+                    },
+                    onModeChange = { mode ->
+                        persistSettings(settings.copy(
+                            mode = mode,
+                            manualExecutionMode = if (mode == BotMode.LIVE_AUTO) false else settings.manualExecutionMode
+                        ))
+                        statusStore.write("Trading mode changed to $mode from Basic Settings.", "INFO")
+                        status = "Mode changed to $mode"
                     },
                     onManualMode = { persistSettings(settings.copy(manualExecutionMode = it)) },
                     onMarketOrders = { persistSettings(settings.copy(enableMarketOrders = it)) },
@@ -963,7 +979,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.0.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.0.6 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1552,6 +1568,7 @@ private fun SettingsHubScreen(
     settings: BotSettings,
     systemTestLines: List<String>,
     onOpen: (AppTab) -> Unit,
+    onModeChange: (BotMode) -> Unit,
     onRunSystemTest: () -> Unit,
     onApplySafeDefaults: () -> Unit
 ) {
@@ -1567,6 +1584,23 @@ private fun SettingsHubScreen(
                 item { MetricCard("Mode", settings.mode.name, "Trading", Mint) }
                 item { MetricCard("Quotes", settings.allowedQuoteAssetsCsv, "Allowed", Amber) }
                 item { MetricCard("Max position", "€${settings.maxPositionEur}", "Risk", Danger) }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Trading Mode", "This controls whether the background bot runs in paper mode, live confirmation mode, or full live auto mode.")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(BotMode.values().toList()) { mode ->
+                        FilterChip(
+                            selected = settings.mode == mode,
+                            onClick = { onModeChange(mode) },
+                            label = { Text(mode.name.replace('_', ' ')) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Current mode: ${settings.mode.name.replace('_', ' ')}", color = modeColor(settings.mode), fontWeight = FontWeight.Bold)
+                Text("PAPER = fake/local orders using live Kraken data. LIVE_CONFIRM = live scanning without auto execution. LIVE_AUTO = guarded automatic live execution.", color = Muted)
             }
         }
         item { HubActionCard("Basic Settings", "Provider, Kraken/API keys, symbols and main risk fields.", "Open", { onOpen(AppTab.BASIC_SETTINGS) }) }
@@ -3774,6 +3808,7 @@ private fun SettingsScreen(
     onNewsKey: (String) -> Unit,
     settings: BotSettings,
     onExchangeProvider: (ExchangeProvider) -> Unit,
+    onModeChange: (BotMode) -> Unit,
     onManualMode: (Boolean) -> Unit,
     onMarketOrders: (Boolean) -> Unit,
     onNewsAi: (Boolean) -> Unit,
@@ -3799,6 +3834,18 @@ private fun SettingsScreen(
                         )
                     }
                 }
+                Spacer(Modifier.height(12.dp))
+                SectionTitle("Trading Mode", "Choose how the bot is allowed to trade.")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(BotMode.values().toList()) { mode ->
+                        FilterChip(
+                            selected = settings.mode == mode,
+                            onClick = { onModeChange(mode) },
+                            label = { Text(mode.name.replace('_', ' ')) }
+                        )
+                    }
+                }
+                Text("PAPER uses live market data with fake local orders. LIVE_CONFIRM scans only. LIVE_AUTO allows guarded automatic live execution.", color = Muted)
                 ToggleRow("Manual execution mode / signal-only", settings.manualExecutionMode, onManualMode)
                 ToggleRow("Allow Kraken market orders", settings.enableMarketOrders, onMarketOrders)
                 Text("Market orders execute immediately and can slip. The bot blocks them when spread exceeds ${settings.marketOrderSlippageWarningPercent}% and caps size at €${settings.maxMarketOrderEur}.", color = Amber)
