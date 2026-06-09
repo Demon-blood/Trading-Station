@@ -473,6 +473,17 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
+                AppTab.PERFORMANCE -> PerformanceLabScreen(
+                    snapshot = performanceLabSnapshot,
+                    settings = settings,
+                    onRefresh = {
+                        onLoadPerformanceLab(settings) { result ->
+                            performanceLabSnapshot = result
+                            statusStore.write(result.summaryLine)
+                            status = "Performance Lab refreshed"
+                        }
+                    }
+                )
                 AppTab.PRO -> ProSystemsScreen(settings = settings)
                 AppTab.PORTFOLIO -> PortfolioScreen(
                     settings = settings,
@@ -575,7 +586,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v1.8.4 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v1.8.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
