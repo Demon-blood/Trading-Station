@@ -53,6 +53,7 @@ class BotController(
     private val autonomousPack = AutonomousIntelligencePack(appContext)
     private val liveVerificationEngine = LiveVerificationEngine()
     private val selfLearningEngine = TrueSelfLearningEngine()
+    private val remoteAlertClient = RemoteAlertClient()
     private val _status = MutableStateFlow("Stopped")
     val status: StateFlow<String> = _status
 
@@ -88,18 +89,18 @@ class BotController(
     private suspend fun sendRemoteAlert(settings: BotSettings, title: String, message: String) {
         val text = "Crypto TradeStation — $title\n$message"
         if (settings.telegramRemoteControlEnabled) {
-            runCatching {
+            runCatching<Boolean> {
                 remoteAlertClient.sendTelegram(
                     settingsStore.telegramBotToken().orEmpty(),
                     settingsStore.telegramChatId().orEmpty(),
                     text
                 )
-            }.onFailure { statusStore.write("Telegram alert failed: ${it.message}", "ERROR") }
+            }.onFailure { error: Throwable -> statusStore.write("Telegram alert failed: ${error.message}", "ERROR") }
         }
         if (settings.discordRemoteControlEnabled) {
-            runCatching {
+            runCatching<Boolean> {
                 remoteAlertClient.sendDiscord(settingsStore.discordWebhookUrl().orEmpty(), text)
-            }.onFailure { statusStore.write("Discord alert failed: ${it.message}", "ERROR") }
+            }.onFailure { error: Throwable -> statusStore.write("Discord alert failed: ${error.message}", "ERROR") }
         }
     }
 
