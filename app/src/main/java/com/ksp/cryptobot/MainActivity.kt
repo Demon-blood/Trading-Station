@@ -217,6 +217,11 @@ class MainActivity : ComponentActivity() {
                                 callback(controller.runSystemFeatureVerification(settings))
                             }
                         },
+                        onExportFullBackup = { settings, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.exportFullLocalBackup(settings))
+                            }
+                        },
                         onTestTelegram = { settings, callback ->
                             lifecycleScope.launch {
                                 callback(controller.sendTelegramTestAlert(settings))
@@ -320,6 +325,7 @@ private fun AdvancedBotApp(
     onLoadTradeJournal: (Int, (List<TradeEntity>) -> Unit) -> Unit,
     onRunKrakenHealth: (BotSettings, (List<String>) -> Unit) -> Unit,
     onRunSystemTest: (BotSettings, (List<String>) -> Unit) -> Unit,
+    onExportFullBackup: (BotSettings, (String) -> Unit) -> Unit,
     onTestTelegram: (BotSettings, (Boolean) -> Unit) -> Unit,
     onTestDiscord: (BotSettings, (Boolean) -> Unit) -> Unit
 ) {
@@ -794,6 +800,11 @@ private fun AdvancedBotApp(
                         statusStore.write("Trading mode changed to $mode from Settings hub.", "INFO")
                         status = "Mode changed to $mode"
                     },
+                    onLiveAckChange = { acknowledged ->
+                        persistSettings(settings.copy(liveTradingAcknowledged = acknowledged))
+                        statusStore.write("Live acknowledgement changed to $acknowledged from Settings hub.", if (acknowledged) "INFO" else "WARN")
+                        status = "Live acknowledgement ${if (acknowledged) "enabled" else "disabled"}"
+                    },
                     onRunSystemTest = {
                         onRunSystemTest(settings) { result ->
                             systemTestLines = result
@@ -856,6 +867,11 @@ private fun AdvancedBotApp(
                         ))
                         statusStore.write("Trading mode changed to $mode from Basic Settings.", "INFO")
                         status = "Mode changed to $mode"
+                    },
+                    onLiveAckChange = { acknowledged ->
+                        persistSettings(settings.copy(liveTradingAcknowledged = acknowledged))
+                        statusStore.write("Live acknowledgement changed to $acknowledged from Basic Settings.", if (acknowledged) "INFO" else "WARN")
+                        status = "Live acknowledgement ${if (acknowledged) "enabled" else "disabled"}"
                     },
                     onManualMode = { persistSettings(settings.copy(manualExecutionMode = it)) },
                     onMarketOrders = { persistSettings(settings.copy(enableMarketOrders = it)) },
@@ -934,6 +950,13 @@ private fun AdvancedBotApp(
                 )
                 AppTab.BACKUP -> BackupRestoreScreen(
                     settings = settings,
+                    onExportFullBackup = { callback ->
+                        onExportFullBackup(settings) { result ->
+                            callback(result)
+                            statusStore.write("Full settings/data backup generated from Backup screen.", "INFO")
+                            status = "Full backup generated"
+                        }
+                    },
                     onApplySafeDefaults = {
                         val safe = settings.copy(
                             exchangeProvider = ExchangeProvider.PAPER,
@@ -979,7 +1002,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.0.6 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.0.7 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1569,6 +1592,7 @@ private fun SettingsHubScreen(
     systemTestLines: List<String>,
     onOpen: (AppTab) -> Unit,
     onModeChange: (BotMode) -> Unit,
+    onLiveAckChange: (Boolean) -> Unit,
     onRunSystemTest: () -> Unit,
     onApplySafeDefaults: () -> Unit
 ) {
@@ -1601,6 +1625,14 @@ private fun SettingsHubScreen(
                 Spacer(Modifier.height(8.dp))
                 Text("Current mode: ${settings.mode.name.replace('_', ' ')}", color = modeColor(settings.mode), fontWeight = FontWeight.Bold)
                 Text("PAPER = fake/local orders using live Kraken data. LIVE_CONFIRM = live scanning without auto execution. LIVE_AUTO = guarded automatic live execution.", color = Muted)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Live Acknowledgement", "Required before LIVE_AUTO can send real Kraken orders.")
+                ToggleRow("I understand live trading can lose real money", settings.liveTradingAcknowledged, onLiveAckChange)
+                Text("Current: ${if (settings.liveTradingAcknowledged) "ACKNOWLEDGED" else "NOT ACKNOWLEDGED"}", color = if (settings.liveTradingAcknowledged) Mint else Danger, fontWeight = FontWeight.Bold)
+                Text("Keep Kraken API withdrawal permission OFF. This acknowledgement only permits guarded trading logic; it does not bypass safety checks.", color = Amber)
             }
         }
         item { HubActionCard("Basic Settings", "Provider, Kraken/API keys, symbols and main risk fields.", "Open", { onOpen(AppTab.BASIC_SETTINGS) }) }
@@ -2334,14 +2366,15 @@ private fun StrategySandboxScreen(
 @Composable
 private fun BackupRestoreScreen(
     settings: BotSettings,
+    onExportFullBackup: ((String) -> Unit) -> Unit,
     onApplySafeDefaults: () -> Unit
 ) {
     var backupText by remember { mutableStateOf("") }
 
-    fun generateBackup(): String {
+    fun generateSettingsSummaryBackup(): String {
         return listOf(
-            "Crypto TradeStation settings backup",
-            "version=v1.9.0",
+            "Crypto TradeStation settings summary backup",
+            "version=v2.0.7",
             "mode=${settings.mode}",
             "provider=${settings.exchangeProvider}",
             "symbols=${settings.symbolsCsv}",
@@ -2362,13 +2395,16 @@ private fun BackupRestoreScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Backup / Restore", "Export a safe text backup of important settings before pushing updates.") }
+        item { SectionTitle("Backup / Export", "Settings and app data are saved automatically during normal updates. Use manual export before reinstalling or moving phones.") }
         item {
             GlassCard {
                 Column {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { backupText = generateBackup() }, colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
-                            Text("Generate Backup")
+                        Button(onClick = { onExportFullBackup { backupText = it } }, colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
+                            Text("Export All Settings + Data")
+                        }
+                        OutlinedButton(onClick = { backupText = generateSettingsSummaryBackup() }) {
+                            Text("Settings Summary")
                         }
                         OutlinedButton(onClick = onApplySafeDefaults) {
                             Text("Restore Safe Defaults")
@@ -2387,9 +2423,10 @@ private fun BackupRestoreScreen(
         }
         item {
             GlassCard {
-                SectionTitle("Restore behavior", "This first restore layer intentionally avoids importing API keys.")
-                Text("API keys are not exported here. Keep withdrawal permission disabled on Kraken API keys.", color = Muted)
-                Text("Future version can add encrypted local backup/restore for learning profiles and trade history.", color = Muted)
+                SectionTitle("Automatic save behavior", "Normal app updates keep local data automatically as long as the package name stays the same.")
+                Text("Saved automatically: settings, local database, trade journal, learning profiles, tax rows and local bot history.", color = Muted)
+                Text("Manual export: press Export All Settings + Data and copy/save the generated text somewhere safe before reinstalling or changing phones.", color = Muted)
+                Text("Not exported for security: Kraken API secrets, Telegram bot token and Discord webhook URL.", color = Amber)
             }
         }
     }
@@ -3809,6 +3846,7 @@ private fun SettingsScreen(
     settings: BotSettings,
     onExchangeProvider: (ExchangeProvider) -> Unit,
     onModeChange: (BotMode) -> Unit,
+    onLiveAckChange: (Boolean) -> Unit,
     onManualMode: (Boolean) -> Unit,
     onMarketOrders: (Boolean) -> Unit,
     onNewsAi: (Boolean) -> Unit,
@@ -3846,6 +3884,8 @@ private fun SettingsScreen(
                     }
                 }
                 Text("PAPER uses live market data with fake local orders. LIVE_CONFIRM scans only. LIVE_AUTO allows guarded automatic live execution.", color = Muted)
+                Spacer(Modifier.height(8.dp))
+                ToggleRow("Live acknowledgement: I understand live trading can lose real money", settings.liveTradingAcknowledged, onLiveAckChange)
                 ToggleRow("Manual execution mode / signal-only", settings.manualExecutionMode, onManualMode)
                 ToggleRow("Allow Kraken market orders", settings.enableMarketOrders, onMarketOrders)
                 Text("Market orders execute immediately and can slip. The bot blocks them when spread exceeds ${settings.marketOrderSlippageWarningPercent}% and caps size at €${settings.maxMarketOrderEur}.", color = Amber)

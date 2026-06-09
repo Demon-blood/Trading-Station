@@ -221,6 +221,95 @@ class BotController(
         return lines
     }
 
+
+    suspend fun exportFullLocalBackup(settings: BotSettings = settingsStore.load()): String {
+        val trades = dao.allTradesSnapshot()
+        val taxRows = dao.taxReportRowsSnapshot()
+        val symbolProfiles = dao.learnedSymbolProfilesSnapshot()
+        val strategyProfiles = dao.learnedStrategyProfilesSnapshot()
+        val holdProfiles = dao.learnedHoldProfilesSnapshot()
+        val learningSnapshots = dao.learningFeatureSnapshots(1000)
+        val audits = dao.selfLearningAudit(1000)
+        val openPositions = dao.openPositionsSnapshot()
+
+        fun clean(value: String): String = value.replace("\n", " ").replace("\r", " ").replace("|", "/")
+
+        val sb = StringBuilder()
+        sb.appendLine("CRYPTO_TRADE_STATION_FULL_BACKUP_V1")
+        sb.appendLine("createdEpochMs=${System.currentTimeMillis()}")
+        sb.appendLine("appVersion=v2.0.7")
+        sb.appendLine()
+        sb.appendLine("[SETTINGS]")
+        sb.appendLine("mode=${settings.mode}")
+        sb.appendLine("exchangeProvider=${settings.exchangeProvider}")
+        sb.appendLine("liveTradingAcknowledged=${settings.liveTradingAcknowledged}")
+        sb.appendLine("manualExecutionMode=${settings.manualExecutionMode}")
+        sb.appendLine("symbolsCsv=${settings.symbolsCsv}")
+        sb.appendLine("allowedQuoteAssetsCsv=${settings.allowedQuoteAssetsCsv}")
+        sb.appendLine("autoSymbolQuoteAsset=${settings.autoSymbolQuoteAsset}")
+        sb.appendLine("maxPositionEur=${settings.maxPositionEur}")
+        sb.appendLine("maxDailyLossEur=${settings.maxDailyLossEur}")
+        sb.appendLine("maxTradesPerDay=${settings.maxTradesPerDay}")
+        sb.appendLine("maxTradesPerHour=${settings.maxTradesPerHour}")
+        sb.appendLine("maxNewTradesPerScan=${settings.maxNewTradesPerScan}")
+        sb.appendLine("maxSimultaneousLivePositions=${settings.maxSimultaneousLivePositions}")
+        sb.appendLine("minStrategyScoreToBuy=${settings.minStrategyScoreToBuy}")
+        sb.appendLine("enableMarketOrders=${settings.enableMarketOrders}")
+        sb.appendLine("enableBacktestGate=${settings.enableBacktestGate}")
+        sb.appendLine("enableForwardTestGate=${settings.enableForwardTestGate}")
+        sb.appendLine("trueSelfLearningEnabled=${settings.trueSelfLearningEnabled}")
+        sb.appendLine("spikeProfitTimingEnabled=${settings.spikeProfitTimingEnabled}")
+        sb.appendLine("telegramRemoteControlEnabled=${settings.telegramRemoteControlEnabled}")
+        sb.appendLine("discordRemoteControlEnabled=${settings.discordRemoteControlEnabled}")
+        sb.appendLine("fullSettings=${clean(settings.toString())}")
+        sb.appendLine()
+        sb.appendLine("[COUNTS]")
+        sb.appendLine("trades=${trades.size}")
+        sb.appendLine("openPositions=${openPositions.size}")
+        sb.appendLine("taxRows=${taxRows.size}")
+        sb.appendLine("learnedSymbolProfiles=${symbolProfiles.size}")
+        sb.appendLine("learnedStrategyProfiles=${strategyProfiles.size}")
+        sb.appendLine("learnedHoldProfiles=${holdProfiles.size}")
+        sb.appendLine("learningSnapshots=${learningSnapshots.size}")
+        sb.appendLine("selfLearningAudits=${audits.size}")
+        sb.appendLine()
+        sb.appendLine("[TRADES]")
+        sb.appendLine("id|timestampEpochMs|symbol|side|quantity|priceEur|feeEur|paper|realizedPnlEur|aiScore|clientOrderId|exchangeOrderId|aiReason")
+        trades.forEach {
+            sb.appendLine("${it.id}|${it.timestampEpochMs}|${clean(it.symbol)}|${clean(it.side)}|${clean(it.quantity)}|${clean(it.priceEur)}|${clean(it.feeEur)}|${it.paper}|${clean(it.realizedPnlEur)}|${it.aiScore}|${clean(it.clientOrderId)}|${clean(it.exchangeOrderId)}|${clean(it.aiReason)}")
+        }
+        sb.appendLine()
+        sb.appendLine("[OPEN_POSITIONS]")
+        sb.appendLine("symbol|baseAsset|quantity|entryPriceEur|highestPriceEur|stopPriceEur|takeProfitPriceEur|trailingStopPriceEur|openedAtEpochMs|updatedAtEpochMs|status|source")
+        openPositions.forEach {
+            sb.appendLine("${clean(it.symbol)}|${clean(it.baseAsset)}|${clean(it.quantity)}|${clean(it.entryPriceEur)}|${clean(it.highestPriceEur)}|${clean(it.stopPriceEur)}|${clean(it.takeProfitPriceEur)}|${clean(it.trailingStopPriceEur)}|${it.openedAtEpochMs}|${it.updatedAtEpochMs}|${clean(it.status)}|${clean(it.source)}")
+        }
+        sb.appendLine()
+        sb.appendLine("[LEARNED_SYMBOL_PROFILES]")
+        symbolProfiles.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine()
+        sb.appendLine("[LEARNED_STRATEGY_PROFILES]")
+        strategyProfiles.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine()
+        sb.appendLine("[LEARNED_HOLD_PROFILES]")
+        holdProfiles.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine()
+        sb.appendLine("[LEARNING_FEATURE_SNAPSHOTS]")
+        learningSnapshots.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine()
+        sb.appendLine("[SELF_LEARNING_AUDIT]")
+        audits.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine()
+        sb.appendLine("[TAX_REPORT_ROWS]")
+        taxRows.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine()
+        sb.appendLine("[SECURITY_NOTE]")
+        sb.appendLine("API keys, secret keys, Telegram tokens and Discord webhook URLs are intentionally not exported.")
+        sb.appendLine("Android app updates with the same package name keep SharedPreferences, encrypted key store entries and Room database automatically.")
+        updateStatus("Full local backup generated: trades=${trades.size}, profiles=${symbolProfiles.size + strategyProfiles.size + holdProfiles.size}, taxRows=${taxRows.size}", "INFO")
+        return sb.toString()
+    }
+
     private fun updateStatus(message: String, level: String = "INFO") {
         _status.value = message
         statusStore.write(message, level)
