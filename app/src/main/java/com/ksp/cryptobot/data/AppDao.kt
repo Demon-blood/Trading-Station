@@ -9,11 +9,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface AppDao {
     @Insert suspend fun insertTrade(trade: TradeEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreTrade(trade: TradeEntity)
     @Insert suspend fun insertSignal(signal: SignalEntity)
     @Insert suspend fun insertAiDecision(decision: AiDecisionEntity)
     @Insert suspend fun insertTaxLot(lot: TaxLotEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPosition(position: PositionEntity)
     @Insert suspend fun insertTaxReportRow(row: TaxReportEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreTaxReportRow(row: TaxReportEntity)
     @Insert suspend fun insertLearningFeatureSnapshot(snapshot: LearningFeatureSnapshotEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLearnedSymbolProfile(profile: LearnedSymbolProfileEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLearnedStrategyProfile(profile: LearnedStrategyProfileEntity)
@@ -58,6 +60,15 @@ interface AppDao {
 
     @Query("SELECT * FROM trades ORDER BY timestampEpochMs DESC")
     suspend fun allTradesSnapshot(): List<TradeEntity>
+
+    @Query("DELETE FROM trades")
+    suspend fun clearTradesForRestore()
+
+    @Query("DELETE FROM positions")
+    suspend fun clearPositionsForRestore()
+
+    @Query("DELETE FROM tax_report_rows")
+    suspend fun clearTaxReportsForRestore()
 
     @Query("SELECT * FROM learned_symbol_profiles WHERE symbol = :symbol LIMIT 1")
     suspend fun learnedSymbolProfile(symbol: String): LearnedSymbolProfileEntity?

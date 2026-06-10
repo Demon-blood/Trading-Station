@@ -217,9 +217,15 @@ class MainActivity : ComponentActivity() {
                                 callback(controller.runSystemFeatureVerification(settings))
                             }
                         },
-                        onExportFullBackup = { settings, callback ->
+                        onExportFullBackup = { settings, customBackupDirectory, callback ->
                             lifecycleScope.launch {
-                                callback(controller.exportFullLocalBackupToFile(settings))
+                                settingsStore.saveBackupDirectoryPath(customBackupDirectory)
+                                callback(controller.exportFullLocalBackupToFile(settings, customBackupDirectory))
+                            }
+                        },
+                        onRestoreFullBackup = { backupInput, replaceExisting, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.restoreFullLocalBackup(backupInput, replaceExisting))
                             }
                         },
                         onTestTelegram = { settings, callback ->
@@ -325,7 +331,8 @@ private fun AdvancedBotApp(
     onLoadTradeJournal: (Int, (List<TradeEntity>) -> Unit) -> Unit,
     onRunKrakenHealth: (BotSettings, (List<String>) -> Unit) -> Unit,
     onRunSystemTest: (BotSettings, (List<String>) -> Unit) -> Unit,
-    onExportFullBackup: (BotSettings, (String) -> Unit) -> Unit,
+    onExportFullBackup: (BotSettings, String, (String) -> Unit) -> Unit,
+    onRestoreFullBackup: (String, Boolean, (String) -> Unit) -> Unit,
     onTestTelegram: (BotSettings, (Boolean) -> Unit) -> Unit,
     onTestDiscord: (BotSettings, (Boolean) -> Unit) -> Unit
 ) {
@@ -986,11 +993,21 @@ private fun AdvancedBotApp(
                 )
                 AppTab.BACKUP -> BackupRestoreScreen(
                     settings = settings,
-                    onExportFullBackup = { callback ->
-                        onExportFullBackup(settings) { result ->
+                    backupDirectoryPath = store.backupDirectoryPath(),
+                    onBackupDirectoryPathChanged = { store.saveBackupDirectoryPath(it) },
+                    onExportFullBackup = { customBackupDirectory, callback ->
+                        onExportFullBackup(settings, customBackupDirectory) { result ->
                             callback(result)
                             statusStore.write("Full settings/data backup generated from Backup screen.", "INFO")
                             status = "Full backup generated"
+                        }
+                    },
+                    onRestoreFullBackup = { backupInput, replaceExisting, callback ->
+                        onRestoreFullBackup(backupInput, replaceExisting) { result ->
+                            callback(result)
+                            settings = store.load()
+                            statusStore.write("Backup restore requested from Backup screen.", "INFO")
+                            status = "Backup restore complete"
                         }
                     },
                     onApplySafeDefaults = {
@@ -1038,7 +1055,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.7.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.7.4 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -2493,10 +2510,17 @@ private fun StrategySandboxScreen(
 @Composable
 private fun BackupRestoreScreen(
     settings: BotSettings,
-    onExportFullBackup: ((String) -> Unit) -> Unit,
+    backupDirectoryPath: String,
+    onBackupDirectoryPathChanged: (String) -> Unit,
+    onExportFullBackup: (String, (String) -> Unit) -> Unit,
+    onRestoreFullBackup: (String, Boolean, (String) -> Unit) -> Unit,
     onApplySafeDefaults: () -> Unit
 ) {
     var backupText by remember { mutableStateOf("") }
+    var customBackupDirectory by remember(backupDirectoryPath) { mutableStateOf(backupDirectoryPath) }
+    var restoreInput by remember { mutableStateOf("") }
+    var restoreResult by remember { mutableStateOf("") }
+    var replaceExistingLocalData by remember { mutableStateOf(false) }
     val displayText = if (backupText.length > 24000) {
         backupText.take(24000) + "\n\n[Preview truncated in UI for stability. Full backup is saved in the file path shown above.]"
     } else backupText
@@ -2556,12 +2580,26 @@ private fun BackupRestoreScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Backup / Export", "Crash-safe export: the full backup is written to a local file, and only a small preview is shown in the app.") }
+        item { SectionTitle("Backup / Restore", "Crash-safe export plus importer for settings, trade journal and open lifecycle positions.") }
         item {
             GlassCard {
                 Column {
+                    OutlinedTextField(
+                        value = customBackupDirectory,
+                        onValueChange = {
+                            customBackupDirectory = it
+                            onBackupDirectoryPathChanged(it)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Custom backup directory path, empty = default") }
+                    )
+                    Text("Example default: app external files /backups. On Android, custom folders must be writable by the app; if not, export falls back to the default app backup folder.", color = Muted)
+                    Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onExportFullBackup { backupText = it } }, colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
+                        Button(onClick = {
+                            onBackupDirectoryPathChanged(customBackupDirectory)
+                            onExportFullBackup(customBackupDirectory) { backupText = it }
+                        }, colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
                             Text("Export All Settings + Data")
                         }
                         OutlinedButton(onClick = { backupText = generateSettingsSummaryBackup() }) {
@@ -2585,10 +2623,40 @@ private fun BackupRestoreScreen(
         }
         item {
             GlassCard {
+                SectionTitle("Load / Restore Backup", "Paste the full backup text or enter the local file path shown by Export All Settings + Data.")
+                OutlinedTextField(
+                    value = restoreInput,
+                    onValueChange = { restoreInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 6,
+                    label = { Text("Backup text or local backup file path") }
+                )
+                ToggleRow("Replace existing local trade/position data before restore", replaceExistingLocalData) { replaceExistingLocalData = it }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onRestoreFullBackup(restoreInput, replaceExistingLocalData) { restoreResult = it } },
+                        colors = ButtonDefaults.buttonColors(containerColor = Electric)
+                    ) {
+                        Text("Load Backup")
+                    }
+                    OutlinedButton(onClick = { restoreInput = backupText }) {
+                        Text("Use Export Result")
+                    }
+                }
+                if (restoreResult.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(restoreResult, color = Mint)
+                }
+                Text("Restores: settings, trade journal and open lifecycle positions. Secrets are intentionally not restored.", color = Amber)
+            }
+        }
+        item {
+            GlassCard {
                 SectionTitle("Automatic save behavior", "Normal app updates keep local data automatically as long as the package name stays the same.")
                 Text("Saved automatically: settings, local database, trade journal, learning profiles, tax rows and local bot history.", color = Muted)
-                Text("Manual export: press Export All Settings + Data. The app saves the full backup to a local file and shows the file path here.", color = Muted)
-                Text("Not exported for security: Kraken API secrets, Telegram bot token and Discord webhook URL.", color = Amber)
+                Text("Manual export: choose a writable backup directory or leave it empty for the default app backup folder, then press Export All Settings + Data.", color = Muted)
+                Text("Manual restore: paste the backup text or the local file path into Load / Restore Backup.", color = Muted)
+                Text("Not exported/restored for security: Kraken API secrets, Telegram bot token, Discord tokens/webhooks and remote command PIN.", color = Amber)
             }
         }
     }

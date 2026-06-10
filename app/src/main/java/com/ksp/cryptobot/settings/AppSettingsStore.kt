@@ -477,5 +477,10 @@ class AppSettingsStore(context: Context) {
         prefs.edit().putString("discord_command_last_message_id", messageId.orEmpty()).apply()
     }
 
+    fun backupDirectoryPath(): String = prefs.getString("backup_directory_path", "") ?: ""
+    fun saveBackupDirectoryPath(path: String) {
+        prefs.edit().putString("backup_directory_path", path.trim()).apply()
+    }
+
     fun newsApiKey(): String? = secure.readEncryptedString("news_api_key")?.takeIf { it.isNotBlank() }
 }

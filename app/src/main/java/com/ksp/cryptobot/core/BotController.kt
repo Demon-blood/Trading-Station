@@ -374,17 +374,221 @@ class BotController(
     }
 
 
-    suspend fun exportFullLocalBackupToFile(settings: BotSettings = settingsStore.load()): String {
+
+    suspend fun restoreFullLocalBackup(
+        rawInput: String,
+        replaceExistingLocalData: Boolean = false
+    ): String {
+        return try {
+            val input = rawInput.trim()
+            if (input.isBlank()) return "Restore failed: backup text/path is empty."
+
+            val backupText = if ((input.startsWith("/") || input.startsWith("content:") || input.startsWith("file:")) && input.length < 600) {
+                val path = input.removePrefix("file://")
+                runCatching { java.io.File(path).readText() }.getOrElse {
+                    return "Restore failed: could not read file path. Paste the backup text directly or enter a readable local file path. ${it.message}"
+                }
+            } else input
+
+            if (!backupText.contains("CRYPTO_TRADE_STATION_FULL_BACKUP", ignoreCase = true)) {
+                return "Restore failed: this does not look like a Crypto TradeStation full backup."
+            }
+
+            val sections = splitBackupSections(backupText)
+            val settingsMap = sections["SETTINGS"].orEmpty()
+                .mapNotNull { line ->
+                    val idx = line.indexOf('=')
+                    if (idx <= 0) null else line.substring(0, idx).trim() to line.substring(idx + 1).trim()
+                }
+                .toMap()
+
+            var restoredSettings = false
+            if (settingsMap.isNotEmpty()) {
+                val current = settingsStore.load()
+                val restored = current.copy(
+                    mode = settingsMap["mode"]?.let { runCatching { BotMode.valueOf(it) }.getOrNull() } ?: current.mode,
+                    exchangeProvider = settingsMap["exchangeProvider"]?.let { runCatching { ExchangeProvider.valueOf(it) }.getOrNull() } ?: current.exchangeProvider,
+                    liveTradingAcknowledged = settingsMap["liveTradingAcknowledged"]?.toBooleanStrictOrNull() ?: current.liveTradingAcknowledged,
+                    manualExecutionMode = settingsMap["manualExecutionMode"]?.toBooleanStrictOrNull() ?: current.manualExecutionMode,
+                    symbolsCsv = settingsMap["symbolsCsv"] ?: current.symbolsCsv,
+                    allowedQuoteAssetsCsv = settingsMap["allowedQuoteAssetsCsv"] ?: current.allowedQuoteAssetsCsv,
+                    autoSymbolQuoteAsset = settingsMap["autoSymbolQuoteAsset"] ?: current.autoSymbolQuoteAsset,
+                    maxPositionEur = settingsMap["maxPositionEur"]?.toBigDecimalOrNull() ?: current.maxPositionEur,
+                    maxBuyPriceFilterEnabled = settingsMap["maxBuyPriceFilterEnabled"]?.toBooleanStrictOrNull() ?: current.maxBuyPriceFilterEnabled,
+                    globalMaxBuyPriceEur = settingsMap["globalMaxBuyPriceEur"]?.toBigDecimalOrNull() ?: current.globalMaxBuyPriceEur,
+                    perSymbolMaxBuyPriceCsv = settingsMap["perSymbolMaxBuyPriceCsv"] ?: current.perSymbolMaxBuyPriceCsv,
+                    ultimateAutomationEnabled = settingsMap["ultimateAutomationEnabled"]?.toBooleanStrictOrNull() ?: current.ultimateAutomationEnabled,
+                    perSymbolRulesEnabled = settingsMap["perSymbolRulesEnabled"]?.toBooleanStrictOrNull() ?: current.perSymbolRulesEnabled,
+                    perSymbolRulesCsv = settingsMap["perSymbolRulesCsv"] ?: current.perSymbolRulesCsv,
+                    autoCompoundingHardCapEnabled = settingsMap["autoCompoundingHardCapEnabled"]?.toBooleanStrictOrNull() ?: current.autoCompoundingHardCapEnabled,
+                    autoCompoundingMaxPositionEur = settingsMap["autoCompoundingMaxPositionEur"]?.toBigDecimalOrNull() ?: current.autoCompoundingMaxPositionEur,
+                    autoPauseAfterOrderFailuresEnabled = settingsMap["autoPauseAfterOrderFailuresEnabled"]?.toBooleanStrictOrNull() ?: current.autoPauseAfterOrderFailuresEnabled,
+                    autoPauseFailureThreshold = settingsMap["autoPauseFailureThreshold"]?.toIntOrNull() ?: current.autoPauseFailureThreshold,
+                    autoPauseMinutes = settingsMap["autoPauseMinutes"]?.toIntOrNull() ?: current.autoPauseMinutes,
+                    volatilityCircuitBreakerEnabled = settingsMap["volatilityCircuitBreakerEnabled"]?.toBooleanStrictOrNull() ?: current.volatilityCircuitBreakerEnabled,
+                    volatilityCircuitBreakerMax24hMovePercent = settingsMap["volatilityCircuitBreakerMax24hMovePercent"]?.toBigDecimalOrNull() ?: current.volatilityCircuitBreakerMax24hMovePercent,
+                    pumpChaseProtectionEnabled = settingsMap["pumpChaseProtectionEnabled"]?.toBooleanStrictOrNull() ?: current.pumpChaseProtectionEnabled,
+                    pumpChaseMax24hGainPercent = settingsMap["pumpChaseMax24hGainPercent"]?.toBigDecimalOrNull() ?: current.pumpChaseMax24hGainPercent,
+                    duplicatePositionProtectionEnabled = settingsMap["duplicatePositionProtectionEnabled"]?.toBooleanStrictOrNull() ?: current.duplicatePositionProtectionEnabled,
+                    adaptiveCompoundingFromRealizedPnlEnabled = settingsMap["adaptiveCompoundingFromRealizedPnlEnabled"]?.toBooleanStrictOrNull() ?: current.adaptiveCompoundingFromRealizedPnlEnabled,
+                    dynamicScanIntervalEnabled = settingsMap["dynamicScanIntervalEnabled"]?.toBooleanStrictOrNull() ?: current.dynamicScanIntervalEnabled,
+                    dynamicScanFastSeconds = settingsMap["dynamicScanFastSeconds"]?.toLongOrNull() ?: current.dynamicScanFastSeconds,
+                    dynamicScanSlowSeconds = settingsMap["dynamicScanSlowSeconds"]?.toLongOrNull() ?: current.dynamicScanSlowSeconds,
+                    multiTimeframeConsensusEnabled = settingsMap["multiTimeframeConsensusEnabled"]?.toBooleanStrictOrNull() ?: current.multiTimeframeConsensusEnabled,
+                    multiTimeframeRequiredBullishCount = settingsMap["multiTimeframeRequiredBullishCount"]?.toIntOrNull() ?: current.multiTimeframeRequiredBullishCount,
+                    ultimateReadinessScoreEnabled = settingsMap["ultimateReadinessScoreEnabled"]?.toBooleanStrictOrNull() ?: current.ultimateReadinessScoreEnabled,
+                    orderBookDepthGuardEnabled = settingsMap["orderBookDepthGuardEnabled"]?.toBooleanStrictOrNull() ?: current.orderBookDepthGuardEnabled,
+                    maxOrderBookSlippagePercent = settingsMap["maxOrderBookSlippagePercent"]?.toBigDecimalOrNull() ?: current.maxOrderBookSlippagePercent,
+                    minOrderBookDepthMultiple = settingsMap["minOrderBookDepthMultiple"]?.toBigDecimalOrNull() ?: current.minOrderBookDepthMultiple,
+                    maxDailyLossEur = settingsMap["maxDailyLossEur"]?.toBigDecimalOrNull() ?: current.maxDailyLossEur,
+                    maxTradesPerDay = settingsMap["maxTradesPerDay"]?.toIntOrNull() ?: current.maxTradesPerDay,
+                    maxTradesPerHour = settingsMap["maxTradesPerHour"]?.toIntOrNull() ?: current.maxTradesPerHour,
+                    maxNewTradesPerScan = settingsMap["maxNewTradesPerScan"]?.toIntOrNull() ?: current.maxNewTradesPerScan,
+                    maxSimultaneousLivePositions = settingsMap["maxSimultaneousLivePositions"]?.toIntOrNull() ?: current.maxSimultaneousLivePositions,
+                    minStrategyScoreToBuy = settingsMap["minStrategyScoreToBuy"]?.toIntOrNull() ?: current.minStrategyScoreToBuy,
+                    enableMarketOrders = settingsMap["enableMarketOrders"]?.toBooleanStrictOrNull() ?: current.enableMarketOrders,
+                    enableBacktestGate = settingsMap["enableBacktestGate"]?.toBooleanStrictOrNull() ?: current.enableBacktestGate,
+                    enableForwardTestGate = settingsMap["enableForwardTestGate"]?.toBooleanStrictOrNull() ?: current.enableForwardTestGate,
+                    trueSelfLearningEnabled = settingsMap["trueSelfLearningEnabled"]?.toBooleanStrictOrNull() ?: current.trueSelfLearningEnabled,
+                    spikeProfitTimingEnabled = settingsMap["spikeProfitTimingEnabled"]?.toBooleanStrictOrNull() ?: current.spikeProfitTimingEnabled,
+                    telegramRemoteControlEnabled = settingsMap["telegramRemoteControlEnabled"]?.toBooleanStrictOrNull() ?: current.telegramRemoteControlEnabled,
+                    discordRemoteControlEnabled = settingsMap["discordRemoteControlEnabled"]?.toBooleanStrictOrNull() ?: current.discordRemoteControlEnabled,
+                    remoteCommandCenterEnabled = settingsMap["remoteCommandCenterEnabled"]?.toBooleanStrictOrNull() ?: current.remoteCommandCenterEnabled,
+                    telegramCommandPollingEnabled = settingsMap["telegramCommandPollingEnabled"]?.toBooleanStrictOrNull() ?: current.telegramCommandPollingEnabled,
+                    discordCommandPollingEnabled = settingsMap["discordCommandPollingEnabled"]?.toBooleanStrictOrNull() ?: current.discordCommandPollingEnabled,
+                    remoteCommandRequirePin = settingsMap["remoteCommandRequirePin"]?.toBooleanStrictOrNull() ?: current.remoteCommandRequirePin,
+                    remoteCommandAllowLiveAuto = settingsMap["remoteCommandAllowLiveAuto"]?.toBooleanStrictOrNull() ?: current.remoteCommandAllowLiveAuto
+                )
+                settingsStore.save(restored)
+                restoredSettings = true
+            }
+
+            if (replaceExistingLocalData) {
+                dao.clearTradesForRestore()
+                dao.clearPositionsForRestore()
+                dao.clearTaxReportsForRestore()
+            }
+
+            val restoredTrades = restoreTradesFromSection(sections["TRADES"].orEmpty())
+            val restoredPositions = restorePositionsFromSection(sections["OPEN_POSITIONS"].orEmpty())
+
+            val message = buildString {
+                appendLine("Restore complete.")
+                appendLine("settings=${if (restoredSettings) "restored" else "not found"}")
+                appendLine("trades=$restoredTrades")
+                appendLine("openPositions=$restoredPositions")
+                appendLine("replaceExistingLocalData=$replaceExistingLocalData")
+                appendLine()
+                appendLine("Security note: API keys, Telegram tokens, Discord tokens/webhooks and PINs are intentionally not restored from backup exports.")
+                appendLine("Unstructured legacy sections such as learned profile toString rows are preserved in the backup file but skipped by this importer.")
+            }.trim()
+            updateStatus("Backup restore complete. trades=$restoredTrades, positions=$restoredPositions", "INFO")
+            message
+        } catch (error: Exception) {
+            val message = "Restore failed: ${error.message}"
+            updateStatus(message, "ERROR")
+            message
+        }
+    }
+
+    private fun splitBackupSections(text: String): Map<String, List<String>> {
+        val out = linkedMapOf<String, MutableList<String>>()
+        var current = "ROOT"
+        text.lineSequence().forEach { raw ->
+            val line = raw.trimEnd()
+            val section = Regex("^\\[([^]]+)]$").find(line)?.groupValues?.getOrNull(1)
+            if (section != null) {
+                current = section
+                out.getOrPut(current) { mutableListOf() }
+            } else {
+                out.getOrPut(current) { mutableListOf() }.add(line)
+            }
+        }
+        return out.mapValues { it.value.filter { line -> line.isNotBlank() } }
+    }
+
+    private suspend fun restoreTradesFromSection(lines: List<String>): Int {
+        var count = 0
+        lines.dropWhile { !it.startsWith("id|") }.drop(1).forEach { line ->
+            val p = line.split("|")
+            if (p.size >= 13) {
+                runCatching {
+                    dao.restoreTrade(
+                        TradeEntity(
+                            id = p[0].toLongOrNull() ?: 0L,
+                            timestampEpochMs = p[1].toLongOrNull() ?: System.currentTimeMillis(),
+                            symbol = p[2],
+                            side = p[3],
+                            quantity = p[4],
+                            priceEur = p[5],
+                            feeEur = p[6],
+                            paper = p[7].toBooleanStrictOrNull() ?: true,
+                            realizedPnlEur = p[8],
+                            aiScore = p[9].toIntOrNull() ?: 0,
+                            clientOrderId = p[10],
+                            exchangeOrderId = p[11],
+                            aiReason = p.drop(12).joinToString("|")
+                        )
+                    )
+                    count++
+                }
+            }
+        }
+        return count
+    }
+
+    private suspend fun restorePositionsFromSection(lines: List<String>): Int {
+        var count = 0
+        lines.dropWhile { !it.startsWith("symbol|") }.drop(1).forEach { line ->
+            val p = line.split("|")
+            if (p.size >= 12) {
+                runCatching {
+                    dao.upsertPosition(
+                        PositionEntity(
+                            symbol = p[0],
+                            baseAsset = p[1],
+                            quantity = p[2],
+                            entryPriceEur = p[3],
+                            highestPriceEur = p[4],
+                            stopPriceEur = p[5],
+                            takeProfitPriceEur = p[6],
+                            trailingStopPriceEur = p[7],
+                            openedAtEpochMs = p[8].toLongOrNull() ?: System.currentTimeMillis(),
+                            updatedAtEpochMs = p[9].toLongOrNull() ?: System.currentTimeMillis(),
+                            status = p[10],
+                            source = p[11]
+                        )
+                    )
+                    count++
+                }
+            }
+        }
+        return count
+    }
+
+        suspend fun exportFullLocalBackupToFile(
+        settings: BotSettings = settingsStore.load(),
+        customDirectoryPath: String = settingsStore.backupDirectoryPath()
+    ): String {
         return try {
             val backup = exportFullLocalBackup(settings)
-            val backupDir = java.io.File(appContext.getExternalFilesDir(null), "backups")
+            val defaultBackupDir = java.io.File(appContext.getExternalFilesDir(null), "backups")
+            val requested = customDirectoryPath.trim()
+            val backupDir = if (requested.isNotBlank()) java.io.File(requested) else defaultBackupDir
             if (!backupDir.exists()) backupDir.mkdirs()
-            val file = java.io.File(backupDir, "cts_backup_${System.currentTimeMillis()}.txt")
+            if (!backupDir.exists() || !backupDir.isDirectory || !backupDir.canWrite()) {
+                defaultBackupDir.mkdirs()
+                updateStatus("Custom backup directory is not writable. Falling back to ${defaultBackupDir.absolutePath}", "WARN")
+            }
+            val finalDir = if (backupDir.exists() && backupDir.isDirectory && backupDir.canWrite()) backupDir else defaultBackupDir
+            val file = java.io.File(finalDir, "cts_backup_${System.currentTimeMillis()}.txt")
             file.writeText(backup)
             val preview = backup.lineSequence().take(80).joinToString("\n")
             val result = buildString {
                 appendLine("BACKUP SAVED SUCCESSFULLY")
                 appendLine("file=${file.absolutePath}")
+                appendLine("directory=${file.parentFile?.absolutePath ?: ""}")
+                appendLine("customDirectoryRequested=${customDirectoryPath.ifBlank { "default app backup folder" }}")
                 appendLine("sizeBytes=${file.length()}")
                 appendLine()
                 appendLine("The full backup was written to a file instead of being loaded into the text box, which prevents UI crashes on large databases.")
@@ -587,9 +791,9 @@ Crypto TradeStation remote commands:
         return buildString {
             appendLine("Positions=${snap.positions.size}")
             snap.positions.take(10).forEach {
-                appendLine("${it.symbol}: qty=${it.quantity} free=${it.freeQuantity} entry=${it.entryPrice} current=${it.currentPrice} pnl≈€${it.unrealizedPnlEur} managed=${it.managed}")
+                appendLine("${it.symbol}: qty=${it.quantity} entry=${it.entryPriceEur} status=${it.status}")
             }
-            if (snap.messages.isNotEmpty()) appendLine("messages=${snap.messages.take(3).joinToString("; ")}")
+            if (snap.warnings.isNotEmpty()) appendLine("warnings=${snap.warnings.take(3).joinToString("; ")}")
         }.take(1800)
     }
 
@@ -1025,6 +1229,10 @@ Crypto TradeStation remote commands:
         val quoteAsset = pairInfo?.quoteAsset ?: quoteAssetFromSymbol(ticker.symbol)
         val availableQuote = freeBalanceForAsset(liveBalances, quoteAsset)
         val availableBase = freeBalanceForAsset(liveBalances, baseAsset)
+        if (side == OrderSide.SELL && availableBase <= BigDecimal.ZERO) {
+            updateStatus("Trade skipped: ${ticker.symbol} generated SELL but there is no available $baseAsset balance. This prevents invalid paper/live SELL attempts.", "WARN")
+            return ExecutionAttemptResult(false)
+        }
         if (settings.ultimateAutomationEnabled && settings.duplicatePositionProtectionEnabled && side == OrderSide.BUY) {
             val openPosition = runCatching { dao.positionForSymbol(ticker.symbol) }.getOrNull()
             val heldBaseValue = availableBase.multiply(if (ticker.ask > BigDecimal.ZERO) ticker.ask else ticker.lastPrice)
