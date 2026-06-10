@@ -649,43 +649,6 @@ class CoinbaseAdvancedClient(
             MarketTicker(product.replace("-", ""), last, bid, ask, BigDecimal.ZERO, BigDecimal.ZERO)
         }
     }
-
-    override suspend fun getOrderBook(symbol: String, depth: Int): OrderBookSnapshot? = withContext(Dispatchers.IO) {
-        val rule = resolvePairRule(symbol)
-        if (!rule.tradable) error("Kraken pair not tradable: ${rule.canonicalSymbol}. ${rule.status}")
-        val safeDepth = depth.coerceIn(5, 100)
-        val req = Request.Builder()
-            .url("https://api.kraken.com/0/public/Depth?pair=${rule.exchangePair}&count=$safeDepth")
-            .get()
-            .build()
-        http.newCall(req).execute().use { res ->
-            if (!res.isSuccessful) error("Kraken depth HTTP ${res.code}")
-            val body = res.body?.string() ?: error("Kraken depth empty response")
-            val root = org.json.JSONObject(body)
-            val errors = root.optJSONArray("error")
-            if (errors != null && errors.length() > 0) error("Kraken depth error: $errors")
-            val result = root.getJSONObject("result")
-            val firstKey = result.keys().asSequence().firstOrNull() ?: error("Kraken depth missing result")
-            val item = result.getJSONObject(firstKey)
-
-            fun parseLevels(name: String): List<OrderBookLevel> {
-                val rows = item.getJSONArray(name)
-                return (0 until rows.length()).mapNotNull { idx ->
-                    val row = rows.optJSONArray(idx) ?: return@mapNotNull null
-                    val price = row.optString(0).toBigDecimalOrNull() ?: return@mapNotNull null
-                    val qty = row.optString(1).toBigDecimalOrNull() ?: return@mapNotNull null
-                    OrderBookLevel(price = price, quantity = qty)
-                }
-            }
-
-            OrderBookSnapshot(
-                symbol = rule.canonicalSymbol,
-                bids = parseLevels("bids"),
-                asks = parseLevels("asks")
-            )
-        }
-    }
-
     override suspend fun getCandles(symbol: String, timeframe: Timeframe, limit: Int): List<Candle> = withContext(Dispatchers.IO) {
         val product = toCoinbaseProduct(symbol)
         val end = System.currentTimeMillis() / 1000L
@@ -846,43 +809,6 @@ class BitvavoClient(
         val change = if (open > BigDecimal.ZERO) last.subtract(open).divide(open, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")) else BigDecimal.ZERO
         MarketTicker(market.replace("-", ""), last, bid, ask, volumeQuote, change)
     }
-
-    override suspend fun getOrderBook(symbol: String, depth: Int): OrderBookSnapshot? = withContext(Dispatchers.IO) {
-        val rule = resolvePairRule(symbol)
-        if (!rule.tradable) error("Kraken pair not tradable: ${rule.canonicalSymbol}. ${rule.status}")
-        val safeDepth = depth.coerceIn(5, 100)
-        val req = Request.Builder()
-            .url("https://api.kraken.com/0/public/Depth?pair=${rule.exchangePair}&count=$safeDepth")
-            .get()
-            .build()
-        http.newCall(req).execute().use { res ->
-            if (!res.isSuccessful) error("Kraken depth HTTP ${res.code}")
-            val body = res.body?.string() ?: error("Kraken depth empty response")
-            val root = org.json.JSONObject(body)
-            val errors = root.optJSONArray("error")
-            if (errors != null && errors.length() > 0) error("Kraken depth error: $errors")
-            val result = root.getJSONObject("result")
-            val firstKey = result.keys().asSequence().firstOrNull() ?: error("Kraken depth missing result")
-            val item = result.getJSONObject(firstKey)
-
-            fun parseLevels(name: String): List<OrderBookLevel> {
-                val rows = item.getJSONArray(name)
-                return (0 until rows.length()).mapNotNull { idx ->
-                    val row = rows.optJSONArray(idx) ?: return@mapNotNull null
-                    val price = row.optString(0).toBigDecimalOrNull() ?: return@mapNotNull null
-                    val qty = row.optString(1).toBigDecimalOrNull() ?: return@mapNotNull null
-                    OrderBookLevel(price = price, quantity = qty)
-                }
-            }
-
-            OrderBookSnapshot(
-                symbol = rule.canonicalSymbol,
-                bids = parseLevels("bids"),
-                asks = parseLevels("asks")
-            )
-        }
-    }
-
     override suspend fun getCandles(symbol: String, timeframe: Timeframe, limit: Int): List<Candle> = withContext(Dispatchers.IO) {
         val market = toBitvavoMarket(symbol)
         val interval = when (timeframe) { Timeframe.M1 -> "1m"; Timeframe.M5 -> "5m"; Timeframe.M15 -> "15m"; Timeframe.H1 -> "1h"; Timeframe.H4 -> "4h" }

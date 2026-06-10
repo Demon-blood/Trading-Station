@@ -791,9 +791,9 @@ Crypto TradeStation remote commands:
         return buildString {
             appendLine("Positions=${snap.positions.size}")
             snap.positions.take(10).forEach {
-                appendLine("${it.symbol}: qty=${it.quantity} entry=${it.entryPriceEur} status=${it.status}")
+                appendLine("${it.symbol}: qty=${it.quantity} entry=${it.entryPrice} pnl≈${it.unrealizedPnlEur} managed=${it.managed}")
             }
-            if (snap.warnings.isNotEmpty()) appendLine("warnings=${snap.warnings.take(3).joinToString("; ")}")
+            if (snap.messages.isNotEmpty()) appendLine("messages=${snap.messages.take(3).joinToString("; ")}")
         }.take(1800)
     }
 
