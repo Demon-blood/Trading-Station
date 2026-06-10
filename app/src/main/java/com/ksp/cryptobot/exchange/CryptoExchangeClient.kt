@@ -14,6 +14,7 @@ import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
 interface CryptoExchangeClient {
     suspend fun getTicker(symbol: String): MarketTicker
     suspend fun getCandles(symbol: String, timeframe: Timeframe, limit: Int = 120): List<Candle>
+    suspend fun getOrderBook(symbol: String, depth: Int = 25): com.ksp.cryptobot.core.OrderBookSnapshot? = null
 
     /**
      * Available balances by asset/currency code, when the selected connector supports it.

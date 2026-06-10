@@ -21,6 +21,32 @@ class AppSettingsStore(context: Context) {
             maxTradesPerDay = prefs.getInt("max_trades_per_day", 4),
             maxSpreadPercent = prefs.getString("max_spread_percent", "0.35")!!.toBigDecimalOrNull() ?: BigDecimal("0.35"),
             minVolume24hEur = prefs.getString("min_volume_24h_eur", "1000000")!!.toBigDecimalOrNull() ?: BigDecimal("1000000"),
+            maxBuyPriceFilterEnabled = prefs.getBoolean("max_buy_price_filter_enabled", false),
+            globalMaxBuyPriceEur = prefs.getString("global_max_buy_price_eur", "0")!!.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+            perSymbolMaxBuyPriceCsv = prefs.getString("per_symbol_max_buy_price_csv", "") ?: "",
+            ultimateAutomationEnabled = prefs.getBoolean("ultimate_automation_enabled", true),
+            perSymbolRulesEnabled = prefs.getBoolean("per_symbol_rules_enabled", false),
+            perSymbolRulesCsv = prefs.getString("per_symbol_rules_csv", "") ?: "",
+            autoCompoundingHardCapEnabled = prefs.getBoolean("auto_compounding_hard_cap_enabled", true),
+            autoCompoundingMaxPositionEur = prefs.getString("auto_compounding_max_position_eur", "50.00")!!.toBigDecimalOrNull() ?: BigDecimal("50.00"),
+            autoPauseAfterOrderFailuresEnabled = prefs.getBoolean("auto_pause_after_order_failures_enabled", true),
+            autoPauseFailureThreshold = prefs.getInt("auto_pause_failure_threshold", 3),
+            autoPauseMinutes = prefs.getInt("auto_pause_minutes", 60),
+            volatilityCircuitBreakerEnabled = prefs.getBoolean("volatility_circuit_breaker_enabled", true),
+            volatilityCircuitBreakerMax24hMovePercent = prefs.getString("volatility_circuit_breaker_max_24h_move_percent", "12.00")!!.toBigDecimalOrNull() ?: BigDecimal("12.00"),
+            pumpChaseProtectionEnabled = prefs.getBoolean("pump_chase_protection_enabled", true),
+            pumpChaseMax24hGainPercent = prefs.getString("pump_chase_max_24h_gain_percent", "8.00")!!.toBigDecimalOrNull() ?: BigDecimal("8.00"),
+            duplicatePositionProtectionEnabled = prefs.getBoolean("duplicate_position_protection_enabled", true),
+            adaptiveCompoundingFromRealizedPnlEnabled = prefs.getBoolean("adaptive_compounding_from_realized_pnl_enabled", true),
+            dynamicScanIntervalEnabled = prefs.getBoolean("dynamic_scan_interval_enabled", true),
+            dynamicScanFastSeconds = prefs.getLong("dynamic_scan_fast_seconds", 30L),
+            dynamicScanSlowSeconds = prefs.getLong("dynamic_scan_slow_seconds", 180L),
+            multiTimeframeConsensusEnabled = prefs.getBoolean("multi_timeframe_consensus_enabled", true),
+            multiTimeframeRequiredBullishCount = prefs.getInt("multi_timeframe_required_bullish_count", 2),
+            ultimateReadinessScoreEnabled = prefs.getBoolean("ultimate_readiness_score_enabled", true),
+            orderBookDepthGuardEnabled = prefs.getBoolean("order_book_depth_guard_enabled", true),
+            maxOrderBookSlippagePercent = prefs.getString("max_order_book_slippage_percent", "0.35")!!.toBigDecimalOrNull() ?: BigDecimal("0.35"),
+            minOrderBookDepthMultiple = prefs.getString("min_order_book_depth_multiple", "3.00")!!.toBigDecimalOrNull() ?: BigDecimal("3.00"),
             scanIntervalSeconds = prefs.getLong("scan_interval_seconds", 60L),
             taxOptimization = prefs.getBoolean("tax_optimization", true),
             tradeOnlyBtcEth = prefs.getBoolean("trade_only_btc_eth", false),
@@ -100,6 +126,11 @@ class AppSettingsStore(context: Context) {
             pauseBelowBatteryPercent = prefs.getInt("pause_below_battery_percent", 15),
             telegramRemoteControlEnabled = prefs.getBoolean("telegram_remote_control_enabled", false),
             discordRemoteControlEnabled = prefs.getBoolean("discord_remote_control_enabled", false),
+            remoteCommandCenterEnabled = prefs.getBoolean("remote_command_center_enabled", false),
+            telegramCommandPollingEnabled = prefs.getBoolean("telegram_command_polling_enabled", false),
+            discordCommandPollingEnabled = prefs.getBoolean("discord_command_polling_enabled", false),
+            remoteCommandRequirePin = prefs.getBoolean("remote_command_require_pin", true),
+            remoteCommandAllowLiveAuto = prefs.getBoolean("remote_command_allow_live_auto", false),
             localMlScoringEnabled = prefs.getBoolean("local_ml_scoring_enabled", true),
             dryRunMirrorModeEnabled = prefs.getBoolean("dry_run_mirror_mode_enabled", true),
             bearishAutoSellScore = prefs.getInt("bearish_auto_sell_score", 45),
@@ -192,6 +223,32 @@ class AppSettingsStore(context: Context) {
             .putInt("max_trades_per_day", settings.maxTradesPerDay)
             .putString("max_spread_percent", settings.maxSpreadPercent.toPlainString())
             .putString("min_volume_24h_eur", settings.minVolume24hEur.toPlainString())
+            .putBoolean("max_buy_price_filter_enabled", settings.maxBuyPriceFilterEnabled)
+            .putString("global_max_buy_price_eur", settings.globalMaxBuyPriceEur.toPlainString())
+            .putString("per_symbol_max_buy_price_csv", settings.perSymbolMaxBuyPriceCsv)
+            .putBoolean("ultimate_automation_enabled", settings.ultimateAutomationEnabled)
+            .putBoolean("per_symbol_rules_enabled", settings.perSymbolRulesEnabled)
+            .putString("per_symbol_rules_csv", settings.perSymbolRulesCsv)
+            .putBoolean("auto_compounding_hard_cap_enabled", settings.autoCompoundingHardCapEnabled)
+            .putString("auto_compounding_max_position_eur", settings.autoCompoundingMaxPositionEur.toPlainString())
+            .putBoolean("auto_pause_after_order_failures_enabled", settings.autoPauseAfterOrderFailuresEnabled)
+            .putInt("auto_pause_failure_threshold", settings.autoPauseFailureThreshold)
+            .putInt("auto_pause_minutes", settings.autoPauseMinutes)
+            .putBoolean("volatility_circuit_breaker_enabled", settings.volatilityCircuitBreakerEnabled)
+            .putString("volatility_circuit_breaker_max_24h_move_percent", settings.volatilityCircuitBreakerMax24hMovePercent.toPlainString())
+            .putBoolean("pump_chase_protection_enabled", settings.pumpChaseProtectionEnabled)
+            .putString("pump_chase_max_24h_gain_percent", settings.pumpChaseMax24hGainPercent.toPlainString())
+            .putBoolean("duplicate_position_protection_enabled", settings.duplicatePositionProtectionEnabled)
+            .putBoolean("adaptive_compounding_from_realized_pnl_enabled", settings.adaptiveCompoundingFromRealizedPnlEnabled)
+            .putBoolean("dynamic_scan_interval_enabled", settings.dynamicScanIntervalEnabled)
+            .putLong("dynamic_scan_fast_seconds", settings.dynamicScanFastSeconds)
+            .putLong("dynamic_scan_slow_seconds", settings.dynamicScanSlowSeconds)
+            .putBoolean("multi_timeframe_consensus_enabled", settings.multiTimeframeConsensusEnabled)
+            .putInt("multi_timeframe_required_bullish_count", settings.multiTimeframeRequiredBullishCount)
+            .putBoolean("ultimate_readiness_score_enabled", settings.ultimateReadinessScoreEnabled)
+            .putBoolean("order_book_depth_guard_enabled", settings.orderBookDepthGuardEnabled)
+            .putString("max_order_book_slippage_percent", settings.maxOrderBookSlippagePercent.toPlainString())
+            .putString("min_order_book_depth_multiple", settings.minOrderBookDepthMultiple.toPlainString())
             .putLong("scan_interval_seconds", settings.scanIntervalSeconds)
             .putBoolean("tax_optimization", settings.taxOptimization)
             .putBoolean("trade_only_btc_eth", settings.tradeOnlyBtcEth)
@@ -271,6 +328,11 @@ class AppSettingsStore(context: Context) {
             .putInt("pause_below_battery_percent", settings.pauseBelowBatteryPercent)
             .putBoolean("telegram_remote_control_enabled", settings.telegramRemoteControlEnabled)
             .putBoolean("discord_remote_control_enabled", settings.discordRemoteControlEnabled)
+            .putBoolean("remote_command_center_enabled", settings.remoteCommandCenterEnabled)
+            .putBoolean("telegram_command_polling_enabled", settings.telegramCommandPollingEnabled)
+            .putBoolean("discord_command_polling_enabled", settings.discordCommandPollingEnabled)
+            .putBoolean("remote_command_require_pin", settings.remoteCommandRequirePin)
+            .putBoolean("remote_command_allow_live_auto", settings.remoteCommandAllowLiveAuto)
             .putBoolean("local_ml_scoring_enabled", settings.localMlScoringEnabled)
             .putBoolean("dry_run_mirror_mode_enabled", settings.dryRunMirrorModeEnabled)
             .putInt("bearish_auto_sell_score", settings.bearishAutoSellScore)
@@ -389,6 +451,31 @@ class AppSettingsStore(context: Context) {
     }
 
     fun discordWebhookUrl(): String? = secure.readEncryptedString("discord_webhook_url")?.takeIf { it.isNotBlank() }
+
+    fun saveRemoteCommandPin(pin: String) {
+        secure.saveEncryptedString("remote_command_pin", pin.trim())
+    }
+
+    fun remoteCommandPin(): String? = secure.readEncryptedString("remote_command_pin")?.takeIf { it.isNotBlank() }
+
+    fun saveDiscordBotCommandConfig(botToken: String, channelId: String) {
+        secure.saveEncryptedString("discord_bot_token", botToken.trim())
+        secure.saveEncryptedString("discord_channel_id", channelId.trim())
+    }
+
+    fun discordBotToken(): String? = secure.readEncryptedString("discord_bot_token")?.takeIf { it.isNotBlank() }
+
+    fun discordChannelId(): String? = secure.readEncryptedString("discord_channel_id")?.takeIf { it.isNotBlank() }
+
+    fun telegramCommandOffset(): Long = prefs.getLong("telegram_command_offset", 0L)
+    fun saveTelegramCommandOffset(offset: Long) {
+        prefs.edit().putLong("telegram_command_offset", offset).apply()
+    }
+
+    fun discordCommandLastMessageId(): String? = prefs.getString("discord_command_last_message_id", null)?.takeIf { it.isNotBlank() }
+    fun saveDiscordCommandLastMessageId(messageId: String?) {
+        prefs.edit().putString("discord_command_last_message_id", messageId.orEmpty()).apply()
+    }
 
     fun newsApiKey(): String? = secure.readEncryptedString("news_api_key")?.takeIf { it.isNotBlank() }
 }

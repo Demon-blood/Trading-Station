@@ -52,23 +52,58 @@ class BotForegroundService : Service() {
         }
         statusStore.write("Background auto bot service starting. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}, backgroundAuto=$backgroundAuto")
         startForeground(NOTIFICATION_ID, notification(text))
-        controller.start()
         scope.launch {
+            val startSettings = settingsStore.load()
+            if (startSettings.mode == BotMode.LIVE_AUTO) {
+                updateNotification("Running LIVE_AUTO preflight verification...")
+                statusStore.write("LIVE_AUTO preflight verification started before background execution.", "INFO")
+                val verification = controller.runSystemFeatureVerification(startSettings)
+                val failures = verification.filter { it.startsWith("FAIL") }
+                if (failures.isNotEmpty()) {
+                    val reason = failures.take(3).joinToString(" | ")
+                    statusStore.write("LIVE_AUTO start blocked by preflight: $reason", "ERROR")
+                    updateNotification("LIVE_AUTO blocked by preflight. Open Settings > System Test.")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@launch
+                }
+                val warnings = verification.count { it.startsWith("WARN") }
+                val notConfigured = verification.count { it.startsWith("NOT_CONFIGURED") }
+                statusStore.write("LIVE_AUTO preflight passed. warnings=$warnings, notConfigured=$notConfigured", "INFO")
+                updateNotification("LIVE_AUTO preflight passed. Starting background auto bot.")
+            }
+            controller.start()
             while (controller.running) {
                 val current = settingsStore.load()
                 val cycleStart = System.currentTimeMillis()
                 try {
-                    val shouldExecute = current.mode == BotMode.PAPER || current.mode == BotMode.LIVE_AUTO
-                    val isPaper = current.mode == BotMode.PAPER || current.exchangeProvider == com.ksp.cryptobot.core.ExchangeProvider.PAPER
-                    statusStore.write("Service cycle started. provider=${current.exchangeProvider}, mode=${current.mode}, paper=$isPaper, execute=$shouldExecute, interval=${current.scanIntervalSeconds}s")
-                    controller.scanOnce(current, execute = shouldExecute)
+                    controller.processRemoteCommands(current)
+                    if (!controller.running) break
+                    val currentAfterCommands = settingsStore.load()
+                    val shouldExecute = currentAfterCommands.mode == BotMode.PAPER || currentAfterCommands.mode == BotMode.LIVE_AUTO
+                    val isPaper = currentAfterCommands.mode == BotMode.PAPER || currentAfterCommands.exchangeProvider == com.ksp.cryptobot.core.ExchangeProvider.PAPER
+                    statusStore.write("Service cycle started. provider=${currentAfterCommands.exchangeProvider}, mode=${currentAfterCommands.mode}, paper=$isPaper, execute=$shouldExecute, interval=${currentAfterCommands.scanIntervalSeconds}s")
+                    val decisions = controller.scanOnce(currentAfterCommands, execute = shouldExecute)
+                    if (currentAfterCommands.dynamicScanIntervalEnabled) {
+                        val hasTradableSignal = decisions.any { it.allowedToTrade && (it.finalAction.name.contains("BUY") || it.finalAction.name.contains("SELL")) }
+                        val selectedDelay = if (hasTradableSignal) currentAfterCommands.dynamicScanFastSeconds else currentAfterCommands.scanIntervalSeconds
+                        statusStore.write("Dynamic scan interval selected: ${selectedDelay}s. TradableSignal=$hasTradableSignal", "INFO")
+                    }
                     updateNotification(statusStore.latestText())
                 } catch (error: Exception) {
                     statusStore.write("Service cycle failed: ${error.message}", "ERROR")
                     updateNotification("Bot error: ${error.message}")
                 }
                 val elapsed = System.currentTimeMillis() - cycleStart
-                val delayMs = (current.scanIntervalSeconds.coerceAtLeast(15L) * 1000L - elapsed).coerceAtLeast(5_000L)
+                val latest = settingsStore.load()
+                val lastLines = statusStore.recentLines(20)
+                val hasRecentTradableSignal = latest.dynamicScanIntervalEnabled && lastLines.any { it.contains("TradableSignal=true", ignoreCase = true) }
+                val selectedInterval = when {
+                    !latest.dynamicScanIntervalEnabled -> latest.scanIntervalSeconds
+                    hasRecentTradableSignal -> latest.dynamicScanFastSeconds
+                    else -> latest.scanIntervalSeconds
+                }.coerceAtLeast(15L)
+                val delayMs = (selectedInterval * 1000L - elapsed).coerceAtLeast(5_000L)
                 statusStore.write("Next scan in ${delayMs / 1000L}s")
                 updateNotification(statusStore.latestText())
                 delay(delayMs)

@@ -219,7 +219,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onExportFullBackup = { settings, callback ->
                             lifecycleScope.launch {
-                                callback(controller.exportFullLocalBackup(settings))
+                                callback(controller.exportFullLocalBackupToFile(settings))
                             }
                         },
                         onTestTelegram = { settings, callback ->
@@ -353,6 +353,9 @@ private fun AdvancedBotApp(
     var telegramBotToken by remember { mutableStateOf(store.telegramBotToken().orEmpty()) }
     var telegramChatId by remember { mutableStateOf(store.telegramChatId().orEmpty()) }
     var discordWebhookUrl by remember { mutableStateOf(store.discordWebhookUrl().orEmpty()) }
+    var remoteCommandPin by remember { mutableStateOf(store.remoteCommandPin().orEmpty()) }
+    var discordBotToken by remember { mutableStateOf(store.discordBotToken().orEmpty()) }
+    var discordCommandChannelId by remember { mutableStateOf(store.discordChannelId().orEmpty()) }
     var liveChartAutoRefresh by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
@@ -539,18 +542,35 @@ private fun AdvancedBotApp(
                     }
                 )
                 AppTab.AI_SIGNALS -> AiSignalsScreen(decisions = decisions, settings = settings)
-                AppTab.CHART -> ChartHubScreen(
+                AppTab.CHART -> ChartScreen(
                     settings = settings,
                     candles = chartCandles,
-                    trades = tradeJournal,
                     selectedSymbol = chartSymbol,
                     selectedTimeframe = chartTimeframe,
                     latestDecision = decisions.firstOrNull { it.symbol.equals(chartSymbol, ignoreCase = true) },
+                    trades = tradeJournal.filter { it.symbol.equals(chartSymbol, ignoreCase = true) },
                     autoRefresh = liveChartAutoRefresh,
-                    onOpen = { currentTab = it },
+                    onAutoRefreshChange = { liveChartAutoRefresh = it },
+                    onSymbolChange = { symbol ->
+                        chartSymbol = symbol
+                        onLoadChartCandles(settings, symbol, chartTimeframe, 240) { result ->
+                            chartCandles = result
+                            status = "Chart loaded: $symbol ${chartTimeframe.name}"
+                        }
+                        onLoadTradeJournal(200) { result -> tradeJournal = result }
+                    },
+                    onTimeframeChange = { timeframe ->
+                        chartTimeframe = timeframe
+                        onLoadChartCandles(settings, chartSymbol, timeframe, 240) { result ->
+                            chartCandles = result
+                            status = "Chart loaded: $chartSymbol ${timeframe.name}"
+                        }
+                        onLoadTradeJournal(200) { result -> tradeJournal = result }
+                    },
                     onRefresh = {
                         onLoadChartCandles(settings, chartSymbol, chartTimeframe, 240) { result ->
                             chartCandles = result
+                            statusStore.write("Unified live chart refreshed. Symbol=$chartSymbol timeframe=${chartTimeframe.name} candles=${result.size}")
                             status = "Chart refreshed"
                         }
                         onLoadTradeJournal(200) { result -> tradeJournal = result }
@@ -923,15 +943,31 @@ private fun AdvancedBotApp(
                     telegramBotToken = telegramBotToken,
                     telegramChatId = telegramChatId,
                     discordWebhookUrl = discordWebhookUrl,
+                    remoteCommandPin = remoteCommandPin,
+                    discordBotToken = discordBotToken,
+                    discordCommandChannelId = discordCommandChannelId,
                     onTelegramBotToken = { telegramBotToken = it },
                     onTelegramChatId = { telegramChatId = it },
                     onDiscordWebhookUrl = { discordWebhookUrl = it },
+                    onRemoteCommandPin = { remoteCommandPin = it },
+                    onDiscordBotToken = { discordBotToken = it },
+                    onDiscordCommandChannelId = { discordCommandChannelId = it },
                     onSave = {
                         store.saveTelegramConfig(telegramBotToken, telegramChatId)
                         store.saveDiscordWebhook(discordWebhookUrl)
+                        store.saveRemoteCommandPin(remoteCommandPin)
+                        store.saveDiscordBotCommandConfig(discordBotToken, discordCommandChannelId)
                         val updated = settings.copy(
                             telegramRemoteControlEnabled = telegramBotToken.isNotBlank() && telegramChatId.isNotBlank(),
-                            discordRemoteControlEnabled = discordWebhookUrl.isNotBlank()
+                            discordRemoteControlEnabled = discordWebhookUrl.isNotBlank(),
+                            remoteCommandCenterEnabled = remoteCommandPin.isNotBlank() && (
+                                (telegramBotToken.isNotBlank() && telegramChatId.isNotBlank()) ||
+                                (discordBotToken.isNotBlank() && discordCommandChannelId.isNotBlank())
+                            ),
+                            telegramCommandPollingEnabled = telegramBotToken.isNotBlank() && telegramChatId.isNotBlank(),
+                            discordCommandPollingEnabled = discordBotToken.isNotBlank() && discordCommandChannelId.isNotBlank(),
+                            remoteCommandRequirePin = true,
+                            remoteCommandAllowLiveAuto = settings.remoteCommandAllowLiveAuto
                         )
                         persistSettings(updated)
                         statusStore.write("Remote alert settings saved. Telegram=${updated.telegramRemoteControlEnabled}, Discord=${updated.discordRemoteControlEnabled}", "INFO")
@@ -1002,7 +1038,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.0.7 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.7.0 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1471,8 +1507,8 @@ private fun ChartHubScreen(
                 }
             }
         }
-        item { HubActionCard("Live Chart", "Candlesticks, volume, zoom/pan, live auto-refresh and TP/SL overlays.", "Open", { onOpen(AppTab.CHART_MAIN) }) }
-        item { HubActionCard("Trade Overlay", "Actual BUY/SELL markers and position overlay.", "Open", { onOpen(AppTab.TRADE_OVERLAY) }) }
+        item { HubActionCard("Unified Live Chart", "Single chart with candles, volume, zoom/pan, auto-refresh, TP/SL and entry/exit markers.", "Open", { onOpen(AppTab.CHART_MAIN) }) }
+        item { HubActionCard("Trade Overlay Details", "Marker statistics and position overlay details for the same chart data.", "Open", { onOpen(AppTab.TRADE_OVERLAY) }) }
         item { HubActionCard("Trade Replay", "Replay candles step-by-step.", "Open", { onOpen(AppTab.REPLAY) }) }
         item { HubActionCard("Trade Journal", "Local paper/live trade database with fees, AI score and P/L.", "Open", { onOpen(AppTab.TRADE_JOURNAL) }) }
     }
@@ -1557,6 +1593,7 @@ private fun SystemTestScreen(
                     Text("No system test has been run yet.", color = Muted)
                     Text("Press Run Tests. Telegram/Discord tests only run when credentials are configured and enabled.", color = Amber)
                     Text("The live order path is verified as wired, but this test does not place a real order for safety.", color = Amber)
+                    Text("LIVE_AUTO background start now runs this verification first and blocks startup if critical FAIL checks are found.", color = Amber)
                 }
             }
         } else {
@@ -1654,7 +1691,7 @@ private fun SettingsHubScreen(
                 }
             }
         }
-        item { HubActionCard("Advanced Settings", "Editable strategy, risk, symbol discovery and execution controls.", "Open", { onOpen(AppTab.ADVANCED_SETTINGS) }) }
+        item { HubActionCard("Advanced Settings", "Clean unified automation controls: price caps, per-symbol rules, live guards, duplicate-position protection and risk limits.", "Open", { onOpen(AppTab.ADVANCED_SETTINGS) }) }
         item { HubActionCard("Remote Alerts", "Telegram bot token, Telegram chat ID and Discord webhook.", "Open", { onOpen(AppTab.REMOTE_ALERTS) }) }
         item { HubActionCard("Backup / Restore", "Export safe text backup and restore safe defaults.", "Open", { onOpen(AppTab.BACKUP) }) }
         item { HubActionCard("Build Health", "Pre-push status and app health checklist.", "Open", { onOpen(AppTab.HEALTH) }) }
@@ -1733,7 +1770,7 @@ private fun ChartScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            SectionTitle("Chart View", "Real Kraken OHLC price chart with bot decision context.")
+            SectionTitle("Unified Live Chart", "One live auto-updating chart with candles, volume, TP/SL, current price, zoom/pan, AI status and actual entry/exit markers.")
         }
         item {
             GlassCard {
@@ -1764,15 +1801,15 @@ private fun ChartScreen(
                     Spacer(Modifier.height(12.dp))
                     ToggleRow("Live auto-refresh every 30 seconds", autoRefresh, onAutoRefreshChange)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ElevatedButton(onClick = onRefresh) { Text("Refresh Kraken Chart") }
-                        OutlinedButton(onClick = { windowSize = (windowSize - 24).coerceAtLeast(24) }) { Text("Zoom In") }
-                        OutlinedButton(onClick = { windowSize = (windowSize + 24).coerceAtMost(180) }) { Text("Zoom Out") }
-                    }
+                    Text("View window: $windowSize candles • Pan offset: $panOffset candles", color = Muted)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { panOffset = (panOffset + 12).coerceAtMost(240) }) { Text("Pan Left") }
-                        OutlinedButton(onClick = { panOffset = (panOffset - 12).coerceAtLeast(0) }) { Text("Pan Right") }
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item { ElevatedButton(onClick = onRefresh) { Text("Refresh Now") } }
+                        item { OutlinedButton(onClick = { windowSize = (windowSize - 24).coerceAtLeast(24) }) { Text("Zoom In") } }
+                        item { OutlinedButton(onClick = { windowSize = (windowSize + 24).coerceAtMost(240) }) { Text("Zoom Out") } }
+                        item { OutlinedButton(onClick = { panOffset = (panOffset + 12).coerceAtMost(240) }) { Text("Pan Left") } }
+                        item { OutlinedButton(onClick = { panOffset = (panOffset - 12).coerceAtLeast(0) }) { Text("Pan Right") } }
+                        item { OutlinedButton(onClick = { panOffset = 0; windowSize = 72 }) { Text("Reset") } }
                     }
                 }
             }
@@ -1784,7 +1821,7 @@ private fun ChartScreen(
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("$selectedSymbol ${selectedTimeframe.name}", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
-                            Text("Candles loaded: ${candles.size}", color = Muted)
+                            Text("Candles=${candles.size} • Trades=${trades.size} • Auto-refresh=${if (autoRefresh) "ON" else "OFF"}", color = Muted)
                         }
                         StatusPill(latestDecision?.finalAction?.name ?: "NO SIGNAL", actionColor(latestDecision?.finalAction ?: SignalAction.WAIT))
                     }
@@ -1798,11 +1835,19 @@ private fun ChartScreen(
 
         item {
             GlassCard {
-                SectionTitle("Chart overlays", "First version includes price trend, estimated TP/SL lines, latest AI action, and spike/hold status.")
+                SectionTitle("Chart feature status", "All chart features are consolidated into the single live chart above.")
+                ToggleInfo("Live Kraken OHLC feed", candles.isNotEmpty())
+                ToggleInfo("Live auto-refresh", autoRefresh)
+                ToggleInfo("Candlestick bodies + wicks", true)
+                ToggleInfo("Volume bars", true)
+                ToggleInfo("Zoom / pan controls", true)
+                ToggleInfo("Actual entry/exit markers", trades.isNotEmpty())
+                ToggleInfo("TP / SL overlay lines", true)
+                ToggleInfo("Current price marker", true)
                 ToggleInfo("Spike timing", settings.spikeProfitTimingEnabled)
                 ToggleInfo("Learned hold", settings.learnedHoldForProfitEnabled)
                 ToggleInfo("Trailing stop", settings.enableTrailingStop)
-                Text("Next chart upgrade: full candlestick bodies, volume bars, zoom/pan and actual entry/exit markers from trade history.", color = Muted)
+                Text("Markers appear after paper/live trades exist in the local trade journal.", color = Muted)
             }
         }
     }
@@ -2015,9 +2060,15 @@ private fun RemoteAlertsScreen(
     telegramBotToken: String,
     telegramChatId: String,
     discordWebhookUrl: String,
+    remoteCommandPin: String,
+    discordBotToken: String,
+    discordCommandChannelId: String,
     onTelegramBotToken: (String) -> Unit,
     onTelegramChatId: (String) -> Unit,
     onDiscordWebhookUrl: (String) -> Unit,
+    onRemoteCommandPin: (String) -> Unit,
+    onDiscordBotToken: (String) -> Unit,
+    onDiscordCommandChannelId: (String) -> Unit,
     onSave: () -> Unit,
     onTestTelegram: () -> Unit,
     onTestDiscord: () -> Unit
@@ -2070,6 +2121,46 @@ private fun RemoteAlertsScreen(
         }
         item {
             GlassCard {
+                SectionTitle("Remote Command Center", "Control the bot from Telegram or Discord while the Android foreground service is running.")
+                OutlinedTextField(
+                    value = remoteCommandPin,
+                    onValueChange = onRemoteCommandPin,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Remote command PIN") },
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                ToggleInfo("Remote command center enabled after save", settings.remoteCommandCenterEnabled)
+                ToggleInfo("Telegram command polling after save", settings.telegramCommandPollingEnabled)
+                ToggleInfo("Discord command polling after save", settings.discordCommandPollingEnabled)
+                ToggleInfo("Remote LIVE_AUTO commands", settings.remoteCommandAllowLiveAuto)
+                Text("Telegram commands use your existing bot token/chat ID. Discord commands require a Discord bot token and channel ID, not only a webhook.", color = Amber)
+                Text("Commands: /cts <PIN> status, portfolio, positions, orders, scan, pause, resume, mode PAPER, set max_position 10, set max_buy BTCEUR 95000.", color = Muted)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Discord Command Bot", "Only needed if you want inbound Discord commands. Webhooks can send alerts, but cannot read commands.")
+                OutlinedTextField(
+                    value = discordBotToken,
+                    onValueChange = onDiscordBotToken,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Discord bot token for commands") },
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                OutlinedTextField(
+                    value = discordCommandChannelId,
+                    onValueChange = onDiscordCommandChannelId,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Discord command channel ID") }
+                )
+                Text("The bot must be added to your server and allowed to read/send messages in this channel.", color = Muted)
+                Button(onClick = onSave, colors = ButtonDefaults.buttonColors(containerColor = Electric), modifier = Modifier.fillMaxWidth()) {
+                    Text("Save Command Settings")
+                }
+            }
+        }
+        item {
+            GlassCard {
                 SectionTitle("Live alert events", "These are now wired into the live execution path.")
                 Text("• Order placed", color = Muted)
                 Text("• Order submit failed", color = Muted)
@@ -2082,7 +2173,14 @@ private fun RemoteAlertsScreen(
 }
 
 @Composable
-private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trades: List<TradeEntity> = emptyList(), windowSize: Int = 72, panOffset: Int = 0, showVolume: Boolean = true) {
+private fun CandlestickChart(
+    candles: List<Candle>,
+    settings: BotSettings,
+    trades: List<TradeEntity> = emptyList(),
+    windowSize: Int = 72,
+    panOffset: Int = 0,
+    showVolume: Boolean = true
+) {
     val upColor = Mint
     val downColor = Danger
     val tpColor = Amber
@@ -2093,50 +2191,67 @@ private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trade
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(240.dp)
+                .height(420.dp)
                 .background(PanelAlt, RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text("No chart data yet. Press Refresh Kraken Chart.", color = Muted)
+            Text("No chart data yet. Press Refresh Now or enable live auto-refresh.", color = Muted)
         }
         return
     }
 
-    val visible = candles.dropLast(panOffset.coerceAtLeast(0)).takeLast(windowSize.coerceIn(24, 240)).ifEmpty { candles.takeLast(windowSize.coerceIn(24, 240)) }
-    val minPrice = visible.minOf { it.low }
-    val maxPrice = visible.maxOf { it.high }
-    val range = (maxPrice - minPrice).takeIf { it > BigDecimal.ZERO } ?: BigDecimal.ONE
+    val safeWindow = windowSize.coerceIn(24, 240)
+    val safePan = panOffset.coerceAtLeast(0)
+    val visible = candles.dropLast(safePan).takeLast(safeWindow).ifEmpty { candles.takeLast(safeWindow) }
+    val priceMin = visible.minOf { it.low }
+    val priceMax = visible.maxOf { it.high }
     val last = visible.last().close
     val tp = last.multiply(BigDecimal.ONE.add(settings.takeProfitPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
     val sl = last.multiply(BigDecimal.ONE.subtract(settings.stopLossPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
+    val tradePrices = trades.mapNotNull { it.priceEur.toBigDecimalOrNull() }
+    val minPrice = (listOf(priceMin, last, tp, sl) + tradePrices).minOrNull() ?: priceMin
+    val maxPrice = (listOf(priceMax, last, tp, sl) + tradePrices).maxOrNull() ?: priceMax
+    val range = (maxPrice - minPrice).takeIf { it > BigDecimal.ZERO } ?: BigDecimal.ONE
+    val firstTime = visible.first().openTimeEpochMs
+    val lastTime = visible.last().openTimeEpochMs
+    val timeRange = (lastTime - firstTime).coerceAtLeast(1L)
+    val lastBuy = trades.lastOrNull { it.side.uppercase().contains("BUY") }?.priceEur?.toBigDecimalOrNull()
+    val lastSell = trades.lastOrNull { it.side.uppercase().contains("SELL") }?.priceEur?.toBigDecimalOrNull()
 
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .height(420.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(PanelAlt)
             .padding(8.dp)
     ) {
         val w = size.width
         val h = size.height
-        val leftPad = 12f
-        val rightPad = 12f
-        val topPad = 16f
-        val bottomPad = 20f
+        val leftPad = 14f
+        val rightPad = 14f
+        val topPad = 18f
+        val bottomPad = 24f
+        val volumeHeight = if (showVolume) h * 0.22f else 0f
+        val priceChartBottom = h - bottomPad - volumeHeight - if (showVolume) 12f else 0f
         val chartW = w - leftPad - rightPad
-        val chartH = h - topPad - bottomPad
+        val chartH = priceChartBottom - topPad
         val candleSlot = chartW / visible.size.coerceAtLeast(1)
-        val bodyWidth = (candleSlot * 0.55f).coerceAtLeast(3f)
-
-        repeat(4) { idx ->
-            val y = topPad + chartH * idx / 3f
-            drawLine(color = gridColor, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 1f)
-        }
+        val bodyWidth = (candleSlot * 0.62f).coerceIn(3f, 18f)
 
         fun priceToY(price: BigDecimal): Float {
             val normalized = price.subtract(minPrice).divide(range, 8, RoundingMode.HALF_UP).toFloat()
             return topPad + chartH * (1f - normalized)
+        }
+
+        fun timeToX(epochMs: Long): Float {
+            val bounded = epochMs.coerceIn(firstTime, lastTime)
+            return leftPad + chartW * ((bounded - firstTime).toFloat() / timeRange.toFloat())
+        }
+
+        repeat(5) { idx ->
+            val y = topPad + chartH * idx / 4f
+            drawLine(color = gridColor, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 1f)
         }
 
         visible.forEachIndexed { idx, candle ->
@@ -2156,46 +2271,58 @@ private fun CandlestickChart(candles: List<Candle>, settings: BotSettings, trade
             )
         }
 
-        fun overlayLine(price: BigDecimal, color: Color) {
-            if (price < minPrice || price > maxPrice) return
-            val y = priceToY(price)
-            drawLine(color = color, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = 2f)
+        fun overlayLine(price: BigDecimal?, color: Color, stroke: Float = 2f) {
+            if (price == null) return
+            val y = priceToY(price.coerceIn(minPrice, maxPrice))
+            drawLine(color = color, start = Offset(leftPad, y), end = Offset(w - rightPad, y), strokeWidth = stroke)
         }
-        overlayLine(tp, tpColor)
-        overlayLine(sl, slColor)
 
-        if (trades.isNotEmpty()) {
-            val firstTime = visible.first().openTimeEpochMs
-            val lastTime = visible.last().openTimeEpochMs
-            val timeRange = (lastTime - firstTime).coerceAtLeast(1L)
-            trades.takeLast(40).forEach { trade: TradeEntity ->
-                val tradeTime = trade.timestampEpochMs.coerceIn(firstTime, lastTime)
-                val x = leftPad + chartW * ((tradeTime - firstTime).toFloat() / timeRange.toFloat())
-                val tradePrice = trade.priceEur.toBigDecimalOrNull() ?: last
-                val y = priceToY(tradePrice.coerceIn(minPrice, maxPrice))
-                val markerColor = if (trade.side.uppercase().contains("BUY")) Mint else Danger
-                drawCircle(color = markerColor, radius = 6f, center = Offset(x, y))
+        overlayLine(tp, tpColor, 2f)
+        overlayLine(sl, slColor, 2f)
+        overlayLine(lastBuy, Mint.copy(alpha = 0.75f), 1.5f)
+        overlayLine(lastSell, Danger.copy(alpha = 0.75f), 1.5f)
+
+        trades.takeLast(80).forEach { trade: TradeEntity ->
+            val tradePrice = trade.priceEur.toBigDecimalOrNull() ?: return@forEach
+            val x = timeToX(trade.timestampEpochMs)
+            val y = priceToY(tradePrice.coerceIn(minPrice, maxPrice))
+            val isBuy = trade.side.uppercase().contains("BUY")
+            val markerColor = if (isBuy) Mint else Danger
+            val marker = Path()
+            if (isBuy) {
+                marker.moveTo(x, y - 9f)
+                marker.lineTo(x - 7f, y + 7f)
+                marker.lineTo(x + 7f, y + 7f)
+            } else {
+                marker.moveTo(x, y + 9f)
+                marker.lineTo(x - 7f, y - 7f)
+                marker.lineTo(x + 7f, y - 7f)
             }
+            marker.close()
+            drawPath(marker, color = markerColor)
+            drawCircle(color = Color.White.copy(alpha = 0.75f), radius = 2f, center = Offset(x, y))
         }
 
         val lastX = w - rightPad
         val lastY = priceToY(last)
+        drawLine(color = Electric.copy(alpha = 0.75f), start = Offset(leftPad, lastY), end = Offset(w - rightPad, lastY), strokeWidth = 1.5f)
         drawCircle(color = Electric, radius = 7f, center = Offset(lastX, lastY))
 
         if (showVolume) {
             val maxVolume = visible.maxOfOrNull { it.volume } ?: BigDecimal.ONE
-            val volHeight = chartH * 0.22f
-            val baseY = h - bottomPad
+            val volTop = priceChartBottom + 12f
+            val volBase = h - bottomPad
+            drawLine(color = gridColor, start = Offset(leftPad, volBase), end = Offset(w - rightPad, volBase), strokeWidth = 1f)
             visible.forEachIndexed { idx, candle ->
                 val x = leftPad + candleSlot * idx + candleSlot / 2f
                 val normalized = if (maxVolume > BigDecimal.ZERO) candle.volume.divide(maxVolume, 8, RoundingMode.HALF_UP).toFloat() else 0f
-                val barH = (volHeight * normalized).coerceAtLeast(1f)
+                val barH = ((volBase - volTop) * normalized).coerceAtLeast(1f)
                 val color = if (candle.close >= candle.open) upColor.copy(alpha = 0.45f) else downColor.copy(alpha = 0.45f)
                 drawLine(
                     color = color,
-                    start = Offset(x, baseY),
-                    end = Offset(x, baseY - barH),
-                    strokeWidth = (candleSlot * 0.45f).coerceAtLeast(2f),
+                    start = Offset(x, volBase),
+                    end = Offset(x, volBase - barH),
+                    strokeWidth = (candleSlot * 0.48f).coerceAtLeast(2f),
                     cap = StrokeCap.Round
                 )
             }
@@ -2370,6 +2497,9 @@ private fun BackupRestoreScreen(
     onApplySafeDefaults: () -> Unit
 ) {
     var backupText by remember { mutableStateOf("") }
+    val displayText = if (backupText.length > 24000) {
+        backupText.take(24000) + "\n\n[Preview truncated in UI for stability. Full backup is saved in the file path shown above.]"
+    } else backupText
 
     fun generateSettingsSummaryBackup(): String {
         return listOf(
@@ -2381,6 +2511,37 @@ private fun BackupRestoreScreen(
             "allowedQuotes=${settings.allowedQuoteAssetsCsv}",
             "autoUniverse=${settings.autoSymbolQuoteAsset}",
             "maxPositionEur=${settings.maxPositionEur}",
+            "maxBuyPriceFilterEnabled=${settings.maxBuyPriceFilterEnabled}",
+            "globalMaxBuyPriceEur=${settings.globalMaxBuyPriceEur}",
+            "perSymbolMaxBuyPriceCsv=${settings.perSymbolMaxBuyPriceCsv}",
+            "ultimateAutomationEnabled=${settings.ultimateAutomationEnabled}",
+            "perSymbolRulesEnabled=${settings.perSymbolRulesEnabled}",
+            "perSymbolRulesCsv=${settings.perSymbolRulesCsv}",
+            "autoCompoundingHardCapEnabled=${settings.autoCompoundingHardCapEnabled}",
+            "autoCompoundingMaxPositionEur=${settings.autoCompoundingMaxPositionEur}",
+            "autoPauseAfterOrderFailuresEnabled=${settings.autoPauseAfterOrderFailuresEnabled}",
+            "autoPauseFailureThreshold=${settings.autoPauseFailureThreshold}",
+            "autoPauseMinutes=${settings.autoPauseMinutes}",
+            "volatilityCircuitBreakerEnabled=${settings.volatilityCircuitBreakerEnabled}",
+            "volatilityCircuitBreakerMax24hMovePercent=${settings.volatilityCircuitBreakerMax24hMovePercent}",
+            "pumpChaseProtectionEnabled=${settings.pumpChaseProtectionEnabled}",
+            "pumpChaseMax24hGainPercent=${settings.pumpChaseMax24hGainPercent}",
+            "duplicatePositionProtectionEnabled=${settings.duplicatePositionProtectionEnabled}",
+            "adaptiveCompoundingFromRealizedPnlEnabled=${settings.adaptiveCompoundingFromRealizedPnlEnabled}",
+            "dynamicScanIntervalEnabled=${settings.dynamicScanIntervalEnabled}",
+            "dynamicScanFastSeconds=${settings.dynamicScanFastSeconds}",
+            "dynamicScanSlowSeconds=${settings.dynamicScanSlowSeconds}",
+            "multiTimeframeConsensusEnabled=${settings.multiTimeframeConsensusEnabled}",
+            "multiTimeframeRequiredBullishCount=${settings.multiTimeframeRequiredBullishCount}",
+            "ultimateReadinessScoreEnabled=${settings.ultimateReadinessScoreEnabled}",
+            "remoteCommandCenterEnabled=${settings.remoteCommandCenterEnabled}",
+            "telegramCommandPollingEnabled=${settings.telegramCommandPollingEnabled}",
+            "discordCommandPollingEnabled=${settings.discordCommandPollingEnabled}",
+            "remoteCommandRequirePin=${settings.remoteCommandRequirePin}",
+            "remoteCommandAllowLiveAuto=${settings.remoteCommandAllowLiveAuto}",
+            "orderBookDepthGuardEnabled=${settings.orderBookDepthGuardEnabled}",
+            "maxOrderBookSlippagePercent=${settings.maxOrderBookSlippagePercent}",
+            "minOrderBookDepthMultiple=${settings.minOrderBookDepthMultiple}",
             "maxTradesPerHour=${settings.maxTradesPerHour}",
             "maxLivePositions=${settings.maxSimultaneousLivePositions}",
             "selfLearning=${settings.trueSelfLearningEnabled}",
@@ -2395,7 +2556,7 @@ private fun BackupRestoreScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Backup / Export", "Settings and app data are saved automatically during normal updates. Use manual export before reinstalling or moving phones.") }
+        item { SectionTitle("Backup / Export", "Crash-safe export: the full backup is written to a local file, and only a small preview is shown in the app.") }
         item {
             GlassCard {
                 Column {
@@ -2412,11 +2573,12 @@ private fun BackupRestoreScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
-                        value = backupText,
-                        onValueChange = { backupText = it },
+                        value = displayText,
+                        onValueChange = { },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 10,
-                        label = { Text("Backup text") }
+                        readOnly = true,
+                        label = { Text("Backup file path / preview") }
                     )
                 }
             }
@@ -2425,7 +2587,7 @@ private fun BackupRestoreScreen(
             GlassCard {
                 SectionTitle("Automatic save behavior", "Normal app updates keep local data automatically as long as the package name stays the same.")
                 Text("Saved automatically: settings, local database, trade journal, learning profiles, tax rows and local bot history.", color = Muted)
-                Text("Manual export: press Export All Settings + Data and copy/save the generated text somewhere safe before reinstalling or changing phones.", color = Muted)
+                Text("Manual export: press Export All Settings + Data. The app saves the full backup to a local file and shows the file path here.", color = Muted)
                 Text("Not exported for security: Kraken API secrets, Telegram bot token and Discord webhook URL.", color = Amber)
             }
         }
@@ -3565,6 +3727,32 @@ private fun AdvancedSettingsScreen(
     var maxTradesHour by remember(settings) { mutableStateOf(settings.maxTradesPerHour.toString()) }
     var maxLivePositions by remember(settings) { mutableStateOf(settings.maxSimultaneousLivePositions.toString()) }
     var maxPosition by remember(settings) { mutableStateOf(settings.maxPositionEur.toPlainString()) }
+    var maxBuyPriceEnabled by remember(settings) { mutableStateOf(settings.maxBuyPriceFilterEnabled) }
+    var globalMaxBuyPrice by remember(settings) { mutableStateOf(settings.globalMaxBuyPriceEur.toPlainString()) }
+    var perSymbolMaxBuyPrice by remember(settings) { mutableStateOf(settings.perSymbolMaxBuyPriceCsv) }
+    var ultimateAutomation by remember(settings) { mutableStateOf(settings.ultimateAutomationEnabled) }
+    var perSymbolRules by remember(settings) { mutableStateOf(settings.perSymbolRulesEnabled) }
+    var perSymbolRulesText by remember(settings) { mutableStateOf(settings.perSymbolRulesCsv) }
+    var compoundingHardCap by remember(settings) { mutableStateOf(settings.autoCompoundingHardCapEnabled) }
+    var compoundingMaxPosition by remember(settings) { mutableStateOf(settings.autoCompoundingMaxPositionEur.toPlainString()) }
+    var failureAutoPause by remember(settings) { mutableStateOf(settings.autoPauseAfterOrderFailuresEnabled) }
+    var failureAutoPauseThreshold by remember(settings) { mutableStateOf(settings.autoPauseFailureThreshold.toString()) }
+    var failureAutoPauseMinutes by remember(settings) { mutableStateOf(settings.autoPauseMinutes.toString()) }
+    var volatilityCircuitBreaker by remember(settings) { mutableStateOf(settings.volatilityCircuitBreakerEnabled) }
+    var volatilityMaxMove by remember(settings) { mutableStateOf(settings.volatilityCircuitBreakerMax24hMovePercent.toPlainString()) }
+    var pumpChaseProtection by remember(settings) { mutableStateOf(settings.pumpChaseProtectionEnabled) }
+    var pumpChaseMaxGain by remember(settings) { mutableStateOf(settings.pumpChaseMax24hGainPercent.toPlainString()) }
+    var duplicatePositionProtection by remember(settings) { mutableStateOf(settings.duplicatePositionProtectionEnabled) }
+    var adaptiveRealizedPnlCompounding by remember(settings) { mutableStateOf(settings.adaptiveCompoundingFromRealizedPnlEnabled) }
+    var dynamicScan by remember(settings) { mutableStateOf(settings.dynamicScanIntervalEnabled) }
+    var dynamicFastSeconds by remember(settings) { mutableStateOf(settings.dynamicScanFastSeconds.toString()) }
+    var dynamicSlowSeconds by remember(settings) { mutableStateOf(settings.dynamicScanSlowSeconds.toString()) }
+    var multiTimeframeConsensus by remember(settings) { mutableStateOf(settings.multiTimeframeConsensusEnabled) }
+    var multiTimeframeRequired by remember(settings) { mutableStateOf(settings.multiTimeframeRequiredBullishCount.toString()) }
+    var ultimateReadinessScore by remember(settings) { mutableStateOf(settings.ultimateReadinessScoreEnabled) }
+    var orderBookDepthGuard by remember(settings) { mutableStateOf(settings.orderBookDepthGuardEnabled) }
+    var maxOrderBookSlippage by remember(settings) { mutableStateOf(settings.maxOrderBookSlippagePercent.toPlainString()) }
+    var minOrderBookDepthMultiple by remember(settings) { mutableStateOf(settings.minOrderBookDepthMultiple.toPlainString()) }
     var minReserveAmount by remember(settings) { mutableStateOf(settings.minimumQuoteReserveAmount.toPlainString()) }
     var minReservePercent by remember(settings) { mutableStateOf(settings.minimumQuoteReservePercent.toPlainString()) }
     var maxLimitSpread by remember(settings) { mutableStateOf(settings.maxSpreadPercent.toPlainString()) }
@@ -3597,6 +3785,17 @@ private fun AdvancedSettingsScreen(
         maxTradesPerHour = 3,
         maxSimultaneousLivePositions = 3,
         maxPositionEur = BigDecimal("5"),
+        maxBuyPriceFilterEnabled = false,
+        globalMaxBuyPriceEur = BigDecimal.ZERO,
+        perSymbolMaxBuyPriceCsv = "",
+        ultimateAutomationEnabled = true,
+        perSymbolRulesEnabled = false,
+        perSymbolRulesCsv = "",
+        autoCompoundingHardCapEnabled = true,
+        autoCompoundingMaxPositionEur = BigDecimal("15"),
+        autoPauseAfterOrderFailuresEnabled = true,
+        autoPauseFailureThreshold = 3,
+        autoPauseMinutes = 60,
         minimumQuoteReserveAmount = BigDecimal("3"),
         minimumQuoteReservePercent = BigDecimal("5"),
         maxSpreadPercent = BigDecimal("0.50"),
@@ -3627,6 +3826,17 @@ private fun AdvancedSettingsScreen(
         maxTradesPerHour = 3,
         maxSimultaneousLivePositions = 3,
         maxPositionEur = BigDecimal("10"),
+        maxBuyPriceFilterEnabled = false,
+        globalMaxBuyPriceEur = BigDecimal.ZERO,
+        perSymbolMaxBuyPriceCsv = "",
+        ultimateAutomationEnabled = true,
+        perSymbolRulesEnabled = false,
+        perSymbolRulesCsv = "",
+        autoCompoundingHardCapEnabled = true,
+        autoCompoundingMaxPositionEur = BigDecimal("35"),
+        autoPauseAfterOrderFailuresEnabled = true,
+        autoPauseFailureThreshold = 3,
+        autoPauseMinutes = 60,
         minimumQuoteReserveAmount = BigDecimal("10"),
         minimumQuoteReservePercent = BigDecimal("20"),
         maxSpreadPercent = BigDecimal("0.35"),
@@ -3657,6 +3867,17 @@ private fun AdvancedSettingsScreen(
         maxTradesPerHour = 6,
         maxSimultaneousLivePositions = 5,
         maxPositionEur = BigDecimal("10"),
+        maxBuyPriceFilterEnabled = false,
+        globalMaxBuyPriceEur = BigDecimal.ZERO,
+        perSymbolMaxBuyPriceCsv = "",
+        ultimateAutomationEnabled = true,
+        perSymbolRulesEnabled = false,
+        perSymbolRulesCsv = "",
+        autoCompoundingHardCapEnabled = true,
+        autoCompoundingMaxPositionEur = BigDecimal("50"),
+        autoPauseAfterOrderFailuresEnabled = true,
+        autoPauseFailureThreshold = 3,
+        autoPauseMinutes = 60,
         minimumQuoteReserveAmount = BigDecimal("2"),
         minimumQuoteReservePercent = BigDecimal("3"),
         maxSpreadPercent = BigDecimal("0.75"),
@@ -3687,6 +3908,32 @@ private fun AdvancedSettingsScreen(
         maxTradesHour = profile.maxTradesPerHour.toString()
         maxLivePositions = profile.maxSimultaneousLivePositions.toString()
         maxPosition = profile.maxPositionEur.toPlainString()
+        maxBuyPriceEnabled = profile.maxBuyPriceFilterEnabled
+        globalMaxBuyPrice = profile.globalMaxBuyPriceEur.toPlainString()
+        perSymbolMaxBuyPrice = profile.perSymbolMaxBuyPriceCsv
+        ultimateAutomation = profile.ultimateAutomationEnabled
+        perSymbolRules = profile.perSymbolRulesEnabled
+        perSymbolRulesText = profile.perSymbolRulesCsv
+        compoundingHardCap = profile.autoCompoundingHardCapEnabled
+        compoundingMaxPosition = profile.autoCompoundingMaxPositionEur.toPlainString()
+        failureAutoPause = profile.autoPauseAfterOrderFailuresEnabled
+        failureAutoPauseThreshold = profile.autoPauseFailureThreshold.toString()
+        failureAutoPauseMinutes = profile.autoPauseMinutes.toString()
+        volatilityCircuitBreaker = profile.volatilityCircuitBreakerEnabled
+        volatilityMaxMove = profile.volatilityCircuitBreakerMax24hMovePercent.toPlainString()
+        pumpChaseProtection = profile.pumpChaseProtectionEnabled
+        pumpChaseMaxGain = profile.pumpChaseMax24hGainPercent.toPlainString()
+        duplicatePositionProtection = profile.duplicatePositionProtectionEnabled
+        adaptiveRealizedPnlCompounding = profile.adaptiveCompoundingFromRealizedPnlEnabled
+        dynamicScan = profile.dynamicScanIntervalEnabled
+        dynamicFastSeconds = profile.dynamicScanFastSeconds.toString()
+        dynamicSlowSeconds = profile.dynamicScanSlowSeconds.toString()
+        multiTimeframeConsensus = profile.multiTimeframeConsensusEnabled
+        multiTimeframeRequired = profile.multiTimeframeRequiredBullishCount.toString()
+        ultimateReadinessScore = profile.ultimateReadinessScoreEnabled
+        orderBookDepthGuard = profile.orderBookDepthGuardEnabled
+        maxOrderBookSlippage = profile.maxOrderBookSlippagePercent.toPlainString()
+        minOrderBookDepthMultiple = profile.minOrderBookDepthMultiple.toPlainString()
         minReserveAmount = profile.minimumQuoteReserveAmount.toPlainString()
         minReservePercent = profile.minimumQuoteReservePercent.toPlainString()
         maxLimitSpread = profile.maxSpreadPercent.toPlainString()
@@ -3720,6 +3967,32 @@ private fun AdvancedSettingsScreen(
         maxTradesPerHour = maxTradesHour.toIntOrNull()?.coerceIn(1, 100) ?: settings.maxTradesPerHour,
         maxSimultaneousLivePositions = maxLivePositions.toIntOrNull()?.coerceIn(1, 50) ?: settings.maxSimultaneousLivePositions,
         maxPositionEur = maxPosition.toBigDecimalOrNull() ?: settings.maxPositionEur,
+        maxBuyPriceFilterEnabled = maxBuyPriceEnabled,
+        globalMaxBuyPriceEur = globalMaxBuyPrice.toBigDecimalOrNull() ?: settings.globalMaxBuyPriceEur,
+        perSymbolMaxBuyPriceCsv = perSymbolMaxBuyPrice.uppercase().replace(" ", ""),
+        ultimateAutomationEnabled = ultimateAutomation,
+        perSymbolRulesEnabled = perSymbolRules,
+        perSymbolRulesCsv = perSymbolRulesText.uppercase().replace(" ", ""),
+        autoCompoundingHardCapEnabled = compoundingHardCap,
+        autoCompoundingMaxPositionEur = compoundingMaxPosition.toBigDecimalOrNull() ?: settings.autoCompoundingMaxPositionEur,
+        autoPauseAfterOrderFailuresEnabled = failureAutoPause,
+        autoPauseFailureThreshold = failureAutoPauseThreshold.toIntOrNull()?.coerceIn(1, 20) ?: settings.autoPauseFailureThreshold,
+        autoPauseMinutes = failureAutoPauseMinutes.toIntOrNull()?.coerceIn(1, 1440) ?: settings.autoPauseMinutes,
+        volatilityCircuitBreakerEnabled = volatilityCircuitBreaker,
+        volatilityCircuitBreakerMax24hMovePercent = volatilityMaxMove.toBigDecimalOrNull() ?: settings.volatilityCircuitBreakerMax24hMovePercent,
+        pumpChaseProtectionEnabled = pumpChaseProtection,
+        pumpChaseMax24hGainPercent = pumpChaseMaxGain.toBigDecimalOrNull() ?: settings.pumpChaseMax24hGainPercent,
+        duplicatePositionProtectionEnabled = duplicatePositionProtection,
+        adaptiveCompoundingFromRealizedPnlEnabled = adaptiveRealizedPnlCompounding,
+        dynamicScanIntervalEnabled = dynamicScan,
+        dynamicScanFastSeconds = dynamicFastSeconds.toLongOrNull()?.coerceIn(15L, 3600L) ?: settings.dynamicScanFastSeconds,
+        dynamicScanSlowSeconds = dynamicSlowSeconds.toLongOrNull()?.coerceIn(15L, 7200L) ?: settings.dynamicScanSlowSeconds,
+        multiTimeframeConsensusEnabled = multiTimeframeConsensus,
+        multiTimeframeRequiredBullishCount = multiTimeframeRequired.toIntOrNull()?.coerceIn(1, 3) ?: settings.multiTimeframeRequiredBullishCount,
+        ultimateReadinessScoreEnabled = ultimateReadinessScore,
+        orderBookDepthGuardEnabled = orderBookDepthGuard,
+        maxOrderBookSlippagePercent = maxOrderBookSlippage.toBigDecimalOrNull() ?: settings.maxOrderBookSlippagePercent,
+        minOrderBookDepthMultiple = minOrderBookDepthMultiple.toBigDecimalOrNull() ?: settings.minOrderBookDepthMultiple,
         minimumQuoteReserveAmount = minReserveAmount.toBigDecimalOrNull() ?: settings.minimumQuoteReserveAmount,
         minimumQuoteReservePercent = minReservePercent.toBigDecimalOrNull() ?: settings.minimumQuoteReservePercent,
         maxSpreadPercent = maxLimitSpread.toBigDecimalOrNull() ?: settings.maxSpreadPercent,
@@ -3773,6 +4046,46 @@ private fun AdvancedSettingsScreen(
         }
         item {
             GlassCard {
+                SectionTitle("Ultimate Automation", "Clean automation layer: per-symbol rules, adaptive position caps, and automatic pause after repeated order failures.")
+                ToggleRow("Enable Ultimate Automation layer", ultimateAutomation) { ultimateAutomation = it }
+                ToggleRow("Enable per-symbol automation rules", perSymbolRules) { perSymbolRules = it }
+                OutlinedTextField(
+                    value = perSymbolRulesText,
+                    onValueChange = { perSymbolRulesText = it },
+                    label = { Text("Rules: SYMBOL=maxPosition|minScore|maxBuyPrice|cooldownMinutes") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+                Text("Example: BTCEUR=20|78|95000|30;ETHEUR=10|74|3500|20. Empty fields can be skipped with 0.", color = Muted)
+                ToggleRow("Auto-compounding hard cap", compoundingHardCap) { compoundingHardCap = it }
+                OutlinedTextField(value = compoundingMaxPosition, onValueChange = { compoundingMaxPosition = it }, label = { Text("Max adaptive position cap EUR") }, modifier = Modifier.fillMaxWidth())
+                ToggleRow("Auto-pause LIVE_AUTO after repeated order/API failures", failureAutoPause) { failureAutoPause = it }
+                OutlinedTextField(value = failureAutoPauseThreshold, onValueChange = { failureAutoPauseThreshold = it }, label = { Text("Failure threshold before auto-pause") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = failureAutoPauseMinutes, onValueChange = { failureAutoPauseMinutes = it }, label = { Text("Pause minutes note") }, modifier = Modifier.fillMaxWidth())
+                Text("Auto-pause changes LIVE_AUTO to LIVE_CONFIRM/manual signal mode so the bot stops submitting real orders until you review status.", color = Amber)
+                Spacer(Modifier.height(12.dp))
+                SectionTitle("Live Guard Automation", "Blocks bad automatic BUY entries during extreme moves, pumps, or unstable scanning conditions.")
+                ToggleRow("Volatility circuit breaker", volatilityCircuitBreaker) { volatilityCircuitBreaker = it }
+                OutlinedTextField(value = volatilityMaxMove, onValueChange = { volatilityMaxMove = it }, label = { Text("Max absolute 24h move % before BUY block") }, modifier = Modifier.fillMaxWidth())
+                ToggleRow("Pump-chase protection", pumpChaseProtection) { pumpChaseProtection = it }
+                OutlinedTextField(value = pumpChaseMaxGain, onValueChange = { pumpChaseMaxGain = it }, label = { Text("Max 24h gain % before BUY block") }, modifier = Modifier.fillMaxWidth())
+                ToggleRow("Duplicate-position protection", duplicatePositionProtection) { duplicatePositionProtection = it }
+                Text("This blocks extra BUY entries when the app already has an open lifecycle position or existing base holding for the same symbol. It does not block SELL/exit management.", color = Muted)
+                ToggleRow("Adaptive compounding from realized P/L", adaptiveRealizedPnlCompounding) { adaptiveRealizedPnlCompounding = it }
+                ToggleRow("Multi-timeframe consensus before BUY", multiTimeframeConsensus) { multiTimeframeConsensus = it }
+                OutlinedTextField(value = multiTimeframeRequired, onValueChange = { multiTimeframeRequired = it }, label = { Text("Required bullish frames, 1-3") }, modifier = Modifier.fillMaxWidth())
+                ToggleRow("Ultimate readiness score in System Test", ultimateReadinessScore) { ultimateReadinessScore = it }
+                ToggleRow("Order book depth / slippage guard", orderBookDepthGuard) { orderBookDepthGuard = it }
+                OutlinedTextField(value = maxOrderBookSlippage, onValueChange = { maxOrderBookSlippage = it }, label = { Text("Max estimated order book slippage %") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = minOrderBookDepthMultiple, onValueChange = { minOrderBookDepthMultiple = it }, label = { Text("Minimum order book depth multiple") }, modifier = Modifier.fillMaxWidth())
+                Text("Uses live Kraken Depth data in LIVE_AUTO to avoid thin books and bad execution. This blocks BUY when execution quality is poor.", color = Muted)
+                ToggleRow("Dynamic scan interval", dynamicScan) { dynamicScan = it }
+                OutlinedTextField(value = dynamicFastSeconds, onValueChange = { dynamicFastSeconds = it }, label = { Text("Fast scan seconds") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = dynamicSlowSeconds, onValueChange = { dynamicSlowSeconds = it }, label = { Text("Slow scan seconds") }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        item {
+            GlassCard {
                 SectionTitle("Signal Confidence", "Lower score = more trades. Higher score = fewer but stricter trades.")
                 OutlinedTextField(value = minAiScore, onValueChange = { minAiScore = it }, label = { Text("Minimum AI / strategy score") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = timeframeAgreement, onValueChange = { timeframeAgreement = it }, label = { Text("Required timeframe agreement, 1-3") }, modifier = Modifier.fillMaxWidth())
@@ -3792,7 +4105,11 @@ private fun AdvancedSettingsScreen(
         item {
             GlassCard {
                 SectionTitle("Position, Reserve and Trade Limits", "Prevents the bot from spending too much or opening too many trades.")
-                OutlinedTextField(value = maxPosition, onValueChange = { maxPosition = it }, label = { Text("Max position size") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxPosition, onValueChange = { maxPosition = it }, label = { Text("Max position size / max spend per buy") }, modifier = Modifier.fillMaxWidth())
+                ToggleRow("Enable Max Buy Price filter", maxBuyPriceEnabled) { maxBuyPriceEnabled = it }
+                OutlinedTextField(value = globalMaxBuyPrice, onValueChange = { globalMaxBuyPrice = it }, label = { Text("Global max buy price, 0 = disabled") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = perSymbolMaxBuyPrice, onValueChange = { perSymbolMaxBuyPrice = it }, label = { Text("Per-symbol max buy prices, e.g. BTCEUR=95000,ETHEUR=3500") }, modifier = Modifier.fillMaxWidth())
+                Text("If enabled, BUY orders are blocked when the current ask is above the configured max buy price. SELL orders are not blocked.", color = Muted)
                 OutlinedTextField(value = maxNewTrades, onValueChange = { maxNewTrades = it }, label = { Text("Max new trades per scan") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = maxTradesHour, onValueChange = { maxTradesHour = it }, label = { Text("Max trades per hour") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = maxLivePositions, onValueChange = { maxLivePositions = it }, label = { Text("Max simultaneous live positions") }, modifier = Modifier.fillMaxWidth())

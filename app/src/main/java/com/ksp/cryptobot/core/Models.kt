@@ -25,6 +25,31 @@ data class MarketTicker(
     val timestamp: Instant = Instant.now()
 )
 
+data class OrderBookLevel(
+    val price: BigDecimal,
+    val quantity: BigDecimal
+)
+
+data class OrderBookSnapshot(
+    val symbol: String,
+    val bids: List<OrderBookLevel>,
+    val asks: List<OrderBookLevel>,
+    val timestamp: Instant = Instant.now()
+) {
+    fun quoteDepth(side: OrderSide): BigDecimal {
+        val levels = if (side == OrderSide.BUY) asks else bids
+        return levels.fold(BigDecimal.ZERO) { total, level -> total + level.price.multiply(level.quantity) }
+    }
+}
+
+data class SymbolAutomationRule(
+    val symbol: String,
+    val maxPositionEur: BigDecimal? = null,
+    val minScoreToBuy: Int? = null,
+    val maxBuyPriceEur: BigDecimal? = null,
+    val cooldownMinutes: Int? = null
+)
+
 data class BotSettings(
     val mode: BotMode = BotMode.PAPER,
     val maxPositionEur: BigDecimal = BigDecimal("25.00"),
@@ -32,6 +57,32 @@ data class BotSettings(
     val maxTradesPerDay: Int = 4,
     val maxSpreadPercent: BigDecimal = BigDecimal("0.35"),
     val minVolume24hEur: BigDecimal = BigDecimal("1000000"),
+    val maxBuyPriceFilterEnabled: Boolean = false,
+    val globalMaxBuyPriceEur: BigDecimal = BigDecimal("0"),
+    val perSymbolMaxBuyPriceCsv: String = "",
+    val ultimateAutomationEnabled: Boolean = true,
+    val perSymbolRulesEnabled: Boolean = false,
+    val perSymbolRulesCsv: String = "",
+    val autoCompoundingHardCapEnabled: Boolean = true,
+    val autoCompoundingMaxPositionEur: BigDecimal = BigDecimal("50.00"),
+    val autoPauseAfterOrderFailuresEnabled: Boolean = true,
+    val autoPauseFailureThreshold: Int = 3,
+    val autoPauseMinutes: Int = 60,
+    val volatilityCircuitBreakerEnabled: Boolean = true,
+    val volatilityCircuitBreakerMax24hMovePercent: BigDecimal = BigDecimal("12.00"),
+    val pumpChaseProtectionEnabled: Boolean = true,
+    val pumpChaseMax24hGainPercent: BigDecimal = BigDecimal("8.00"),
+    val duplicatePositionProtectionEnabled: Boolean = true,
+    val adaptiveCompoundingFromRealizedPnlEnabled: Boolean = true,
+    val dynamicScanIntervalEnabled: Boolean = true,
+    val dynamicScanFastSeconds: Long = 30,
+    val dynamicScanSlowSeconds: Long = 180,
+    val multiTimeframeConsensusEnabled: Boolean = true,
+    val multiTimeframeRequiredBullishCount: Int = 2,
+    val ultimateReadinessScoreEnabled: Boolean = true,
+    val orderBookDepthGuardEnabled: Boolean = true,
+    val maxOrderBookSlippagePercent: BigDecimal = BigDecimal("0.35"),
+    val minOrderBookDepthMultiple: BigDecimal = BigDecimal("3.00"),
     val scanIntervalSeconds: Long = 60,
     val taxOptimization: Boolean = true,
     val tradeOnlyBtcEth: Boolean = false,
@@ -117,6 +168,11 @@ data class BotSettings(
     val pauseBelowBatteryPercent: Int = 15,
     val telegramRemoteControlEnabled: Boolean = false,
     val discordRemoteControlEnabled: Boolean = false,
+    val remoteCommandCenterEnabled: Boolean = false,
+    val telegramCommandPollingEnabled: Boolean = false,
+    val discordCommandPollingEnabled: Boolean = false,
+    val remoteCommandRequirePin: Boolean = true,
+    val remoteCommandAllowLiveAuto: Boolean = false,
     val localMlScoringEnabled: Boolean = true,
     val dryRunMirrorModeEnabled: Boolean = true,
     val bearishAutoSellScore: Int = 45,
@@ -229,6 +285,55 @@ data class BotSettings(
     val taxExportYear: Int = 2026
 ) {
     fun symbols(): List<String> = symbolsCsv.split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
+
+    fun maxBuyPriceFor(symbol: String): BigDecimal? {
+        if (!maxBuyPriceFilterEnabled) return null
+        val normalizedSymbol = symbol.uppercase().replace("/", "").replace("-", "").trim()
+        val perSymbol = perSymbolMaxBuyPriceCsv
+            .split(',', '\n', ';')
+            .mapNotNull { entry ->
+                val parts = entry.split('=')
+                if (parts.size != 2) null
+                else parts[0].uppercase().replace("/", "").replace("-", "").trim() to parts[1].trim().toBigDecimalOrNull()
+            }
+            .firstOrNull { it.first == normalizedSymbol }
+            ?.second
+        return perSymbol ?: globalMaxBuyPriceEur.takeIf { it > BigDecimal.ZERO }
+    }
+
+    fun symbolAutomationRuleFor(symbol: String): SymbolAutomationRule? {
+        if (!perSymbolRulesEnabled) return null
+        val normalizedSymbol = symbol.uppercase().replace("/", "").replace("-", "").trim()
+        return perSymbolRulesCsv
+            .split(';', '\n')
+            .mapNotNull { raw ->
+                val parts = raw.split('=', limit = 2)
+                if (parts.size != 2) return@mapNotNull null
+                val ruleSymbol = parts[0].uppercase().replace("/", "").replace("-", "").trim()
+                val values = parts[1].split('|', ',').map { it.trim() }
+                if (ruleSymbol.isBlank() || values.isEmpty()) return@mapNotNull null
+                SymbolAutomationRule(
+                    symbol = ruleSymbol,
+                    maxPositionEur = values.getOrNull(0)?.toBigDecimalOrNull(),
+                    minScoreToBuy = values.getOrNull(1)?.toIntOrNull(),
+                    maxBuyPriceEur = values.getOrNull(2)?.toBigDecimalOrNull(),
+                    cooldownMinutes = values.getOrNull(3)?.toIntOrNull()
+                )
+            }
+            .firstOrNull { it.symbol == normalizedSymbol }
+    }
+
+    fun effectiveMaxBuyPriceFor(symbol: String): BigDecimal? {
+        val base = maxBuyPriceFor(symbol)
+        val rule = symbolAutomationRuleFor(symbol)?.maxBuyPriceEur?.takeIf { it > BigDecimal.ZERO }
+        return listOfNotNull(base, rule).minOrNull()
+    }
+
+    fun effectiveMaxPositionFor(symbol: String): BigDecimal {
+        val ruleCap = symbolAutomationRuleFor(symbol)?.maxPositionEur?.takeIf { it > BigDecimal.ZERO }
+        val baseCap = ruleCap ?: maxPositionEur
+        return if (autoCompoundingHardCapEnabled) baseCap.min(autoCompoundingMaxPositionEur) else baseCap
+    }
 
     fun allowedQuoteAssets(): Set<String> = allowedQuoteAssetsCsv
         .split(',')

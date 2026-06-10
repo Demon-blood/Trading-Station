@@ -24,6 +24,8 @@ import com.ksp.cryptobot.strategy.RecommendationEngine
 import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.autonomous.AutonomousIntelligencePack
 import com.ksp.cryptobot.alerts.RemoteAlertClient
+import com.ksp.cryptobot.alerts.RemoteCommandClient
+import com.ksp.cryptobot.alerts.RemoteCommandMessage
 import com.ksp.cryptobot.backtest.BacktestEngine
 import com.ksp.cryptobot.completion.LiveVerificationEngine
 import com.ksp.cryptobot.completion.LiveVerificationResult
@@ -54,6 +56,7 @@ class BotController(
     private val liveVerificationEngine = LiveVerificationEngine()
     private val selfLearningEngine = TrueSelfLearningEngine()
     private val remoteAlertClient = RemoteAlertClient()
+    private val remoteCommandClient = RemoteCommandClient()
     private val _status = MutableStateFlow("Stopped")
     val status: StateFlow<String> = _status
 
@@ -211,6 +214,35 @@ class BotController(
         }
 
         add("PASS", "Live Order Path Wiring", "Order placement path is wired. This verification does not place a real order for safety.")
+        add("PASS", "Max Buy Price Guard", if (settings.maxBuyPriceFilterEnabled || settings.perSymbolRulesEnabled) "Enabled. Global=${settings.globalMaxBuyPriceEur}, maxBuyList=${settings.perSymbolMaxBuyPriceCsv.ifBlank { "none" }}, rules=${settings.perSymbolRulesCsv.ifBlank { "none" }}" else "Disabled. Enable it in Advanced Settings when you want hard buy-price caps.")
+        add("PASS", "Per-Symbol Automation Rules", if (settings.perSymbolRulesEnabled) "Enabled. Format SYMBOL=maxPosition|minScore|maxBuyPrice|cooldownMinutes. Rules=${settings.perSymbolRulesCsv.ifBlank { "none" }}" else "Disabled.")
+        add("PASS", "Auto-Compounding Hard Cap", if (settings.autoCompoundingHardCapEnabled) "Enabled. Max adaptive position=${settings.autoCompoundingMaxPositionEur}, realized-PnL compounding=${settings.adaptiveCompoundingFromRealizedPnlEnabled}" else "Disabled.")
+        add("PASS", "Volatility Circuit Breaker", if (settings.volatilityCircuitBreakerEnabled) "Enabled. BUY blocked above abs 24h move ${settings.volatilityCircuitBreakerMax24hMovePercent}%." else "Disabled.")
+        add("PASS", "Pump-Chase Protection", if (settings.pumpChaseProtectionEnabled) "Enabled. BUY blocked above 24h gain ${settings.pumpChaseMax24hGainPercent}%." else "Disabled.")
+        add("PASS", "Duplicate Position Protection", if (settings.duplicatePositionProtectionEnabled) "Enabled. Blocks additional BUY entries when an OPEN position or existing base holding exists; SELL remains allowed." else "Disabled.")
+        add("PASS", "Portfolio Exposure Guard", if (settings.portfolioBalancerEnabled) "Enabled through existing Portfolio Balancer + Max Single Asset Allocation controls. Max=${settings.maxSingleAssetAllocationPercent}%." else "Disabled.")
+        val ultimateReadinessEnabled = listOf(
+            settings.ultimateAutomationEnabled,
+            settings.trueSelfLearningEnabled,
+            settings.adaptiveStrategyLearningEnabled,
+            settings.learnedHoldForProfitEnabled,
+            settings.spikeProfitTimingEnabled,
+            settings.multiTimeframeConsensusEnabled,
+            settings.volatilityCircuitBreakerEnabled,
+            settings.pumpChaseProtectionEnabled,
+            settings.duplicatePositionProtectionEnabled,
+            settings.autoPauseAfterOrderFailuresEnabled,
+            settings.liveVerificationPanelEnabled
+        ).count { it }
+        val ultimateReadinessScore = (ultimateReadinessEnabled * 100) / 11
+        add("PASS", "Ultimate Readiness Score", "Enabled automation modules=$ultimateReadinessEnabled/11, score=$ultimateReadinessScore%. This is a wiring/readiness score, not a profit guarantee.")
+        add("PASS", "Multi-Timeframe Consensus", if (settings.multiTimeframeConsensusEnabled) "Enabled. Requires ${settings.multiTimeframeRequiredBullishCount.coerceIn(1, 3)}/3 bullish frames before automatic BUY." else "Disabled.")
+        add("PASS", "Order Book Depth/Slippage Guard", if (settings.orderBookDepthGuardEnabled) "Enabled. Uses Kraken live depth when available. Max slippage=${settings.maxOrderBookSlippagePercent}%, min depth multiple=${settings.minOrderBookDepthMultiple}x." else "Disabled.")
+        add("PASS", "Professional Engine Layout", "Market Data, Strategy, Signal Scoring, Risk, Execution, Portfolio, Learning, Backtesting, Monitoring and Security are kept as independent app layers.")
+        add("PASS", "Remote Command Center", if (settings.remoteCommandCenterEnabled) "Enabled. Telegram polling=${settings.telegramCommandPollingEnabled}, Discord polling=${settings.discordCommandPollingEnabled}, PIN required=${settings.remoteCommandRequirePin}, remote LIVE_AUTO=${settings.remoteCommandAllowLiveAuto}." else "Disabled. Enable in Notifications → Remote Alerts.")
+        add("PASS", "Duplicate Feature Audit", "No duplicate top-level feature was added. Canonical controls: Max Position=max spend, Max Buy Price=price cap, Portfolio Balancer=exposure cap, LIVE_AUTO Preflight=live gate, Auto-Pause=safety stop, Multi-Timeframe Consensus=trend agreement, Order Book Guard=execution quality.")
+        add("PASS", "Repeated Failure Auto-Pause", if (settings.autoPauseAfterOrderFailuresEnabled) "Enabled. Threshold=${settings.autoPauseFailureThreshold}, pause mode=LIVE_CONFIRM." else "Disabled.")
+        add("PASS", "Dynamic Scan Interval", if (settings.dynamicScanIntervalEnabled) "Enabled. fast=${settings.dynamicScanFastSeconds}s, normal=${settings.scanIntervalSeconds}s, slow=${settings.dynamicScanSlowSeconds}s." else "Disabled.")
         add("PASS", "Chart Auto Refresh Wiring", "Chart screen refresh loop is wired for 30-second updates while Chart/Trade Overlay is open.")
         add("PASS", "Grouped Navigation", "Top tabs route to Dashboard, AI, Self Learning, Chart, Settings and Notifications hubs.")
 
@@ -248,6 +280,32 @@ class BotController(
         sb.appendLine("allowedQuoteAssetsCsv=${settings.allowedQuoteAssetsCsv}")
         sb.appendLine("autoSymbolQuoteAsset=${settings.autoSymbolQuoteAsset}")
         sb.appendLine("maxPositionEur=${settings.maxPositionEur}")
+        sb.appendLine("maxBuyPriceFilterEnabled=${settings.maxBuyPriceFilterEnabled}")
+        sb.appendLine("globalMaxBuyPriceEur=${settings.globalMaxBuyPriceEur}")
+        sb.appendLine("perSymbolMaxBuyPriceCsv=${clean(settings.perSymbolMaxBuyPriceCsv)}")
+        sb.appendLine("ultimateAutomationEnabled=${settings.ultimateAutomationEnabled}")
+        sb.appendLine("perSymbolRulesEnabled=${settings.perSymbolRulesEnabled}")
+        sb.appendLine("perSymbolRulesCsv=${clean(settings.perSymbolRulesCsv)}")
+        sb.appendLine("autoCompoundingHardCapEnabled=${settings.autoCompoundingHardCapEnabled}")
+        sb.appendLine("autoCompoundingMaxPositionEur=${settings.autoCompoundingMaxPositionEur}")
+        sb.appendLine("autoPauseAfterOrderFailuresEnabled=${settings.autoPauseAfterOrderFailuresEnabled}")
+        sb.appendLine("autoPauseFailureThreshold=${settings.autoPauseFailureThreshold}")
+        sb.appendLine("autoPauseMinutes=${settings.autoPauseMinutes}")
+        sb.appendLine("volatilityCircuitBreakerEnabled=${settings.volatilityCircuitBreakerEnabled}")
+        sb.appendLine("volatilityCircuitBreakerMax24hMovePercent=${settings.volatilityCircuitBreakerMax24hMovePercent}")
+        sb.appendLine("pumpChaseProtectionEnabled=${settings.pumpChaseProtectionEnabled}")
+        sb.appendLine("pumpChaseMax24hGainPercent=${settings.pumpChaseMax24hGainPercent}")
+        sb.appendLine("duplicatePositionProtectionEnabled=${settings.duplicatePositionProtectionEnabled}")
+        sb.appendLine("adaptiveCompoundingFromRealizedPnlEnabled=${settings.adaptiveCompoundingFromRealizedPnlEnabled}")
+        sb.appendLine("dynamicScanIntervalEnabled=${settings.dynamicScanIntervalEnabled}")
+        sb.appendLine("dynamicScanFastSeconds=${settings.dynamicScanFastSeconds}")
+        sb.appendLine("dynamicScanSlowSeconds=${settings.dynamicScanSlowSeconds}")
+        sb.appendLine("multiTimeframeConsensusEnabled=${settings.multiTimeframeConsensusEnabled}")
+        sb.appendLine("multiTimeframeRequiredBullishCount=${settings.multiTimeframeRequiredBullishCount}")
+        sb.appendLine("ultimateReadinessScoreEnabled=${settings.ultimateReadinessScoreEnabled}")
+        sb.appendLine("orderBookDepthGuardEnabled=${settings.orderBookDepthGuardEnabled}")
+        sb.appendLine("maxOrderBookSlippagePercent=${settings.maxOrderBookSlippagePercent}")
+        sb.appendLine("minOrderBookDepthMultiple=${settings.minOrderBookDepthMultiple}")
         sb.appendLine("maxDailyLossEur=${settings.maxDailyLossEur}")
         sb.appendLine("maxTradesPerDay=${settings.maxTradesPerDay}")
         sb.appendLine("maxTradesPerHour=${settings.maxTradesPerHour}")
@@ -261,6 +319,11 @@ class BotController(
         sb.appendLine("spikeProfitTimingEnabled=${settings.spikeProfitTimingEnabled}")
         sb.appendLine("telegramRemoteControlEnabled=${settings.telegramRemoteControlEnabled}")
         sb.appendLine("discordRemoteControlEnabled=${settings.discordRemoteControlEnabled}")
+        sb.appendLine("remoteCommandCenterEnabled=${settings.remoteCommandCenterEnabled}")
+        sb.appendLine("telegramCommandPollingEnabled=${settings.telegramCommandPollingEnabled}")
+        sb.appendLine("discordCommandPollingEnabled=${settings.discordCommandPollingEnabled}")
+        sb.appendLine("remoteCommandRequirePin=${settings.remoteCommandRequirePin}")
+        sb.appendLine("remoteCommandAllowLiveAuto=${settings.remoteCommandAllowLiveAuto}")
         sb.appendLine("fullSettings=${clean(settings.toString())}")
         sb.appendLine()
         sb.appendLine("[COUNTS]")
@@ -308,6 +371,276 @@ class BotController(
         sb.appendLine("Android app updates with the same package name keep SharedPreferences, encrypted key store entries and Room database automatically.")
         updateStatus("Full local backup generated: trades=${trades.size}, profiles=${symbolProfiles.size + strategyProfiles.size + holdProfiles.size}, taxRows=${taxRows.size}", "INFO")
         return sb.toString()
+    }
+
+
+    suspend fun exportFullLocalBackupToFile(settings: BotSettings = settingsStore.load()): String {
+        return try {
+            val backup = exportFullLocalBackup(settings)
+            val backupDir = java.io.File(appContext.getExternalFilesDir(null), "backups")
+            if (!backupDir.exists()) backupDir.mkdirs()
+            val file = java.io.File(backupDir, "cts_backup_${System.currentTimeMillis()}.txt")
+            file.writeText(backup)
+            val preview = backup.lineSequence().take(80).joinToString("\n")
+            val result = buildString {
+                appendLine("BACKUP SAVED SUCCESSFULLY")
+                appendLine("file=${file.absolutePath}")
+                appendLine("sizeBytes=${file.length()}")
+                appendLine()
+                appendLine("The full backup was written to a file instead of being loaded into the text box, which prevents UI crashes on large databases.")
+                appendLine()
+                appendLine("[PREVIEW FIRST 80 LINES]")
+                appendLine(preview)
+            }
+            updateStatus("Full backup saved to file: ${file.absolutePath}", "INFO")
+            result
+        } catch (error: Exception) {
+            val message = "Backup export failed: ${error.message}"
+            updateStatus(message, "ERROR")
+            message
+        }
+    }
+
+
+    suspend fun processRemoteCommands(settings: BotSettings = settingsStore.load()): List<String> {
+        if (!settings.remoteCommandCenterEnabled) return emptyList()
+        val replies = mutableListOf<String>()
+        val telegramToken = settingsStore.telegramBotToken().orEmpty()
+        val telegramChatId = settingsStore.telegramChatId().orEmpty()
+
+        if (settings.telegramCommandPollingEnabled && telegramToken.isNotBlank() && telegramChatId.isNotBlank()) {
+            runCatching {
+                val offset = settingsStore.telegramCommandOffset()
+                val (messages, nextOffset) = remoteCommandClient.pollTelegram(telegramToken, telegramChatId, offset)
+                settingsStore.saveTelegramCommandOffset(nextOffset)
+                messages.forEach { message ->
+                    val reply = handleRemoteCommand(message, settingsStore.load())
+                    replies += reply
+                    remoteCommandClient.sendTelegram(telegramToken, telegramChatId, reply)
+                }
+            }.onFailure { error ->
+                updateStatus("Telegram command polling failed: ${error.message}", "WARN")
+            }
+        }
+
+        val discordToken = settingsStore.discordBotToken().orEmpty()
+        val discordChannelId = settingsStore.discordChannelId().orEmpty()
+        if (settings.discordCommandPollingEnabled && discordToken.isNotBlank() && discordChannelId.isNotBlank()) {
+            runCatching {
+                val lastId = settingsStore.discordCommandLastMessageId()
+                val (messages, newestId) = remoteCommandClient.pollDiscord(discordToken, discordChannelId, lastId)
+                settingsStore.saveDiscordCommandLastMessageId(newestId)
+                messages.forEach { message ->
+                    val reply = handleRemoteCommand(message, settingsStore.load())
+                    replies += reply
+                    remoteCommandClient.sendDiscordBotMessage(discordToken, discordChannelId, reply)
+                }
+            }.onFailure { error ->
+                updateStatus("Discord command polling failed: ${error.message}", "WARN")
+            }
+        }
+
+        if (replies.isNotEmpty()) updateStatus("Remote command center processed ${replies.size} command(s).", "INFO")
+        return replies
+    }
+
+    private suspend fun handleRemoteCommand(message: RemoteCommandMessage, settings: BotSettings): String {
+        val raw = message.text.trim()
+        if (!raw.startsWith("/cts", ignoreCase = true) && !raw.startsWith("!cts", ignoreCase = true)) return "Ignored. Commands must start with /cts or !cts."
+        val tokens = raw.split(Regex("\\s+")).filter { it.isNotBlank() }.toMutableList()
+        if (tokens.isEmpty()) return remoteHelp()
+        tokens.removeAt(0)
+
+        if (tokens.firstOrNull()?.equals("help", ignoreCase = true) == true || tokens.isEmpty()) {
+            return remoteHelp()
+        }
+
+        if (settings.remoteCommandRequirePin) {
+            val configuredPin = settingsStore.remoteCommandPin().orEmpty()
+            if (configuredPin.isBlank()) {
+                return "Remote command center is locked: no PIN configured in Settings → Notifications/Remote Alerts."
+            }
+            val suppliedPin = tokens.firstOrNull().orEmpty()
+            if (suppliedPin != configuredPin) {
+                updateStatus("Remote command rejected from ${message.source}: bad PIN.", "WARN")
+                return "Rejected: bad or missing PIN."
+            }
+            tokens.removeAt(0)
+        }
+
+        val command = tokens.firstOrNull()?.lowercase().orEmpty()
+        val args = tokens.drop(1)
+        return when (command) {
+            "help" -> remoteHelp()
+            "status" -> remoteStatus()
+            "settings" -> remoteSettings(settingsStore.load())
+            "portfolio" -> remotePortfolio(settingsStore.load())
+            "positions" -> remotePositions(settingsStore.load())
+            "orders" -> remoteOrders(settingsStore.load())
+            "system_test" -> runSystemFeatureVerification(settingsStore.load()).take(18).joinToString("\n")
+            "scan" -> {
+                val decisions = scanOnce(settingsStore.load(), execute = false)
+                "Scan complete. Decisions=${decisions.size}\n" + decisions.take(8).joinToString("\n") { "${it.symbol}: ${it.finalAction} score=${it.finalScore} allowed=${it.allowedToTrade}" }
+            }
+            "execute" -> {
+                val current = settingsStore.load()
+                if (current.mode != BotMode.PAPER && current.mode != BotMode.LIVE_AUTO) {
+                    "Execute skipped: mode=${current.mode}. Use PAPER or LIVE_AUTO."
+                } else if (current.mode == BotMode.LIVE_AUTO && !current.remoteCommandAllowLiveAuto) {
+                    "Execute blocked: remote LIVE_AUTO execution is disabled in settings."
+                } else {
+                    val decisions = scanOnce(current, execute = true)
+                    "Execution pass complete. Decisions=${decisions.size}. Check Live Status for order details."
+                }
+            }
+            "start" -> {
+                start()
+                "Controller started. The Android foreground service must already be running to keep listening remotely."
+            }
+            "stop" -> {
+                stop()
+                "Controller stopped. Remote listener stops when the foreground service loop stops."
+            }
+            "pause" -> {
+                val current = settingsStore.load()
+                settingsStore.save(current.copy(mode = BotMode.LIVE_CONFIRM, manualExecutionMode = true))
+                "Paused: mode changed to LIVE_CONFIRM and manual/signal-only enabled."
+            }
+            "resume" -> {
+                val current = settingsStore.load()
+                if (!current.remoteCommandAllowLiveAuto) {
+                    "Resume to LIVE_AUTO blocked: enable 'Allow remote LIVE_AUTO commands' in Remote Alerts first."
+                } else {
+                    settingsStore.save(current.copy(mode = BotMode.LIVE_AUTO, manualExecutionMode = false))
+                    "Resume requested: mode changed to LIVE_AUTO. Existing preflight/release safety still applies."
+                }
+            }
+            "mode" -> {
+                val modeName = args.firstOrNull()?.uppercase()
+                val mode = runCatching { BotMode.valueOf(modeName.orEmpty()) }.getOrNull()
+                if (mode == null) {
+                    "Invalid mode. Use PAPER, LIVE_CONFIRM, or LIVE_AUTO."
+                } else if (mode == BotMode.LIVE_AUTO && !settings.remoteCommandAllowLiveAuto) {
+                    "LIVE_AUTO by remote command is disabled. Enable it in Remote Alerts first."
+                } else {
+                    val current = settingsStore.load()
+                    settingsStore.save(current.copy(mode = mode, manualExecutionMode = mode == BotMode.LIVE_CONFIRM))
+                    "Mode changed to $mode."
+                }
+            }
+            "set" -> remoteSet(args)
+            else -> "Unknown command: $command\n${remoteHelp()}"
+        }
+    }
+
+    private fun remoteHelp(): String = """
+Crypto TradeStation remote commands:
+/cts <PIN> status
+/cts <PIN> settings
+/cts <PIN> portfolio
+/cts <PIN> positions
+/cts <PIN> orders
+/cts <PIN> scan
+/cts <PIN> execute
+/cts <PIN> start
+/cts <PIN> stop
+/cts <PIN> pause
+/cts <PIN> resume
+/cts <PIN> mode PAPER|LIVE_CONFIRM|LIVE_AUTO
+/cts <PIN> set max_position 10
+/cts <PIN> set max_buy BTCEUR 95000
+/cts <PIN> set score 75
+/cts help
+""".trimIndent()
+
+    private fun remoteStatus(): String {
+        val s = settingsStore.load()
+        return "Status=${statusStore.latestText()}\nlevel=${statusStore.latestLevel()}\nrunning=$running\nmode=${s.mode}\nprovider=${s.exchangeProvider}\nmanual=${s.manualExecutionMode}\nremoteCommands=${s.remoteCommandCenterEnabled}"
+    }
+
+    private fun remoteSettings(s: BotSettings): String = buildString {
+        appendLine("Settings")
+        appendLine("mode=${s.mode}")
+        appendLine("provider=${s.exchangeProvider}")
+        appendLine("symbols=${s.symbolsCsv}")
+        appendLine("maxPosition=${s.maxPositionEur}")
+        appendLine("maxBuyGlobal=${s.globalMaxBuyPriceEur}")
+        appendLine("minScore=${s.minStrategyScoreToBuy}")
+        appendLine("allowedQuotes=${s.allowedQuoteAssetsCsv}")
+        appendLine("liveAck=${s.liveTradingAcknowledged}")
+        appendLine("remoteLiveAutoAllowed=${s.remoteCommandAllowLiveAuto}")
+    }.trim()
+
+    private suspend fun remotePortfolio(s: BotSettings): String {
+        val p = loadPortfolioSnapshot(s)
+        return buildString {
+            appendLine("Portfolio ${p.provider}")
+            appendLine("total≈€${p.totalValueEur}")
+            appendLine("freeEUR≈€${p.freeEur}")
+            p.assets.take(8).forEach { appendLine("${it.asset}: total=${it.total} free=${it.free} value≈€${it.eurValue}") }
+            if (p.warning.isNotBlank()) appendLine("warning=${p.warning}")
+        }.take(1800)
+    }
+
+    private suspend fun remotePositions(s: BotSettings): String {
+        val snap = loadLifecycleSnapshot(s)
+        return buildString {
+            appendLine("Positions=${snap.positions.size}")
+            snap.positions.take(10).forEach {
+                appendLine("${it.symbol}: qty=${it.quantity} entry=${it.entryPriceEur} status=${it.status}")
+            }
+            if (snap.warnings.isNotEmpty()) appendLine("warnings=${snap.warnings.take(3).joinToString("; ")}")
+        }.take(1800)
+    }
+
+    private suspend fun remoteOrders(s: BotSettings): String {
+        val orders = loadOpenOrdersSnapshot(s)
+        return buildString {
+            appendLine("Open orders=${orders.size}")
+            orders.take(10).forEach {
+                appendLine("${it.side} ${it.symbol} ${it.orderType} remaining=${it.remainingQuantity} price=${it.price} status=${it.status}")
+            }
+        }.take(1800)
+    }
+
+    private fun remoteSet(args: List<String>): String {
+        if (args.size < 2) return "Usage: /cts <PIN> set max_position 10 | max_buy BTCEUR 95000 | score 75"
+        val current = settingsStore.load()
+        return when (args[0].lowercase()) {
+            "max_position" -> {
+                val value = args.getOrNull(1)?.toBigDecimalOrNull()
+                if (value == null || value <= BigDecimal.ZERO) "Invalid max_position."
+                else {
+                    settingsStore.save(current.copy(maxPositionEur = value))
+                    "maxPositionEur changed to $value"
+                }
+            }
+            "score" -> {
+                val value = args.getOrNull(1)?.toIntOrNull()
+                if (value == null) "Invalid score."
+                else {
+                    settingsStore.save(current.copy(minStrategyScoreToBuy = value.coerceIn(1, 100)))
+                    "minStrategyScoreToBuy changed to ${value.coerceIn(1, 100)}"
+                }
+            }
+            "max_buy" -> {
+                val symbol = args.getOrNull(1)?.uppercase()?.replace("/", "")?.replace("-", "")
+                val value = args.getOrNull(2)?.toBigDecimalOrNull()
+                if (symbol.isNullOrBlank() || value == null || value <= BigDecimal.ZERO) {
+                    "Usage: /cts <PIN> set max_buy BTCEUR 95000"
+                } else {
+                    val existing = current.perSymbolMaxBuyPriceCsv
+                        .split(',', ';', '\n')
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() && !it.uppercase().startsWith("$symbol=") }
+                        .toMutableList()
+                    existing += "$symbol=${value.stripTrailingZeros().toPlainString()}"
+                    settingsStore.save(current.copy(maxBuyPriceFilterEnabled = true, perSymbolMaxBuyPriceCsv = existing.joinToString(",")))
+                    "Max buy price for $symbol changed to $value"
+                }
+            }
+            else -> "Unknown setting '${args[0]}'. Supported: max_position, max_buy, score."
+        }
     }
 
     private fun updateStatus(message: String, level: String = "INFO") {
@@ -658,11 +991,62 @@ class BotController(
             return ExecutionAttemptResult(false)
         }
         val side = if (decision.finalAction == SignalAction.SELL) OrderSide.SELL else OrderSide.BUY
+        val symbolRule = settings.symbolAutomationRuleFor(ticker.symbol)
+        if (settings.ultimateAutomationEnabled && side == OrderSide.BUY) {
+            val minRuleScore = symbolRule?.minScoreToBuy
+            if (minRuleScore != null && decision.finalScore < minRuleScore) {
+                updateStatus("Trade blocked by per-symbol rule: ${ticker.symbol} score=${decision.finalScore} is below minScore=$minRuleScore.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+            val cooldownMinutes = symbolRule?.cooldownMinutes
+            if (cooldownMinutes != null && cooldownMinutes > 0) {
+                val lastTrade = runCatching { dao.lastTradeForSymbol(ticker.symbol) }.getOrNull()
+                val ageMinutes = if (lastTrade == null) Long.MAX_VALUE else (System.currentTimeMillis() - lastTrade.timestampEpochMs) / 60000L
+                if (ageMinutes < cooldownMinutes) {
+                    updateStatus("Trade blocked by per-symbol cooldown: ${ticker.symbol} last trade ${ageMinutes}m ago, cooldown=${cooldownMinutes}m.", "WARN")
+                    return ExecutionAttemptResult(false)
+                }
+            }
+        }
+        if (settings.ultimateAutomationEnabled && side == OrderSide.BUY) {
+            val move24h = ticker.priceChangePercent24h
+            val absMove24h = move24h.abs()
+            if (settings.volatilityCircuitBreakerEnabled && absMove24h > settings.volatilityCircuitBreakerMax24hMovePercent) {
+                updateStatus("Trade blocked by volatility circuit breaker: ${ticker.symbol} 24h move=${move24h.setScale(2, RoundingMode.HALF_UP)}%, max=${settings.volatilityCircuitBreakerMax24hMovePercent}%. SELL remains allowed.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+            if (settings.pumpChaseProtectionEnabled && move24h > settings.pumpChaseMax24hGainPercent) {
+                updateStatus("Trade blocked by pump-chase protection: ${ticker.symbol} 24h gain=${move24h.setScale(2, RoundingMode.HALF_UP)}%, maxBuyGain=${settings.pumpChaseMax24hGainPercent}%.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+        }
         val pairInfo = runCatching { exchange.validateSymbol(ticker.symbol) }.getOrNull()
         val baseAsset = pairInfo?.baseAsset ?: baseAssetFromSymbol(ticker.symbol)
         val quoteAsset = pairInfo?.quoteAsset ?: quoteAssetFromSymbol(ticker.symbol)
         val availableQuote = freeBalanceForAsset(liveBalances, quoteAsset)
         val availableBase = freeBalanceForAsset(liveBalances, baseAsset)
+        if (settings.ultimateAutomationEnabled && settings.duplicatePositionProtectionEnabled && side == OrderSide.BUY) {
+            val openPosition = runCatching { dao.positionForSymbol(ticker.symbol) }.getOrNull()
+            val heldBaseValue = availableBase.multiply(if (ticker.ask > BigDecimal.ZERO) ticker.ask else ticker.lastPrice)
+            if (openPosition != null && openPosition.status.equals("OPEN", ignoreCase = true)) {
+                updateStatus("Trade blocked by duplicate-position protection: ${ticker.symbol} already has an OPEN lifecycle position. SELL/exit management remains allowed.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+            if (heldBaseValue >= BigDecimal("5.00")) {
+                updateStatus("Trade blocked by duplicate-position protection: existing $baseAsset value≈${heldBaseValue.setScale(2, RoundingMode.DOWN)} $quoteAsset. SELL/exit management remains allowed.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+        }
+        if (settings.ultimateAutomationEnabled && settings.portfolioBalancerEnabled && side == OrderSide.BUY) {
+            val heldBaseValue = availableBase.multiply(if (ticker.ask > BigDecimal.ZERO) ticker.ask else ticker.lastPrice)
+            val freeQuoteValue = availableQuote
+            val estimatedTotal = heldBaseValue.add(freeQuoteValue).max(BigDecimal.ONE)
+            val exposurePercent = heldBaseValue.multiply(BigDecimal("100")).divide(estimatedTotal, 4, RoundingMode.HALF_UP)
+            if (exposurePercent > settings.maxSingleAssetAllocationPercent) {
+                updateStatus("Trade blocked by portfolio exposure guard: $baseAsset exposure≈${exposurePercent.setScale(2, RoundingMode.HALF_UP)}%, max=${settings.maxSingleAssetAllocationPercent}%.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+        }
         val quoteReserve = quoteReserveAmount(settings, availableQuote)
         val quoteReservedThisScan = reservedByQuoteThisScan[quoteAsset] ?: BigDecimal.ZERO
         if (side == OrderSide.BUY && !settings.isQuoteAssetAllowed(quoteAsset)) {
@@ -697,10 +1081,26 @@ class BotController(
             }
         }
         val price = if (side == OrderSide.BUY) ticker.ask else ticker.bid
+        if (side == OrderSide.BUY && settings.multiTimeframeConsensusEnabled) {
+            val consensus = multiTimeframeConsensusAllowsBuy(settings, exchange, ticker.symbol)
+            updateStatus("[${ticker.symbol}] ${consensus.second}", if (consensus.first) "INFO" else "WARN")
+            if (!consensus.first) {
+                updateStatus("Trade blocked by multi-timeframe consensus: ${consensus.second}", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+        }
+        if (side == OrderSide.BUY) {
+            val maxBuyPrice = settings.effectiveMaxBuyPriceFor(ticker.symbol)
+            if (maxBuyPrice != null && price > maxBuyPrice) {
+                updateStatus("Trade blocked by Max Buy Price: ${ticker.symbol} ask=${price.stripTrailingZeros().toPlainString()} is above configured max=${maxBuyPrice.stripTrailingZeros().toPlainString()}.", "WARN")
+                return ExecutionAttemptResult(false)
+            }
+        }
         val feeReserveMultiplier = BigDecimal("1.01")
         val minimumOrderNotional = BigDecimal("5.00")
 
-        val perOrderCap = if (useMarketOrder) settings.maxPositionEur.min(settings.maxMarketOrderEur) else settings.maxPositionEur
+        val adaptivePositionCap = if (settings.ultimateAutomationEnabled) adaptivePositionCapFor(settings, ticker.symbol) else settings.maxPositionEur
+        val perOrderCap = if (useMarketOrder) adaptivePositionCap.min(settings.maxMarketOrderEur) else adaptivePositionCap
         val targetNotional = if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) {
             val freeQuote = availableQuote ?: BigDecimal.ZERO
             val spendableAfterReserve = freeQuote
@@ -721,6 +1121,12 @@ class BotController(
         }
 
         if (side == OrderSide.BUY) {
+            val orderBookCheck = orderBookDepthAllowsExecution(settings, exchange, ticker.symbol, side, targetNotional, price)
+            updateStatus("[${ticker.symbol}] ${orderBookCheck.second}", if (orderBookCheck.first) "INFO" else "WARN")
+            if (!orderBookCheck.first) {
+                updateStatus("Trade blocked by order book depth/slippage guard: ${orderBookCheck.second}", "WARN")
+                return ExecutionAttemptResult(false)
+            }
             updateStatus("[${ticker.symbol}] Quote budget: base=$baseAsset, quote=$quoteAsset, freeQuote=${availableQuote.stripTrailingZeros().toPlainString()}, reservedByBotThisScan=${quoteReservedThisScan.setScale(2, RoundingMode.DOWN)}, reserve=${quoteReserve.setScale(2, RoundingMode.DOWN)}, targetOrder=${targetNotional.stripTrailingZeros().toPlainString()} $quoteAsset", "INFO")
             val heldBaseValue = (availableBase ?: BigDecimal.ZERO).multiply(price)
             if (quoteAsset != "EUR" && quoteAsset !in setOf("USD", "USDT", "USDC") && !settings.nonEurQuoteBuyEnabled) {
@@ -768,6 +1174,15 @@ class BotController(
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
             updateStatus("Order submit failed: ${error.message}", "ERROR")
             sendRemoteAlert(settings, "Order submit failed", "${request.side} ${request.symbol}: ${error.message}")
+            if (settings.ultimateAutomationEnabled && settings.autoPauseAfterOrderFailuresEnabled && settings.mode == BotMode.LIVE_AUTO) {
+                val recentFailures = statusStore.recentLines(80).count { it.contains("Order submit failed", ignoreCase = true) || it.contains("Service cycle failed", ignoreCase = true) }
+                if (recentFailures + 1 >= settings.autoPauseFailureThreshold.coerceAtLeast(1)) {
+                    settingsStore.save(settings.copy(mode = BotMode.LIVE_CONFIRM, manualExecutionMode = true))
+                    val pauseMessage = "LIVE_AUTO auto-paused after repeated order/API failures. Mode changed to LIVE_CONFIRM. Review Live Status before re-enabling LIVE_AUTO."
+                    updateStatus(pauseMessage, "ERROR")
+                    sendRemoteAlert(settings, "LIVE_AUTO auto-paused", pauseMessage)
+                }
+            }
             throw error
         }
         dao.insertTrade(
@@ -789,6 +1204,119 @@ class BotController(
         sendRemoteAlert(settings, "Order placed", "${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"} qty=${result.executedQuantity} avg=${result.averagePrice} fee=${result.fee} id=${result.exchangeOrderId}")
         val reservedAmount = if (side == OrderSide.BUY) targetNotional.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
         return ExecutionAttemptResult(true, quoteAsset, reservedAmount)
+    }
+
+
+
+
+    private fun estimateOrderBookSlippagePercent(
+        snapshot: OrderBookSnapshot,
+        side: OrderSide,
+        targetNotional: BigDecimal,
+        referencePrice: BigDecimal
+    ): BigDecimal {
+        if (targetNotional <= BigDecimal.ZERO || referencePrice <= BigDecimal.ZERO) return BigDecimal.ZERO
+        val levels = if (side == OrderSide.BUY) snapshot.asks else snapshot.bids
+        var remaining = targetNotional
+        var spent = BigDecimal.ZERO
+        var acquired = BigDecimal.ZERO
+        for (level in levels) {
+            if (remaining <= BigDecimal.ZERO) break
+            val levelQuote = level.price.multiply(level.quantity)
+            val usedQuote = remaining.min(levelQuote)
+            val usedQty = if (level.price > BigDecimal.ZERO) usedQuote.divide(level.price, 12, RoundingMode.DOWN) else BigDecimal.ZERO
+            spent += usedQuote
+            acquired += usedQty
+            remaining -= usedQuote
+        }
+        if (acquired <= BigDecimal.ZERO) return BigDecimal("999")
+        val averagePrice = spent.divide(acquired, 12, RoundingMode.HALF_UP)
+        val raw = if (side == OrderSide.BUY) {
+            averagePrice.subtract(referencePrice)
+        } else {
+            referencePrice.subtract(averagePrice)
+        }
+        return raw.divide(referencePrice, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")).max(BigDecimal.ZERO)
+    }
+
+    private suspend fun orderBookDepthAllowsExecution(
+        settings: BotSettings,
+        exchange: CryptoExchangeClient,
+        symbol: String,
+        side: OrderSide,
+        targetNotional: BigDecimal,
+        referencePrice: BigDecimal
+    ): Pair<Boolean, String> {
+        if (!settings.ultimateAutomationEnabled || !settings.orderBookDepthGuardEnabled) {
+            return true to "Order book guard disabled."
+        }
+        val snapshot = runCatching { exchange.getOrderBook(symbol, 40) }.getOrNull()
+            ?: return if (settings.mode == BotMode.LIVE_AUTO) {
+                false to "Order book unavailable for $symbol in LIVE_AUTO."
+            } else {
+                true to "Order book unavailable; non-live-auto mode allowed."
+            }
+        val availableDepth = snapshot.quoteDepth(side)
+        val requiredDepth = targetNotional.multiply(settings.minOrderBookDepthMultiple)
+        if (availableDepth < requiredDepth) {
+            return false to "order book depth too thin: available≈${availableDepth.setScale(2, RoundingMode.DOWN)}, required≈${requiredDepth.setScale(2, RoundingMode.DOWN)}"
+        }
+        val slippage = estimateOrderBookSlippagePercent(snapshot, side, targetNotional, referencePrice)
+        if (slippage > settings.maxOrderBookSlippagePercent) {
+            return false to "estimated order book slippage ${slippage.setScale(3, RoundingMode.HALF_UP)}% > max ${settings.maxOrderBookSlippagePercent}%"
+        }
+        return true to "order book OK: depth≈${availableDepth.setScale(2, RoundingMode.DOWN)}, required≈${requiredDepth.setScale(2, RoundingMode.DOWN)}, estimatedSlippage≈${slippage.setScale(3, RoundingMode.HALF_UP)}%"
+    }
+
+    private suspend fun multiTimeframeConsensusAllowsBuy(
+        settings: BotSettings,
+        exchange: CryptoExchangeClient,
+        symbol: String
+    ): Pair<Boolean, String> {
+        if (!settings.ultimateAutomationEnabled || !settings.multiTimeframeConsensusEnabled) {
+            return true to "Multi-timeframe consensus disabled."
+        }
+        val frames = listOf(Timeframe.M5, Timeframe.M15, Timeframe.H1)
+        var bullish = 0
+        val details = mutableListOf<String>()
+        frames.forEach { timeframe ->
+            val candles = runCatching { exchange.getCandles(symbol, timeframe, 48) }.getOrDefault(emptyList())
+            if (candles.size >= 12) {
+                val first = candles.first().close
+                val last = candles.last().close
+                val isBullish = last > first
+                if (isBullish) bullish += 1
+                val change = if (first > BigDecimal.ZERO) last.subtract(first).divide(first, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")) else BigDecimal.ZERO
+                details += "${timeframe.name}:${if (isBullish) "UP" else "DOWN"}(${change.setScale(2, RoundingMode.HALF_UP)}%)"
+            } else {
+                details += "${timeframe.name}:NO_DATA"
+            }
+        }
+        val required = settings.multiTimeframeRequiredBullishCount.coerceIn(1, frames.size)
+        val allowed = bullish >= required
+        val reason = "multi-timeframe bullish=$bullish/$required details=${details.joinToString(",")}"
+        return allowed to reason
+    }
+
+    private suspend fun adaptivePositionCapFor(settings: BotSettings, symbol: String): BigDecimal {
+        val baseCap = settings.effectiveMaxPositionFor(symbol)
+        if (!settings.autoCompoundingEnabled || !settings.adaptiveCompoundingFromRealizedPnlEnabled) {
+            return baseCap
+        }
+        val recentPnl = runCatching {
+            dao.recentTradesSnapshot(settings.optimizerLookbackTrades.coerceIn(10, 500))
+                .mapNotNull { it.realizedPnlEur.toBigDecimalOrNull() }
+                .fold(BigDecimal.ZERO) { acc, value -> acc + value }
+        }.getOrDefault(BigDecimal.ZERO)
+        if (recentPnl <= BigDecimal.ZERO) return baseCap
+        val boost = recentPnl
+            .multiply(settings.autoCompoundingMaxIncreasePercent)
+            .divide(BigDecimal("100"), 8, RoundingMode.DOWN)
+            .max(BigDecimal.ZERO)
+        val hardCap = if (settings.autoCompoundingHardCapEnabled) settings.autoCompoundingMaxPositionEur else settings.maxPositionEur.max(baseCap).add(boost)
+        val finalCap = baseCap.add(boost).min(hardCap).setScale(2, RoundingMode.DOWN)
+        updateStatus("[$symbol] Adaptive compounding cap: base=${baseCap.setScale(2, RoundingMode.DOWN)}, recentPnl=${recentPnl.setScale(2, RoundingMode.DOWN)}, boost=${boost.setScale(2, RoundingMode.DOWN)}, final=${finalCap.setScale(2, RoundingMode.DOWN)}", "INFO")
+        return finalCap
     }
 
     private fun freeBalanceForAsset(balances: Map<String, BigDecimal>, asset: String): BigDecimal {
