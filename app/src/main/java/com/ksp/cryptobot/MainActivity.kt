@@ -1055,7 +1055,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.7.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.7.6 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -2566,6 +2566,7 @@ private fun BackupRestoreScreen(
             "orderBookDepthGuardEnabled=${settings.orderBookDepthGuardEnabled}",
             "maxOrderBookSlippagePercent=${settings.maxOrderBookSlippagePercent}",
             "minOrderBookDepthMultiple=${settings.minOrderBookDepthMultiple}",
+            "maxTradesPerDay=${settings.maxTradesPerDay}",
             "maxTradesPerHour=${settings.maxTradesPerHour}",
             "maxLivePositions=${settings.maxSimultaneousLivePositions}",
             "selfLearning=${settings.trueSelfLearningEnabled}",
@@ -3792,6 +3793,7 @@ private fun AdvancedSettingsScreen(
     var candidateLimit by remember(settings) { mutableStateOf(settings.autoSymbolCandidateLimit.toString()) }
     var activeLimit by remember(settings) { mutableStateOf(settings.autoSymbolActiveLimit.toString()) }
     var maxNewTrades by remember(settings) { mutableStateOf(settings.maxNewTradesPerScan.toString()) }
+    var maxTradesDay by remember(settings) { mutableStateOf(settings.maxTradesPerDay.toString()) }
     var maxTradesHour by remember(settings) { mutableStateOf(settings.maxTradesPerHour.toString()) }
     var maxLivePositions by remember(settings) { mutableStateOf(settings.maxSimultaneousLivePositions.toString()) }
     var maxPosition by remember(settings) { mutableStateOf(settings.maxPositionEur.toPlainString()) }
@@ -4032,6 +4034,7 @@ private fun AdvancedSettingsScreen(
         autoSymbolCandidateLimit = candidateLimit.toIntOrNull()?.coerceIn(1, 1000) ?: settings.autoSymbolCandidateLimit,
         autoSymbolActiveLimit = activeLimit.toIntOrNull()?.coerceIn(1, 100) ?: settings.autoSymbolActiveLimit,
         maxNewTradesPerScan = maxNewTrades.toIntOrNull()?.coerceIn(1, 20) ?: settings.maxNewTradesPerScan,
+        maxTradesPerDay = maxTradesDay.toIntOrNull()?.coerceIn(1, 500) ?: settings.maxTradesPerDay,
         maxTradesPerHour = maxTradesHour.toIntOrNull()?.coerceIn(1, 100) ?: settings.maxTradesPerHour,
         maxSimultaneousLivePositions = maxLivePositions.toIntOrNull()?.coerceIn(1, 50) ?: settings.maxSimultaneousLivePositions,
         maxPositionEur = maxPosition.toBigDecimalOrNull() ?: settings.maxPositionEur,
@@ -4179,6 +4182,7 @@ private fun AdvancedSettingsScreen(
                 OutlinedTextField(value = perSymbolMaxBuyPrice, onValueChange = { perSymbolMaxBuyPrice = it }, label = { Text("Per-symbol max buy prices, e.g. BTCEUR=95000,ETHEUR=3500") }, modifier = Modifier.fillMaxWidth())
                 Text("If enabled, BUY orders are blocked when the current ask is above the configured max buy price. SELL orders are not blocked.", color = Muted)
                 OutlinedTextField(value = maxNewTrades, onValueChange = { maxNewTrades = it }, label = { Text("Max new trades per scan") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxTradesDay, onValueChange = { maxTradesDay = it }, label = { Text("Max trades per day") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = maxTradesHour, onValueChange = { maxTradesHour = it }, label = { Text("Max trades per hour") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = maxLivePositions, onValueChange = { maxLivePositions = it }, label = { Text("Max simultaneous live positions") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = minReserveAmount, onValueChange = { minReserveAmount = it }, label = { Text("Minimum quote reserve amount") }, modifier = Modifier.fillMaxWidth())
