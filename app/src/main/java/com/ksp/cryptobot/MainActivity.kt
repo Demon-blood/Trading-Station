@@ -687,6 +687,7 @@ private fun AdvancedBotApp(
                     candles = chartCandles,
                     selectedSymbol = chartSymbol,
                     selectedTimeframe = chartTimeframe,
+                    activePositionSymbols = activeChartSymbols,
                     latestDecision = decisions.firstOrNull { it.symbol.equals(chartSymbol, ignoreCase = true) },
                     trades = tradeJournal.filter { it.symbol.equals(chartSymbol, ignoreCase = true) },
                     autoRefresh = liveChartAutoRefresh,
@@ -1181,7 +1182,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.9.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.9.4 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
