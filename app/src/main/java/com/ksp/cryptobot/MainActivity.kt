@@ -1182,7 +1182,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.9.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.9.6 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -2744,7 +2744,7 @@ private fun StrategySandboxScreen(
         if (reports.isEmpty()) {
             item { GlassCard { Text("No sandbox results yet.", color = Muted) } }
         } else {
-            items(reports) { report ->
+            items(reports.take(50)) { report ->
                 BacktestReportCard(title = "Sandbox ${report.strategy.name}", report = report)
             }
         }
@@ -3173,11 +3173,14 @@ private fun StrategyAutoTunerScreen(
     var running by remember { mutableStateOf(false) }
     var expectedReports by remember { mutableStateOf(0) }
     var appliedMessage by remember { mutableStateOf("") }
-    val symbols = (settings.symbols() + activePositionSymbols)
+    val rawSymbols = (settings.symbols() + activePositionSymbols)
         .map { it.uppercase().replace("/", "").replace("-", "") }
         .filter { it.isNotBlank() }
         .distinct()
         .ifEmpty { listOf("BTCEUR", "ETHEUR") }
+    val maxAutoTuneSymbols = 8
+    val symbols = rawSymbols.take(maxAutoTuneSymbols)
+    val symbolsCapped = rawSymbols.size > symbols.size
     val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
     val strategies = listOf(StrategyMode.SCALPING, StrategyMode.TREND, StrategyMode.BREAKOUT, StrategyMode.REVERSAL, StrategyMode.NEWS_MOMENTUM)
 
@@ -3190,18 +3193,28 @@ private fun StrategyAutoTunerScreen(
         )
 
     fun runAutoTune() {
+        val tests = symbols.flatMap { symbol -> strategies.map { strategy -> symbol to strategy } }
         running = true
         appliedMessage = ""
         reports = emptyList()
-        expectedReports = symbols.size * strategies.size
-        symbols.forEach { symbol ->
-            strategies.forEach { strategy ->
-                onRunHistoricalBacktest(settings.copy(symbolsCsv = symbols.joinToString(",")), symbol, Timeframe.M15, strategy, 720) { report ->
-                    val updated = sortedReports(reports + report)
-                    reports = updated
-                    if (updated.size >= expectedReports) running = false
-                }
+        expectedReports = tests.size
+        fun runNext(index: Int) {
+            if (index >= tests.size) {
+                running = false
+                return
             }
+            val (symbol, strategy) = tests[index]
+            onRunHistoricalBacktest(settings.copy(symbolsCsv = symbols.joinToString(",")), symbol, Timeframe.M15, strategy, 360) { report ->
+                val updated = sortedReports(reports + report)
+                reports = updated
+                runNext(index + 1)
+            }
+        }
+        if (tests.isEmpty()) {
+            running = false
+            appliedMessage = "No symbols available for auto-tune."
+        } else {
+            runNext(0)
         }
     }
 
@@ -3233,11 +3246,11 @@ private fun StrategyAutoTunerScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Strategy Auto-Tuner", "Tests strategies on Kraken OHLC for configured symbols plus active positions, then can apply the best passed strategy to live settings.") }
+        item { SectionTitle("Strategy Auto-Tuner", "Crash-safe sequential strategy testing for configured symbols plus active positions.") }
         item {
             HeroCard(
                 title = "Auto-tune ${symbols.size} symbol(s)",
-                subtitle = if (running) "Running ${reports.size}/$expectedReports OHLC tests..." else "Universe: ${symbols.joinToString(", ")}",
+                subtitle = if (running) "Sequential safe mode: ${reports.size}/$expectedReports OHLC tests..." else "Universe: ${symbols.joinToString(", ")}${if (symbolsCapped) " + ${rawSymbols.size - symbols.size} capped" else ""}",
                 primaryButton = if (running) "Running..." else "Run Auto-Tune",
                 secondaryButton = "Clear",
                 onPrimary = { if (!running) runAutoTune() },
@@ -3248,7 +3261,7 @@ private fun StrategyAutoTunerScreen(
             GlassCard {
                 Text("Live usage", fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(6.dp))
-                Text("Auto-Tune is no longer recommendation-only. After tests finish, you can apply the best passed candidate to the live strategy settings.", color = Muted)
+                Text("Auto-Tune now runs sequentially and caps large universes to prevent UI freezes/crashes. After tests finish, you can apply the best passed candidate to the live strategy settings.", color = Muted)
                 Text("This changes strategyMode and symbol universe, but does not bypass LIVE_AUTO preflight, release safety, risk limits, or order-book guards.", color = Amber)
                 Spacer(Modifier.height(10.dp))
                 Button(
@@ -3289,7 +3302,7 @@ private fun StrategyAutoTunerScreen(
             item {
                 GlassCard {
                     Text("No auto-tune results yet.", color = Muted)
-                    Text("Press Run Auto-Tune to test every strategy across configured symbols and active positions.", color = Muted)
+                    Text("Press Run Auto-Tune to test strategies sequentially. Large universes are capped to keep the app stable.", color = Muted)
                 }
             }
         }
