@@ -1181,7 +1181,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.9.2 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.9.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1981,6 +1981,7 @@ private fun ChartScreen(
     candles: List<Candle>,
     selectedSymbol: String,
     selectedTimeframe: Timeframe,
+    activePositionSymbols: List<String>,
     latestDecision: AiDecision?,
     trades: List<TradeEntity>,
     autoRefresh: Boolean,
