@@ -17,6 +17,8 @@ import com.ksp.cryptobot.execution.ExecutionGuard
 import com.ksp.cryptobot.execution.AdvancedRiskManager
 import com.ksp.cryptobot.intelligence.AiDecisionEngine
 import com.ksp.cryptobot.news.NewsApiClient
+import com.ksp.cryptobot.news.CompositeNewsClient
+import com.ksp.cryptobot.news.CryptoCompareNewsClient
 import com.ksp.cryptobot.news.NewsClient
 import com.ksp.cryptobot.news.NoopNewsClient
 import com.ksp.cryptobot.settings.AppSettingsStore
@@ -568,6 +570,7 @@ class BotController(
                 dao.clearTradesForRestore()
                 dao.clearSignalsForRestore()
                 dao.clearAiDecisionsForRestore()
+                dao.clearNewsArticlesForRestore()
                 dao.clearTaxLotsForRestore()
                 dao.clearPositionsForRestore()
                 dao.clearTaxReportsForRestore()
@@ -1219,14 +1222,19 @@ Crypto TradeStation remote commands:
                 val news = if (settings.useNewsAi) {
                     runCatching { newsClient.latestCryptoNews(symbol) }
                         .onSuccess { articles ->
-                            updateStatus("[$symbol] News check complete: articles=${articles.size}${articles.firstOrNull()?.source?.takeIf { it.isNotBlank() }?.let { ", topSource=$it" } ?: ""}.", if (articles.isEmpty()) "WARN" else "INFO")
+                            cacheNewsArticles(symbol, articles)
+                            val topTitles = articles.take(3).joinToString(" | ") { it.title.take(90) }
+                            updateStatus("[$symbol] News check complete: articles=${articles.size}${articles.firstOrNull()?.source?.takeIf { it.isNotBlank() }?.let { ", topSource=$it" } ?: ""}${if (topTitles.isNotBlank()) ", top=$topTitles" else ""}.", if (articles.isEmpty()) "WARN" else "INFO")
                         }
                         .onFailure { error ->
                             updateStatus("[$symbol] News check failed: ${error.message}", "WARN")
                         }
                         .getOrDefault(emptyList())
                 } else emptyList()
-                val baseDecision = aiDecisionEngine.decide(rec, news, recentTrades, settings)
+                val newsTitles = news.take(3).joinToString(" | ") { it.title.take(100) }
+                val baseDecision = aiDecisionEngine.decide(rec, news, recentTrades, settings).let { decision ->
+                    if (newsTitles.isBlank()) decision else decision.copy(explanation = decision.explanation + " News titles: " + newsTitles)
+                }
                 val riskState = advancedRiskManager.riskState(settings)
                 val adaptiveStrategy = selfLearningEngine.selectAdaptiveStrategyMode(dao, symbol, settings.strategyMode, settings)
                 val strategySettings = if (settings.strategyMode == StrategyMode.AUTO && adaptiveStrategy.selectedStrategy != StrategyMode.AUTO) {
@@ -1899,10 +1907,43 @@ Crypto TradeStation remote commands:
         }
     }
 
+
+    private suspend fun cacheNewsArticles(symbol: String, articles: List<NewsArticle>) {
+        if (articles.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val rows = articles.take(40).map { article ->
+            NewsArticleEntity(
+                symbol = symbol.uppercase().replace("/", "").replace("-", ""),
+                title = article.title.take(300),
+                description = article.description.take(800),
+                source = article.source.take(120),
+                url = article.url.take(500),
+                provider = article.source.substringBefore(':', article.source).ifBlank { "Unknown" }.take(80),
+                publishedAtEpochMs = article.publishedAt?.toEpochMilli() ?: 0L,
+                fetchedAtEpochMs = now
+            )
+        }
+        dao.insertNewsArticles(rows)
+    }
+
+    suspend fun loadNewsHistory(symbol: String = "", limit: Int = 200): List<NewsArticleEntity> {
+        val normalized = symbol.uppercase().replace("/", "").replace("-", "").trim()
+        return runCatching {
+            if (normalized.isBlank()) dao.recentNewsArticles(limit) else dao.newsArticlesForSymbol(normalized, limit)
+        }
+            .onSuccess { updateStatus("News history loaded. symbol=${normalized.ifBlank { "ALL" }} rows=${it.size}", "INFO") }
+            .onFailure { updateStatus("News history load failed: ${it.message}", "ERROR") }
+            .getOrDefault(emptyList())
+    }
+
+
     private fun createNewsClient(settings: BotSettings): NewsClient {
         if (!settings.useNewsAi) return NoopNewsClient()
+        val providers = mutableListOf<NewsClient>()
         val key = settingsStore.newsApiKey()
-        return if (!key.isNullOrBlank()) NewsApiClient(key) else NoopNewsClient()
+        if (!key.isNullOrBlank()) providers += NewsApiClient(key)
+        providers += CryptoCompareNewsClient()
+        return if (providers.isEmpty()) NoopNewsClient() else CompositeNewsClient(providers)
     }
 
 

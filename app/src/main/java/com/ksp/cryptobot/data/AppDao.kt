@@ -13,6 +13,7 @@ interface AppDao {
     @Insert suspend fun insertSignal(signal: SignalEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreSignal(signal: SignalEntity)
     @Insert suspend fun insertAiDecision(decision: AiDecisionEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertNewsArticles(articles: List<NewsArticleEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreAiDecision(decision: AiDecisionEntity)
     @Insert suspend fun insertTaxLot(lot: TaxLotEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreTaxLot(lot: TaxLotEntity)
@@ -48,6 +49,12 @@ interface AppDao {
     @Query("SELECT * FROM ai_decisions ORDER BY timestampEpochMs DESC LIMIT 100")
     fun recentAiDecisions(): Flow<List<AiDecisionEntity>>
 
+    @Query("SELECT * FROM news_articles ORDER BY fetchedAtEpochMs DESC LIMIT :limit")
+    suspend fun recentNewsArticles(limit: Int = 200): List<NewsArticleEntity>
+
+    @Query("SELECT * FROM news_articles WHERE symbol = :symbol ORDER BY fetchedAtEpochMs DESC LIMIT :limit")
+    suspend fun newsArticlesForSymbol(symbol: String, limit: Int = 100): List<NewsArticleEntity>
+
     @Query("SELECT COALESCE(SUM(CAST(realizedGainEur AS REAL)), 0) FROM tax_lots WHERE closedAtEpochMs BETWEEN :yearStartMs AND :yearEndMs")
     suspend fun realizedGainForYear(yearStartMs: Long, yearEndMs: Long): Double
 
@@ -72,6 +79,9 @@ interface AppDao {
     @Query("SELECT * FROM ai_decisions ORDER BY timestampEpochMs DESC")
     suspend fun allAiDecisionsSnapshot(): List<AiDecisionEntity>
 
+    @Query("SELECT * FROM news_articles ORDER BY fetchedAtEpochMs DESC")
+    suspend fun allNewsArticlesSnapshot(): List<NewsArticleEntity>
+
     @Query("SELECT * FROM tax_lots ORDER BY openedAtEpochMs DESC")
     suspend fun allTaxLotsSnapshot(): List<TaxLotEntity>
 
@@ -84,6 +94,9 @@ interface AppDao {
 
     @Query("DELETE FROM ai_decisions")
     suspend fun clearAiDecisionsForRestore()
+
+    @Query("DELETE FROM news_articles")
+    suspend fun clearNewsArticlesForRestore()
 
     @Query("DELETE FROM tax_lots")
     suspend fun clearTaxLotsForRestore()

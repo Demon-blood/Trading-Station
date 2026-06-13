@@ -96,6 +96,7 @@ import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import com.ksp.cryptobot.learning.TrueSelfLearningEngine
 import com.ksp.cryptobot.data.TradeEntity
+import com.ksp.cryptobot.data.NewsArticleEntity
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import java.math.BigDecimal
@@ -207,6 +208,11 @@ class MainActivity : ComponentActivity() {
                         onLoadTradeJournal = { limit, callback ->
                             lifecycleScope.launch {
                                 callback(controller.loadTradeJournal(limit))
+                            }
+                        },
+                        onLoadNewsHistory = { symbol, limit, callback ->
+                            lifecycleScope.launch {
+                                callback(controller.loadNewsHistory(symbol, limit))
                             }
                         },
                         onRunKrakenHealth = { settings, callback ->
@@ -331,6 +337,7 @@ private fun AdvancedBotApp(
     onRunHistoricalBacktest: (BotSettings, String, Timeframe, StrategyMode, Int, (BacktestReport) -> Unit) -> Unit,
     onLoadChartCandles: (BotSettings, String, Timeframe, Int, (List<Candle>) -> Unit) -> Unit,
     onLoadTradeJournal: (Int, (List<TradeEntity>) -> Unit) -> Unit,
+    onLoadNewsHistory: (String, Int, (List<NewsArticleEntity>) -> Unit) -> Unit,
     onRunKrakenHealth: (BotSettings, (List<String>) -> Unit) -> Unit,
     onRunSystemTest: (BotSettings, (List<String>) -> Unit) -> Unit,
     onExportFullBackup: (BotSettings, String, (String) -> Unit) -> Unit,
@@ -357,6 +364,7 @@ private fun AdvancedBotApp(
     var chartSymbol by remember { mutableStateOf(settings.symbols().firstOrNull() ?: "BTCEUR") }
     var chartTimeframe by remember { mutableStateOf(Timeframe.M15) }
     var tradeJournal by remember { mutableStateOf<List<TradeEntity>>(emptyList()) }
+    var newsHistory by remember { mutableStateOf<List<NewsArticleEntity>>(emptyList()) }
     var krakenHealthLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var systemTestLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var telegramBotToken by remember { mutableStateOf(store.telegramBotToken().orEmpty()) }
@@ -421,6 +429,12 @@ private fun AdvancedBotApp(
                 statusStore.write("AI Signals portfolio symbols loaded. assets=${result.assets.size}")
             }
             onLoadTradeJournal(200) { result -> tradeJournal = result }
+        }
+        if (currentTab == AppTab.NEWS) {
+            onLoadNewsHistory("", 200) { result ->
+                newsHistory = result
+                statusStore.write("News dashboard loaded. cachedArticles=${result.size}")
+            }
         }
         if (currentTab == AppTab.PORTFOLIO) {
             onLoadPortfolio(settings) { result ->
@@ -893,7 +907,28 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
-                AppTab.NEWS -> NewsScreen(settings = settings, onToggleNews = { persistSettings(settings.copy(useNewsAi = it)) })
+                AppTab.NEWS -> NewsScreen(
+                    settings = settings,
+                    newsHistory = newsHistory,
+                    activeSymbols = activeChartSymbols,
+                    onToggleNews = { persistSettings(settings.copy(useNewsAi = it)) },
+                    onRefreshHistory = { symbol ->
+                        onLoadNewsHistory(symbol, 200) { result ->
+                            newsHistory = result
+                            statusStore.write("News dashboard refreshed. symbol=${symbol.ifBlank { "ALL" }} rows=${result.size}")
+                            status = "News dashboard refreshed"
+                        }
+                    },
+                    onScanNews = { symbol ->
+                        val scanSymbol = symbol.ifBlank { settings.symbols().firstOrNull() ?: "BTCEUR" }
+                        onScan(settings.copy(symbolsCsv = scanSymbol), false) { result ->
+                            decisions = result
+                            onLoadNewsHistory(scanSymbol, 200) { rows -> newsHistory = rows }
+                            statusStore.write("News scan complete for $scanSymbol. decisions=${result.size}")
+                            status = "News scan complete: $scanSymbol"
+                        }
+                    }
+                )
                 AppTab.TAX -> TaxScreen()
                 AppTab.HISTORY -> HistoryScreen(
                     settings = settings,
@@ -1182,7 +1217,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v3.0.0 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v3.1.0 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -3880,36 +3915,112 @@ private fun LiveBalanceRow(
 }
 
 @Composable
-private fun NewsScreen(settings: BotSettings, onToggleNews: (Boolean) -> Unit) {
-    val headlines = listOf(
-        "BTC macro sentiment scanner",
-        "ETH network and ETF-related keyword monitor",
-        "Exchange risk and regulatory keyword alerts",
-        "Market crash / liquidation warning feed"
-    )
+private fun NewsScreen(
+    settings: BotSettings,
+    newsHistory: List<NewsArticleEntity>,
+    activeSymbols: List<String>,
+    onToggleNews: (Boolean) -> Unit,
+    onRefreshHistory: (String) -> Unit,
+    onScanNews: (String) -> Unit
+) {
+    var selectedSymbol by remember(settings.symbolsCsv, activeSymbols) {
+        mutableStateOf((activeSymbols + settings.symbols()).firstOrNull()?.uppercase()?.replace("/", "")?.replace("-", "") ?: "")
+    }
+    val symbols = (settings.symbols() + activeSymbols + newsHistory.map { it.symbol })
+        .map { it.uppercase().replace("/", "").replace("-", "") }
+        .filter { it.isNotBlank() }
+        .distinct()
+    val visibleNews = if (selectedSymbol.isBlank()) newsHistory else newsHistory.filter { it.symbol.equals(selectedSymbol, ignoreCase = true) }
+    val grouped = newsHistory.groupBy { it.symbol }.toList().sortedByDescending { it.second.size }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("News Intelligence", "NewsAPI-powered sentiment layer for AI scoring.") }
+        item { SectionTitle("News Intelligence", "Cached per-symbol articles from NewsAPI + CryptoCompare, used by AI signal scoring.") }
         item {
             GlassCard {
                 ToggleRow("Use news sentiment in AI decisions", settings.useNewsAi, onToggleNews)
-                Text("When enabled and a NewsAPI key is saved in Settings, each scanned symbol performs a symbol-specific news search. Live Status now logs article counts per symbol.", color = Muted)
+                Text("During scans, every symbol fetches news, stores articles locally, and adds article titles into the AI decision explanation.", color = Muted)
+                Spacer(Modifier.height(10.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChip(
+                            selected = selectedSymbol.isBlank(),
+                            onClick = {
+                                selectedSymbol = ""
+                                onRefreshHistory("")
+                            },
+                            label = { Text("ALL") }
+                        )
+                    }
+                    items(symbols) { symbol ->
+                        FilterChip(
+                            selected = selectedSymbol.equals(symbol, ignoreCase = true),
+                            onClick = {
+                                selectedSymbol = symbol
+                                onRefreshHistory(symbol)
+                            },
+                            label = { Text(symbol) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onScanNews(selectedSymbol) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Electric)
+                    ) { Text("Scan News") }
+                    OutlinedButton(onClick = { onRefreshHistory(selectedSymbol) }) { Text("Refresh Cache") }
+                }
             }
         }
-        items(headlines) { headline ->
-            GlassCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(Electric)
-                    Spacer(Modifier.width(10.dp))
-                    Text(headline, fontWeight = FontWeight.SemiBold)
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { MetricCard("Cached articles", newsHistory.size.toString(), "Local DB", Electric) }
+                item { MetricCard("Symbols", grouped.size.toString(), "With cached news", Mint) }
+                item { MetricCard("Visible", visibleNews.size.toString(), selectedSymbol.ifBlank { "All symbols" }, Amber) }
+            }
+        }
+        if (grouped.isNotEmpty()) {
+            item {
+                GlassCard {
+                    Text("Per-symbol cache", fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(6.dp))
+                    grouped.take(12).forEach { (symbol, rows) ->
+                        Text("$symbol: ${rows.size} article(s)", color = if (symbol.equals(selectedSymbol, ignoreCase = true)) Mint else Muted)
+                    }
+                }
+            }
+        }
+        if (visibleNews.isEmpty()) {
+            item {
+                GlassCard {
+                    Text("No cached news yet.", fontWeight = FontWeight.Bold)
+                    Text("Press Scan News or run a normal market scan. Articles are stored after each symbol news check.", color = Muted)
+                }
+            }
+        } else {
+            items(visibleNews.take(80)) { article ->
+                GlassCard {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        StatusPill(article.symbol, Electric)
+                        Spacer(Modifier.width(8.dp))
+                        Text(article.source.ifBlank { article.provider }, color = Muted, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(article.title, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    if (article.description.isNotBlank()) {
+                        Text(article.description, color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text("provider=${article.provider} • fetched=${article.fetchedAtEpochMs}", color = Muted, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
     }
 }
+
 
 @Composable
 private fun TaxScreen() {
@@ -4853,7 +4964,16 @@ private fun DecisionCard(decision: AiDecision, expanded: Boolean = false) {
         }
         if (expanded) {
             Divider(color = Stroke)
-            Text(decision.explanation, color = Muted)
+            val newsMarker = " News titles: "
+            val parts = decision.explanation.split(newsMarker, limit = 2)
+            Text(parts.first(), color = Muted)
+            if (parts.size > 1) {
+                Spacer(Modifier.height(6.dp))
+                Text("News titles", fontWeight = FontWeight.Bold, color = Amber)
+                parts[1].split(" | ").take(3).forEach { title ->
+                    Text("• $title", color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
             Text("Allowed to trade: ${if (decision.allowedToTrade) "Yes" else "No"}", color = if (decision.allowedToTrade) Mint else Danger)
         }
     }

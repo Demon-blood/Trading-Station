@@ -46,6 +46,19 @@ data class AiDecisionEntity(
     val timestampEpochMs: Long
 )
 
+@Entity(tableName = "news_articles")
+data class NewsArticleEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val symbol: String,
+    val title: String,
+    val description: String,
+    val source: String,
+    val url: String,
+    val provider: String,
+    val publishedAtEpochMs: Long,
+    val fetchedAtEpochMs: Long
+)
+
 @Entity(tableName = "tax_lots")
 data class TaxLotEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
