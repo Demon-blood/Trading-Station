@@ -1218,7 +1218,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v3.1.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v3.1.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1236,6 +1236,7 @@ private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
         val liveTabs = listOf(
             AppTab.DASHBOARD,
             AppTab.AI,
+            AppTab.NEWS,
             AppTab.SELF_LEARNING,
             AppTab.CHART,
             AppTab.PORTFOLIO,
@@ -1940,7 +1941,6 @@ private fun SettingsHubScreen(
             }
         }
         item { HubActionCard("Basic Settings", "Provider, Kraken/API keys, symbols and main risk fields.", "Open", { onOpen(AppTab.BASIC_SETTINGS) }) }
-        item { HubActionCard("News Dashboard", "Cached symbol articles, NewsAPI/CryptoCompare provider status and per-symbol news scans.", "Open", { onOpen(AppTab.NEWS) }) }
         item {
             GlassCard {
                 val failures = systemTestLines.count { it.startsWith("FAIL") }
@@ -4850,7 +4850,7 @@ private fun SettingsScreen(
                 SectionTitle("Secure API Credentials", "Stored locally through Android Keystore-backed encrypted storage.")
                 OutlinedTextField(value = apiKey, onValueChange = onApiKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = secretKey, onValueChange = onSecretKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} secret key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
-                OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI key required for non-zero news score") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI key(s), comma-separated") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 Button(onClick = onSaveKeys, modifier = Modifier.fillMaxWidth()) { Text("Save Secure Keys") }
             }
         }

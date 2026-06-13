@@ -1170,8 +1170,13 @@ Crypto TradeStation remote commands:
         var submittedOrdersThisScan = 0
         val newsClient = createNewsClient(settings)
         if (settings.useNewsAi) {
-            val keyConfigured = !settingsStore.newsApiKey().isNullOrBlank()
-            updateStatus("News AI ${if (keyConfigured) "enabled with API key" else "enabled but no NewsAPI key saved; news score will stay 0"}.", if (keyConfigured) "INFO" else "WARN")
+            val newsApiKeyCount = settingsStore.newsApiKey()
+                ?.split(',', ';', '\n')
+                ?.map { it.trim() }
+                ?.count { it.isNotBlank() }
+                ?: 0
+            val keyConfigured = newsApiKeyCount > 0
+            updateStatus("News AI ${if (keyConfigured) "enabled with $newsApiKeyCount NewsAPI key(s) + CryptoCompare" else "enabled with CryptoCompare only; save NewsAPI key(s) for extra coverage"}.", if (keyConfigured) "INFO" else "WARN")
         }
         val recentTrades = dao.recentTradesSnapshot(settings.selfLearningLookbackTrades.coerceAtLeast(100))
         if (settings.trueSelfLearningEnabled) {
@@ -1940,8 +1945,14 @@ Crypto TradeStation remote commands:
     private fun createNewsClient(settings: BotSettings): NewsClient {
         if (!settings.useNewsAi) return NoopNewsClient()
         val providers = mutableListOf<NewsClient>()
-        val key = settingsStore.newsApiKey()
-        if (!key.isNullOrBlank()) providers += NewsApiClient(key)
+        val keys = settingsStore.newsApiKey()
+            ?.split(',', ';', '\n')
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+        keys.forEachIndexed { index, key ->
+            providers += NewsApiClient(key, providerName = "NewsAPI-${index + 1}")
+        }
         providers += CryptoCompareNewsClient()
         return if (providers.isEmpty()) NoopNewsClient() else CompositeNewsClient(providers)
     }

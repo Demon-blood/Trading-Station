@@ -14,7 +14,8 @@ import java.time.LocalDate
 
 class NewsApiClient(
     private val apiKey: String,
-    private val baseUrl: String = "https://newsapi.org"
+    private val baseUrl: String = "https://newsapi.org",
+    private val providerName: String = "NewsAPI"
 ) : NewsClient {
     private val client = OkHttpClient.Builder().build()
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
@@ -60,7 +61,7 @@ class NewsApiClient(
                 NewsArticle(
                     title = title,
                     description = article.description.orEmpty(),
-                    source = article.source?.name.orEmpty(),
+                    source = "$providerName:${article.source?.name.orEmpty()}",
                     url = article.url.orEmpty(),
                     publishedAt = article.publishedAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
                 )
