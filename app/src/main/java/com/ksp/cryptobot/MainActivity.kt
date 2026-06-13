@@ -1182,7 +1182,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.9.4 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.9.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -2776,6 +2776,17 @@ private fun BackupRestoreScreen(
         }
     }
     var restoreInput by remember { mutableStateOf("") }
+    val restoreFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            restoreInput = it.toString()
+        }
+    }
     var restoreResult by remember { mutableStateOf("") }
     var replaceExistingLocalData by remember { mutableStateOf(false) }
     val displayText = if (backupText.length > 24000) {
@@ -2892,24 +2903,27 @@ private fun BackupRestoreScreen(
         }
         item {
             GlassCard {
-                SectionTitle("Load / Restore Backup", "Paste the full backup text or enter the local file path shown by Export All Settings + Data.")
-                OutlinedTextField(
-                    value = restoreInput,
-                    onValueChange = { restoreInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 6,
-                    label = { Text("Backup text or local backup file path") }
+                SectionTitle("Load / Restore Backup", "Use Android's file picker to choose a Crypto TradeStation backup file.")
+                Text(
+                    if (restoreInput.isBlank()) "No backup file selected yet." else "Selected backup file: $restoreInput",
+                    color = Muted,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(10.dp))
                 ToggleRow("Replace existing local trade/position data before restore", replaceExistingLocalData) { replaceExistingLocalData = it }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
-                        onClick = { onRestoreFullBackup(restoreInput, replaceExistingLocalData) { restoreResult = it } },
+                        onClick = { restoreFilePicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
                         colors = ButtonDefaults.buttonColors(containerColor = Electric)
                     ) {
-                        Text("Load Backup")
+                        Text("Select Backup File")
                     }
-                    OutlinedButton(onClick = { restoreInput = backupText }) {
-                        Text("Use Export Result")
+                    OutlinedButton(
+                        enabled = restoreInput.isNotBlank(),
+                        onClick = { onRestoreFullBackup(restoreInput, replaceExistingLocalData) { restoreResult = it } }
+                    ) {
+                        Text("Restore Selected")
                     }
                 }
                 if (restoreResult.isNotBlank()) {
@@ -2924,7 +2938,7 @@ private fun BackupRestoreScreen(
                 SectionTitle("Automatic save behavior", "Normal app updates keep local data automatically as long as the package name stays the same.")
                 Text("Saved automatically: settings, local database, trade journal, learning profiles, tax rows and local bot history.", color = Muted)
                 Text("Manual path entry was removed. Use Select Folder or Use Default, then press Export All Settings + Data.", color = Muted)
-                Text("Manual restore: paste the backup text or the local file path into Load / Restore Backup.", color = Muted)
+                Text("Manual restore text/path entry was removed. Use Select Backup File, then Restore Selected.", color = Muted)
                 Text("Full backup includes credentials/tokens/PINs because this backup is meant to restore literally everything. Keep the backup file private.", color = Amber)
             }
         }
