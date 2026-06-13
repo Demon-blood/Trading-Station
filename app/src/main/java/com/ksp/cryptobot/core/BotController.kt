@@ -1166,6 +1166,10 @@ Crypto TradeStation remote commands:
         val reservedByQuoteThisScan = mutableMapOf<String, BigDecimal>()
         var submittedOrdersThisScan = 0
         val newsClient = createNewsClient(settings)
+        if (settings.useNewsAi) {
+            val keyConfigured = !settingsStore.newsApiKey().isNullOrBlank()
+            updateStatus("News AI ${if (keyConfigured) "enabled with API key" else "enabled but no NewsAPI key saved; news score will stay 0"}.", if (keyConfigured) "INFO" else "WARN")
+        }
         val recentTrades = dao.recentTradesSnapshot(settings.selfLearningLookbackTrades.coerceAtLeast(100))
         if (settings.trueSelfLearningEnabled) {
             val learningSummary = selfLearningEngine.refreshFromTradeHistory(dao, settings)
@@ -1212,7 +1216,16 @@ Crypto TradeStation remote commands:
                 updateStatus("[$symbol] Running recommendation + AI automation engines...")
                 val rec = recommendationEngine.recommend(ticker, settings, candlesByTimeframe = candlesByTimeframe)
                 dao.insertSignal(rec.toEntity())
-                val news = newsClient.latestCryptoNews(symbol)
+                val news = if (settings.useNewsAi) {
+                    runCatching { newsClient.latestCryptoNews(symbol) }
+                        .onSuccess { articles ->
+                            updateStatus("[$symbol] News check complete: articles=${articles.size}${articles.firstOrNull()?.source?.takeIf { it.isNotBlank() }?.let { ", topSource=$it" } ?: ""}.", if (articles.isEmpty()) "WARN" else "INFO")
+                        }
+                        .onFailure { error ->
+                            updateStatus("[$symbol] News check failed: ${error.message}", "WARN")
+                        }
+                        .getOrDefault(emptyList())
+                } else emptyList()
                 val baseDecision = aiDecisionEngine.decide(rec, news, recentTrades, settings)
                 val riskState = advancedRiskManager.riskState(settings)
                 val adaptiveStrategy = selfLearningEngine.selectAdaptiveStrategyMode(dao, symbol, settings.strategyMode, settings)

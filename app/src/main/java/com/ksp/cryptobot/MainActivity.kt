@@ -1182,7 +1182,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.9.6 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v3.0.0 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -3896,7 +3896,7 @@ private fun NewsScreen(settings: BotSettings, onToggleNews: (Boolean) -> Unit) {
         item {
             GlassCard {
                 ToggleRow("Use news sentiment in AI decisions", settings.useNewsAi, onToggleNews)
-                Text("When enabled, the AI layer can adjust confidence using recent market headlines.", color = Muted)
+                Text("When enabled and a NewsAPI key is saved in Settings, each scanned symbol performs a symbol-specific news search. Live Status now logs article counts per symbol.", color = Muted)
             }
         }
         items(headlines) { headline ->
@@ -4483,7 +4483,7 @@ private fun AdvancedSettingsScreen(
         autoSymbolCandidateLimit = candidateLimit.toIntOrNull()?.coerceIn(1, 1000) ?: settings.autoSymbolCandidateLimit,
         autoSymbolActiveLimit = activeLimit.toIntOrNull()?.coerceIn(1, 100) ?: settings.autoSymbolActiveLimit,
         maxNewTradesPerScan = maxNewTrades.toIntOrNull()?.coerceIn(1, 20) ?: settings.maxNewTradesPerScan,
-        maxTradesPerDay = maxTradesDay.toIntOrNull()?.coerceIn(1, 500) ?: settings.maxTradesPerDay,
+        maxTradesPerDay = maxTradesDay.toIntOrNull()?.coerceAtLeast(0) ?: settings.maxTradesPerDay,
         maxTradesPerHour = maxTradesHour.toIntOrNull()?.coerceIn(1, 100) ?: settings.maxTradesPerHour,
         maxSimultaneousLivePositions = maxLivePositions.toIntOrNull()?.coerceIn(1, 50) ?: settings.maxSimultaneousLivePositions,
         maxPositionEur = maxPosition.toBigDecimalOrNull() ?: settings.maxPositionEur,
@@ -4631,7 +4631,7 @@ private fun AdvancedSettingsScreen(
                 OutlinedTextField(value = perSymbolMaxBuyPrice, onValueChange = { perSymbolMaxBuyPrice = it }, label = { Text("Per-symbol max buy prices, e.g. BTCEUR=95000,ETHEUR=3500") }, modifier = Modifier.fillMaxWidth())
                 Text("If enabled, BUY orders are blocked when the current ask is above the configured max buy price. SELL orders are not blocked.", color = Muted)
                 OutlinedTextField(value = maxNewTrades, onValueChange = { maxNewTrades = it }, label = { Text("Max new trades per scan") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = maxTradesDay, onValueChange = { maxTradesDay = it }, label = { Text("Max trades per day") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxTradesDay, onValueChange = { maxTradesDay = it }, label = { Text("Max trades/day (0=∞)") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = maxTradesHour, onValueChange = { maxTradesHour = it }, label = { Text("Max trades per hour") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = maxLivePositions, onValueChange = { maxLivePositions = it }, label = { Text("Max simultaneous live positions") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = minReserveAmount, onValueChange = { minReserveAmount = it }, label = { Text("Minimum quote reserve amount") }, modifier = Modifier.fillMaxWidth())
@@ -4735,7 +4735,7 @@ private fun SettingsScreen(
                 SectionTitle("Secure API Credentials", "Stored locally through Android Keystore-backed encrypted storage.")
                 OutlinedTextField(value = apiKey, onValueChange = onApiKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = secretKey, onValueChange = onSecretKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} secret key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
-                OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI key optional") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI key required for non-zero news score") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 Button(onClick = onSaveKeys, modifier = Modifier.fillMaxWidth()) { Text("Save Secure Keys") }
             }
         }

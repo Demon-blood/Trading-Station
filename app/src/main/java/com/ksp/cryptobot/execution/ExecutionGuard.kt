@@ -19,7 +19,7 @@ class ExecutionGuard(private val dao: AppDao) {
         val start = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
         val end = LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
         val todaysTrades = dao.tradesBetween(start, end)
-        if (todaysTrades.size >= settings.maxTradesPerDay) {
+        if (settings.maxTradesPerDay > 0 && todaysTrades.size >= settings.maxTradesPerDay) {
             return false to "Daily trade limit reached: ${todaysTrades.size}/${settings.maxTradesPerDay}."
         }
 

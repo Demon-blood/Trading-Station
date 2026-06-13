@@ -83,7 +83,7 @@ class ProAutomationSuite(private val context: Context? = null) {
         }
         add(settings.mode == BotMode.LIVE_AUTO || settings.mode == BotMode.PAPER, "Mode is ${settings.mode}; automatic loop can run")
         add(settings.maxPositionEur >= BigDecimal("5.00"), "Max position is at least practical Kraken minimum")
-        add(settings.maxTradesPerDay > 0, "Daily trade limit configured")
+        add(settings.maxTradesPerDay >= 0, if (settings.maxTradesPerDay == 0) "Daily trade limit is unlimited" else "Daily trade limit configured")
         add(settings.symbols().isNotEmpty(), "Symbol list is not empty")
         add(settings.mode == BotMode.PAPER || settings.liveTradingAcknowledged, "Live acknowledgement present or paper mode active")
         add(!settings.manualExecutionMode, "Manual execution mode is OFF")

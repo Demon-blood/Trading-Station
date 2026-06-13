@@ -35,7 +35,7 @@ class AiDecisionEngine(
         }
         val allowed = action == SignalAction.BUY || action == SignalAction.SMALL_BUY
         val explanation = buildString {
-            append("Technical=${technicalScore}, news=${newsScore}, memory=${memoryScore}, final=${finalScore}. ")
+            append("Technical=${technicalScore}, news=${newsScore}, newsArticles=${news.size}, memory=${memoryScore}, final=${finalScore}. ")
             append(newsSentimentEngine.explain(newsScore)).append(' ')
             append(tradeMemoryEngine.explain(memoryScore)).append(' ')
             append("Base reason: ${recommendation.reason}")
