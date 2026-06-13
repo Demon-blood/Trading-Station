@@ -25,3 +25,12 @@ secrets.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# Crypto TradeStation stable debug update signing key.
+# This is intentionally committed for debug APK update compatibility only.
+!keystore/
+!keystore/cts_debug_update_key.jks
+!keystore/cts_debug_update_key.jks.b64
+!app/keystore/
+!app/keystore/cts_debug_update_key.jks
+!app/keystore/cts_debug_update_key.jks.b64

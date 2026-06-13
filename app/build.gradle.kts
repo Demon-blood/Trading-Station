@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -13,6 +14,29 @@ if (signingPropertiesFile.exists()) {
     signingPropertiesFile.inputStream().use { signingProperties.load(it) }
 }
 
+val stableDebugKeystoreFile = stableDebugKeystoreResolved
+val stableDebugKeystoreB64File = rootProject.file("keystore/cts_debug_update_key.jks.b64")
+val stableDebugKeystoreAppFile = rootProject.file("app/keystore/cts_debug_update_key.jks")
+val stableDebugKeystoreAppB64File = rootProject.file("app/keystore/cts_debug_update_key.jks.b64")
+
+fun ensureStableDebugKeystore(): File {
+    if (stableDebugKeystoreFile.exists()) return stableDebugKeystoreFile
+    if (stableDebugKeystoreAppFile.exists()) return stableDebugKeystoreAppFile
+    val sourceB64 = when {
+        stableDebugKeystoreB64File.exists() -> stableDebugKeystoreB64File
+        stableDebugKeystoreAppB64File.exists() -> stableDebugKeystoreAppB64File
+        else -> null
+    }
+    if (sourceB64 != null) {
+        stableDebugKeystoreFile.parentFile.mkdirs()
+        stableDebugKeystoreFile.writeBytes(Base64.getDecoder().decode(sourceB64.readText().trim()))
+        return stableDebugKeystoreFile
+    }
+    throw GradleException("Stable debug keystore missing. Expected keystore/cts_debug_update_key.jks or keystore/cts_debug_update_key.jks.b64. Use the full project ZIP or commit the keystore folder.")
+}
+
+val stableDebugKeystoreResolved = ensureStableDebugKeystore()
+
 android {
     namespace = "com.ksp.cryptobot"
     compileSdk = 35
@@ -21,13 +45,13 @@ android {
         applicationId = "com.ksp.cryptobot"
         minSdk = 26
         targetSdk = 35
-        versionCode = 77
-        versionName = "2.8.9"
+        versionCode = 78
+        versionName = "2.9.0"
     }
 
     signingConfigs {
         create("stableDebug") {
-            storeFile = rootProject.file("keystore/cts_debug_update_key.jks")
+            storeFile = stableDebugKeystoreResolved
             storePassword = "ctsdebug"
             keyAlias = "ctsdebug"
             keyPassword = "ctsdebug"

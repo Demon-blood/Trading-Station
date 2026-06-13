@@ -1,15 +1,16 @@
 # Updating without uninstalling
 
 Android only allows an APK to update an existing app when:
-1. The package name/applicationId is identical.
-2. The new APK versionCode is higher.
-3. The signing certificate is identical.
+1. applicationId is identical.
+2. versionCode is higher.
+3. signing certificate is identical.
 
-Older GitHub Actions debug builds may have used a temporary debug signing key, so Android sees the new APK as a different signer and refuses to update. That is why uninstall was required.
-
-This build adds a stable project-local debug signing key:
+This project now uses a stable debug update key:
 - keystore/cts_debug_update_key.jks
-- alias: ctsdebug
+- fallback: keystore/cts_debug_update_key.jks.b64
+- fallback: app/keystore/cts_debug_update_key.jks.b64
 
-You may need one final uninstall to switch from the old temporary signer to this stable signer.
-After that, future builds from this project should install as updates.
+GitHub Actions will recreate the keystore from the .b64 fallback if the .jks file is missing.
+
+You may need one final uninstall if your currently installed app was signed with an older temporary debug key.
+After installing this stable-signed build once, future builds signed with the same key should update normally.
