@@ -14,7 +14,7 @@ if (signingPropertiesFile.exists()) {
     signingPropertiesFile.inputStream().use { signingProperties.load(it) }
 }
 
-val stableDebugKeystoreFile = stableDebugKeystoreResolved
+val stableDebugKeystoreFile = rootProject.file("keystore/cts_debug_update_key.jks")
 val stableDebugKeystoreB64File = rootProject.file("keystore/cts_debug_update_key.jks.b64")
 val stableDebugKeystoreAppFile = rootProject.file("app/keystore/cts_debug_update_key.jks")
 val stableDebugKeystoreAppB64File = rootProject.file("app/keystore/cts_debug_update_key.jks.b64")
@@ -45,8 +45,8 @@ android {
         applicationId = "com.ksp.cryptobot"
         minSdk = 26
         targetSdk = 35
-        versionCode = 78
-        versionName = "2.9.0"
+        versionCode = 79
+        versionName = "2.9.1"
     }
 
     signingConfigs {
