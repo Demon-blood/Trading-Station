@@ -702,7 +702,108 @@ class BotController(
         return count
     }
 
-        suspend fun exportFullLocalBackupToFile(
+
+    private suspend fun restoreSignalsFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "id|").forEach { p ->
+            if (p.size >= 7) runCatching {
+                dao.restoreSignal(SignalEntity(p[0].toLongOrNull() ?: 0L, p[2], p[3], p[4].toIntOrNull() ?: 0, p[5], p.drop(6).joinToString("|"), p[1].toLongOrNull() ?: System.currentTimeMillis()))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreAiDecisionsFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "id|").forEach { p ->
+            if (p.size >= 11) runCatching {
+                dao.restoreAiDecision(AiDecisionEntity(p[0].toLongOrNull() ?: 0L, p[2], p[3], p[4].toIntOrNull() ?: 0, p[5].toIntOrNull() ?: 0, p[6].toIntOrNull() ?: 0, p[7].toIntOrNull() ?: 0, p[8].toIntOrNull() ?: 0, p[9].toBooleanStrictOrNull() ?: false, p.drop(10).joinToString("|"), p[1].toLongOrNull() ?: System.currentTimeMillis()))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreTaxLotsFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "id|").forEach { p ->
+            if (p.size >= 7) runCatching {
+                dao.restoreTaxLot(TaxLotEntity(p[0].toLongOrNull() ?: 0L, p[1], p[2], p[3], p[4].toLongOrNull() ?: System.currentTimeMillis(), p[5].toLongOrNull(), p[6]))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreTaxRowsFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "id|").forEach { p ->
+            if (p.size >= 9) runCatching {
+                dao.restoreTaxReportRow(TaxReportEntity(p[0].toLongOrNull() ?: 0L, p[1].toLongOrNull() ?: System.currentTimeMillis(), p[2], p[3], p[4], p[5], p[6], p[7], p.drop(8).joinToString("|")))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreLearnedSymbolProfilesFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "symbol|").forEach { p ->
+            if (p.size >= 17) runCatching {
+                dao.upsertLearnedSymbolProfile(LearnedSymbolProfileEntity(p[0], p[1].toLongOrNull() ?: System.currentTimeMillis(), p[2].toIntOrNull() ?: 0, p[3].toIntOrNull() ?: 0, p[4].toIntOrNull() ?: 0, p[5], p[6], p[7], p[8], p[9].toIntOrNull() ?: 0, p[10].toIntOrNull() ?: 0, p[11], p[12], p[13], p[14].toLongOrNull() ?: 0L, p[15], p.drop(16).joinToString("|")))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreLearnedStrategyProfilesFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "strategyKey|").forEach { p ->
+            if (p.size >= 10) runCatching {
+                dao.upsertLearnedStrategyProfile(LearnedStrategyProfileEntity(p[0], p[1].toLongOrNull() ?: System.currentTimeMillis(), p[2].toIntOrNull() ?: 0, p[3].toIntOrNull() ?: 0, p[4].toIntOrNull() ?: 0, p[5], p[6], p[7].toIntOrNull() ?: 0, p[8], p.drop(9).joinToString("|")))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreLearnedHoldProfilesFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "symbol|").forEach { p ->
+            if (p.size >= 14) runCatching {
+                dao.upsertLearnedHoldProfile(LearnedHoldProfileEntity(p[0], p[1].toLongOrNull() ?: System.currentTimeMillis(), p[2].toIntOrNull() ?: 0, p[3].toIntOrNull() ?: 0, p[4].toIntOrNull() ?: 0, p[5], p[6], p[7], p[8], p[9].toIntOrNull() ?: 0, p[10], p[11].toBooleanStrictOrNull() ?: false, p[12].toBooleanStrictOrNull() ?: false, p.drop(13).joinToString("|")))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreLearningFeatureSnapshotsFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "id|").forEach { p ->
+            if (p.size >= 19) runCatching {
+                dao.restoreLearningFeatureSnapshot(LearningFeatureSnapshotEntity(p[0].toLongOrNull() ?: 0L, p[1].toLongOrNull() ?: System.currentTimeMillis(), p[2], p[3], p[4], p[5], p[6].toIntOrNull() ?: 0, p[7].toIntOrNull() ?: 0, p[8].toIntOrNull() ?: 0, p[9].toIntOrNull() ?: 0, p[10], p[11], p[12], p[13].toBooleanStrictOrNull() ?: false, p[14].toBooleanStrictOrNull() ?: false, p[15], p[16], p[17], p.drop(18).joinToString("|")))
+                count++
+            }
+        }
+        return count
+    }
+
+    private suspend fun restoreSelfLearningAuditFromSection(lines: List<String>): Int {
+        var count = 0
+        parseBackupRows(lines, "id|").forEach { p ->
+            if (p.size >= 5) runCatching {
+                dao.restoreSelfLearningAudit(SelfLearningAuditEntity(p[0].toLongOrNull() ?: 0L, p[1].toLongOrNull() ?: System.currentTimeMillis(), p[2], p[3], p.drop(4).joinToString("|")))
+                count++
+            }
+        }
+        return count
+    }
+
+
+    suspend fun exportFullLocalBackupToFile(
         settings: BotSettings = settingsStore.load(),
         customDirectoryPath: String = settingsStore.backupDirectoryPath()
     ): String {

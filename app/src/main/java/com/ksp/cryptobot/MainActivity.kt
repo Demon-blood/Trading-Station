@@ -1181,7 +1181,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.9.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.9.2 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -3815,6 +3815,10 @@ private fun LiveBalanceRow(
             Text("€${asset.eurValue.setScale(2, java.math.RoundingMode.DOWN)}", color = Mint, fontWeight = FontWeight.Bold)
         }
         LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(8.dp), color = Mint, trackColor = Stroke)
+        if (asset.eurValue > BigDecimal.ZERO && asset.eurValue < BigDecimal("5.00")) {
+            Spacer(Modifier.height(8.dp))
+            Text("Dust balance: below typical exchange minimum order value, may be impossible to sell/convert automatically.", color = Amber)
+        }
         val actionText = when {
             asset.asset == "EUR" && asset.free >= BigDecimal("5.00") -> "Available for automatic BUY orders."
             asset.asset == "EUR" -> "Too low for BUY orders. Deposit/convert to free EUR if you want buys."
@@ -3822,6 +3826,27 @@ private fun LiveBalanceRow(
             else -> "Not currently free for bot trading."
         }
         Text(actionText, color = Muted, style = MaterialTheme.typography.bodySmall)
+        position?.let { pos ->
+            Spacer(Modifier.height(10.dp))
+            Divider(color = Stroke)
+            Spacer(Modifier.height(8.dp))
+            val pnlColor = if (pos.unrealizedPnlEur >= BigDecimal.ZERO) Mint else Danger
+            val trailingArmed = settingsTrailingArmedPlaceholder(pos)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Position guards", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                StatusPill(if (pos.managed) "MANAGED" else "WATCH", if (pos.managed) Mint else Amber)
+            }
+            Spacer(Modifier.height(6.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { StatusPill(if (pos.takeProfitPrice > BigDecimal.ZERO) "TP ARMED" else "TP OFF", if (pos.takeProfitPrice > BigDecimal.ZERO) Mint else Muted) }
+                item { StatusPill(if (pos.stopPrice > BigDecimal.ZERO) "SL ARMED" else "SL OFF", if (pos.stopPrice > BigDecimal.ZERO) Danger else Muted) }
+                item { StatusPill(if (trailingArmed) "TRAILING ARMED" else "TRAILING WAIT", if (trailingArmed) Amber else Muted) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("entry=${pos.entryPrice.setScale(4, java.math.RoundingMode.DOWN)} • now=${pos.currentPrice.setScale(4, java.math.RoundingMode.DOWN)} • high=${pos.highestPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
+            Text("TP=${pos.takeProfitPrice.setScale(4, java.math.RoundingMode.DOWN)} • SL=${pos.stopPrice.setScale(4, java.math.RoundingMode.DOWN)} • trail=${pos.trailingStopPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
+            Text("P/L≈€${pos.unrealizedPnlEur.setScale(2, java.math.RoundingMode.HALF_UP)} • ${pos.unrealizedPnlPercent.setScale(2, java.math.RoundingMode.HALF_UP)}% • ${pos.reason}", color = pnlColor)
+        }
     }
 }
 
@@ -4820,31 +4845,6 @@ private fun AllocationRow(symbol: String, value: String, progress: Float) {
             Text(value, color = Mint, fontWeight = FontWeight.Bold)
         }
         LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(8.dp), color = Mint, trackColor = Stroke)
-        if (asset.eurValue > BigDecimal.ZERO && asset.eurValue < BigDecimal("5.00")) {
-            Spacer(Modifier.height(8.dp))
-            Text("Dust balance: below typical exchange minimum order value, may be impossible to sell/convert automatically.", color = Amber)
-        }
-        position?.let { pos ->
-            Spacer(Modifier.height(10.dp))
-            Divider(color = Stroke)
-            Spacer(Modifier.height(8.dp))
-            val pnlColor = if (pos.unrealizedPnlEur >= BigDecimal.ZERO) Mint else Danger
-            val trailingArmed = settingsTrailingArmedPlaceholder(pos)
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Position guards", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                StatusPill(if (pos.managed) "MANAGED" else "WATCH", if (pos.managed) Mint else Amber)
-            }
-            Spacer(Modifier.height(6.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { StatusPill(if (pos.takeProfitPrice > BigDecimal.ZERO) "TP ARMED" else "TP OFF", if (pos.takeProfitPrice > BigDecimal.ZERO) Mint else Muted) }
-                item { StatusPill(if (pos.stopPrice > BigDecimal.ZERO) "SL ARMED" else "SL OFF", if (pos.stopPrice > BigDecimal.ZERO) Danger else Muted) }
-                item { StatusPill(if (trailingArmed) "TRAILING ARMED" else "TRAILING WAIT", if (trailingArmed) Amber else Muted) }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text("entry=${pos.entryPrice.setScale(4, java.math.RoundingMode.DOWN)} • now=${pos.currentPrice.setScale(4, java.math.RoundingMode.DOWN)} • high=${pos.highestPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
-            Text("TP=${pos.takeProfitPrice.setScale(4, java.math.RoundingMode.DOWN)} • SL=${pos.stopPrice.setScale(4, java.math.RoundingMode.DOWN)} • trail=${pos.trailingStopPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
-            Text("P/L≈€${pos.unrealizedPnlEur.setScale(2, java.math.RoundingMode.HALF_UP)} • ${pos.unrealizedPnlPercent.setScale(2, java.math.RoundingMode.HALF_UP)}% • ${pos.reason}", color = pnlColor)
-        }
     }
 }
 

@@ -45,8 +45,8 @@ android {
         applicationId = "com.ksp.cryptobot"
         minSdk = 26
         targetSdk = 35
-        versionCode = 79
-        versionName = "2.9.1"
+        versionCode = 80
+        versionName = "2.9.2"
     }
 
     signingConfigs {
