@@ -278,6 +278,7 @@ private enum class AppTab(val label: String) {
     BOT("Bot"),
     AI("AI"),
     AI_SIGNALS("AI Signals"),
+    NEWS("News Dashboard"),
     CHART("Chart"),
     CHART_MAIN("Live Chart"),
     TRADE_OVERLAY("Trade Overlay"),
@@ -301,7 +302,6 @@ private enum class AppTab(val label: String) {
     AUTO_TUNER("Auto-Tuner"),
     RELEASE_SAFETY("Release Safety"),
     PORTFOLIO("Portfolio"),
-    NEWS("News Intel"),
     TAX("Belgium Tax"),
     RISK("Risk Center"),
     HISTORY("History"),
@@ -590,7 +590,8 @@ private fun AdvancedBotApp(
                             statusStore.write("Manual execution pass complete from dashboard. Symbols=${scanSymbols.size}, Decisions=${result.size}")
                             status = "Execution pass complete"
                         }
-                    }
+                    },
+                    onOpenNews = { currentTab = AppTab.NEWS }
                 )
                 AppTab.STATUS -> LiveStatusScreen(
                     status = status,
@@ -1217,7 +1218,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v3.1.0 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v3.1.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1260,7 +1261,8 @@ private fun DashboardScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onScan: () -> Unit,
-    onExecute: () -> Unit
+    onExecute: () -> Unit,
+    onOpenNews: () -> Unit
 ) {
     val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
     val dashboardDecisions = decisions
@@ -1303,6 +1305,7 @@ private fun DashboardScreen(
                         item { OutlinedButton(onClick = onStop) { Text("Stop Bot") } }
                         item { Button(onClick = onScan) { Text("Scan Once") } }
                         item { OutlinedButton(onClick = onExecute) { Text("Execute Once") } }
+                        item { OutlinedButton(onClick = onOpenNews) { Text("News Dashboard") } }
                     }
                 }
             }
@@ -1937,6 +1940,7 @@ private fun SettingsHubScreen(
             }
         }
         item { HubActionCard("Basic Settings", "Provider, Kraken/API keys, symbols and main risk fields.", "Open", { onOpen(AppTab.BASIC_SETTINGS) }) }
+        item { HubActionCard("News Dashboard", "Cached symbol articles, NewsAPI/CryptoCompare provider status and per-symbol news scans.", "Open", { onOpen(AppTab.NEWS) }) }
         item {
             GlassCard {
                 val failures = systemTestLines.count { it.startsWith("FAIL") }
@@ -3938,7 +3942,7 @@ private fun NewsScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("News Intelligence", "Cached per-symbol articles from NewsAPI + CryptoCompare, used by AI signal scoring.") }
+        item { SectionTitle("News Dashboard", "Cached per-symbol articles from NewsAPI + CryptoCompare, used by AI signal scoring.") }
         item {
             GlassCard {
                 ToggleRow("Use news sentiment in AI decisions", settings.useNewsAi, onToggleNews)
