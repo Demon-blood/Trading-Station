@@ -7,7 +7,9 @@ import java.math.BigDecimal
 class RecommendationEngine(
     private val riskEngine: RiskEngine = RiskEngine(),
     private val taxEngine: BelgiumTaxEngine = BelgiumTaxEngine(),
-    private val scalpingStrategy: MultiTimeframeScalpingStrategy = MultiTimeframeScalpingStrategy()
+    private val scalpingStrategy: MultiTimeframeScalpingStrategy = MultiTimeframeScalpingStrategy(),
+    private val regimeDetector: MarketRegimeDetector = MarketRegimeDetector(),
+    private val multiStrategyEngine: MultiStrategyEngine = MultiStrategyEngine()
 ) {
     fun recommend(
         ticker: MarketTicker,
@@ -31,13 +33,14 @@ class RecommendationEngine(
         }
 
         if (settings.recoveredScalpingStrategyEnabled && candlesByTimeframe.isNotEmpty()) {
-            val strategy = scalpingStrategy.evaluate(ticker.symbol, candlesByTimeframe, settings)
+            val regime = regimeDetector.detect(ticker.symbol, candlesByTimeframe)
+            val selected = multiStrategyEngine.chooseBest(ticker, candlesByTimeframe, settings, regime)
             val liquidityBoost = if (ticker.volume24h > BigDecimal("10000000")) 5 else 0
             val spreadPenalty = riskEngine.spreadPercent(ticker).toDouble().let { if (it > 0.20) 5 else 0 }
-            val finalScore = (strategy.strategyScore + liquidityBoost - spreadPenalty).coerceIn(0, 100)
+            val finalScore = (selected.score + liquidityBoost - spreadPenalty).coerceIn(0, 100)
             val action = when {
                 risk > BigDecimal("15") -> SignalAction.WAIT
-                strategy.trendAgreement < settings.minTrendAgreement -> SignalAction.WAIT
+                selected.action == SignalAction.SELL -> SignalAction.SELL
                 finalScore >= settings.minStrategyScoreToBuy + 10 -> SignalAction.BUY
                 finalScore >= settings.minStrategyScoreToBuy -> SignalAction.SMALL_BUY
                 finalScore >= 58 -> SignalAction.WATCH
@@ -50,7 +53,7 @@ class RecommendationEngine(
                 score = finalScore,
                 riskPercent = risk,
                 taxWarning = taxEstimate.warning,
-                reason = "${strategy.explanation} Liquidity boost=$liquidityBoost, spread penalty=$spreadPenalty, 24h risk=$risk%."
+                reason = "Selected ${selected.mode.name}: ${selected.reason} Liquidity boost=$liquidityBoost, spread penalty=$spreadPenalty, 24h risk=$risk%."
             )
         }
 

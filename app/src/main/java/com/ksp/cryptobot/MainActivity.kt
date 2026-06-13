@@ -1218,7 +1218,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v3.1.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v3.2.0 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1627,10 +1627,10 @@ private fun StrategyScreen(settings: BotSettings, onToggleStrategy: (Boolean) ->
         }
         item {
             GlassCard {
-                SectionTitle("Strategy Library", "Implemented now plus strong future candidates.")
-                Text("Currently implemented/selectable: SCALPING, TREND, BREAKOUT, REVERSAL, NEWS_MOMENTUM, plus AUTO/adaptive selection.", color = Muted)
+                SectionTitle("Strategy Library", "Implemented strategy modules.")
+                Text("Implemented/selectable: SCALPING, TREND, BREAKOUT, REVERSAL, NEWS_MOMENTUM, MEAN_REVERSION_RSI_BOLLINGER, VWAP_PULLBACK, DONCHIAN_BREAKOUT, RANGE_GRID, MARKET_MAKING_IMBALANCE, FUNDING_NEWS_RISK_OFF, PAIRS_RELATIVE_STRENGTH, DCA_CRASH_PROTECTION, MOMENTUM_SPIKE_CONTINUATION, VOLUME_ANOMALY_WHALE_MOVE, plus AUTO/adaptive selection.", color = Muted)
                 Divider(color = Stroke)
-                Text("Good next additions:", fontWeight = FontWeight.Bold)
+                Text("Additional implemented modules:", fontWeight = FontWeight.Bold)
                 Text("• Mean reversion / RSI-Bollinger squeeze", color = Muted)
                 Text("• VWAP pullback / intraday fair-value strategy", color = Muted)
                 Text("• Donchian breakout / volatility expansion", color = Muted)
@@ -2742,7 +2742,23 @@ private fun StrategySandboxScreen(
     var reports by remember { mutableStateOf<List<BacktestReport>>(emptyList()) }
     var running by remember { mutableStateOf(false) }
     val symbol = settings.symbols().firstOrNull() ?: "BTCEUR"
-    val strategies = listOf(StrategyMode.SCALPING, StrategyMode.TREND, StrategyMode.BREAKOUT, StrategyMode.REVERSAL, StrategyMode.NEWS_MOMENTUM)
+    val strategies = listOf(
+        StrategyMode.SCALPING,
+        StrategyMode.TREND,
+        StrategyMode.BREAKOUT,
+        StrategyMode.REVERSAL,
+        StrategyMode.NEWS_MOMENTUM,
+        StrategyMode.MEAN_REVERSION_RSI_BOLLINGER,
+        StrategyMode.VWAP_PULLBACK,
+        StrategyMode.DONCHIAN_BREAKOUT,
+        StrategyMode.RANGE_GRID,
+        StrategyMode.MARKET_MAKING_IMBALANCE,
+        StrategyMode.FUNDING_NEWS_RISK_OFF,
+        StrategyMode.PAIRS_RELATIVE_STRENGTH,
+        StrategyMode.DCA_CRASH_PROTECTION,
+        StrategyMode.MOMENTUM_SPIKE_CONTINUATION,
+        StrategyMode.VOLUME_ANOMALY_WHALE_MOVE
+    )
 
     fun runSandbox() {
         running = true
@@ -3221,7 +3237,23 @@ private fun StrategyAutoTunerScreen(
     val symbols = rawSymbols.take(maxAutoTuneSymbols)
     val symbolsCapped = rawSymbols.size > symbols.size
     val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
-    val strategies = listOf(StrategyMode.SCALPING, StrategyMode.TREND, StrategyMode.BREAKOUT, StrategyMode.REVERSAL, StrategyMode.NEWS_MOMENTUM)
+    val strategies = listOf(
+        StrategyMode.SCALPING,
+        StrategyMode.TREND,
+        StrategyMode.BREAKOUT,
+        StrategyMode.REVERSAL,
+        StrategyMode.NEWS_MOMENTUM,
+        StrategyMode.MEAN_REVERSION_RSI_BOLLINGER,
+        StrategyMode.VWAP_PULLBACK,
+        StrategyMode.DONCHIAN_BREAKOUT,
+        StrategyMode.RANGE_GRID,
+        StrategyMode.MARKET_MAKING_IMBALANCE,
+        StrategyMode.FUNDING_NEWS_RISK_OFF,
+        StrategyMode.PAIRS_RELATIVE_STRENGTH,
+        StrategyMode.DCA_CRASH_PROTECTION,
+        StrategyMode.MOMENTUM_SPIKE_CONTINUATION,
+        StrategyMode.VOLUME_ANOMALY_WHALE_MOVE
+    )
 
     fun sortedReports(input: List<BacktestReport>): List<BacktestReport> =
         input.sortedWith(

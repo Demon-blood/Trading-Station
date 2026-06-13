@@ -73,6 +73,7 @@ class AutonomousIntelligencePack(private val context: Context? = null) {
             StrategyMode.REVERSAL -> "Optimizer selected REVERSAL."
             StrategyMode.NEWS_MOMENTUM -> "Optimizer selected NEWS_MOMENTUM."
             StrategyMode.AUTO -> "Optimizer left strategy in AUTO."
+            else -> "Optimizer selected ${selectedStrategy.name}."
         }
         return AutonomousSymbolAssessment(symbol, allowed, selectedStrategy, winRate, profitFactor, reason, hint)
     }

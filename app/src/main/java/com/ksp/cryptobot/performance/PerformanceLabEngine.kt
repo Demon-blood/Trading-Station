@@ -24,7 +24,17 @@ class PerformanceLabEngine {
             StrategyMode.TREND,
             StrategyMode.BREAKOUT,
             StrategyMode.REVERSAL,
-            StrategyMode.NEWS_MOMENTUM
+            StrategyMode.NEWS_MOMENTUM,
+            StrategyMode.MEAN_REVERSION_RSI_BOLLINGER,
+            StrategyMode.VWAP_PULLBACK,
+            StrategyMode.DONCHIAN_BREAKOUT,
+            StrategyMode.RANGE_GRID,
+            StrategyMode.MARKET_MAKING_IMBALANCE,
+            StrategyMode.FUNDING_NEWS_RISK_OFF,
+            StrategyMode.PAIRS_RELATIVE_STRENGTH,
+            StrategyMode.DCA_CRASH_PROTECTION,
+            StrategyMode.MOMENTUM_SPIKE_CONTINUATION,
+            StrategyMode.VOLUME_ANOMALY_WHALE_MOVE
         )
 
         val candidates = symbols.flatMap { symbol ->
