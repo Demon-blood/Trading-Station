@@ -21,11 +21,17 @@ android {
         applicationId = "com.ksp.cryptobot"
         minSdk = 26
         targetSdk = 35
-        versionCode = 64
-        versionName = "2.7.6"
+        versionCode = 77
+        versionName = "2.8.9"
     }
 
     signingConfigs {
+        create("stableDebug") {
+            storeFile = rootProject.file("keystore/cts_debug_update_key.jks")
+            storePassword = "ctsdebug"
+            keyAlias = "ctsdebug"
+            keyPassword = "ctsdebug"
+        }
         create("release") {
             if (signingPropertiesFile.exists()) {
                 storeFile = file(signingProperties.getProperty("storeFile"))
@@ -47,7 +53,10 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug { isDebuggable = true }
+        debug {
+            signingConfig = signingConfigs.getByName("stableDebug")
+            isDebuggable = true
+        }
     }
 
     compileOptions {

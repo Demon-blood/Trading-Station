@@ -11,15 +11,20 @@ interface AppDao {
     @Insert suspend fun insertTrade(trade: TradeEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreTrade(trade: TradeEntity)
     @Insert suspend fun insertSignal(signal: SignalEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreSignal(signal: SignalEntity)
     @Insert suspend fun insertAiDecision(decision: AiDecisionEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreAiDecision(decision: AiDecisionEntity)
     @Insert suspend fun insertTaxLot(lot: TaxLotEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreTaxLot(lot: TaxLotEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPosition(position: PositionEntity)
     @Insert suspend fun insertTaxReportRow(row: TaxReportEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreTaxReportRow(row: TaxReportEntity)
     @Insert suspend fun insertLearningFeatureSnapshot(snapshot: LearningFeatureSnapshotEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreLearningFeatureSnapshot(snapshot: LearningFeatureSnapshotEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLearnedSymbolProfile(profile: LearnedSymbolProfileEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLearnedStrategyProfile(profile: LearnedStrategyProfileEntity)
     @Insert suspend fun insertSelfLearningAudit(row: SelfLearningAuditEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun restoreSelfLearningAudit(row: SelfLearningAuditEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertLearnedHoldProfile(profile: LearnedHoldProfileEntity)
 
     @Query("SELECT * FROM trades ORDER BY timestampEpochMs DESC LIMIT 100")
@@ -61,14 +66,48 @@ interface AppDao {
     @Query("SELECT * FROM trades ORDER BY timestampEpochMs DESC")
     suspend fun allTradesSnapshot(): List<TradeEntity>
 
+    @Query("SELECT * FROM signals ORDER BY timestampEpochMs DESC")
+    suspend fun allSignalsSnapshot(): List<SignalEntity>
+
+    @Query("SELECT * FROM ai_decisions ORDER BY timestampEpochMs DESC")
+    suspend fun allAiDecisionsSnapshot(): List<AiDecisionEntity>
+
+    @Query("SELECT * FROM tax_lots ORDER BY openedAtEpochMs DESC")
+    suspend fun allTaxLotsSnapshot(): List<TaxLotEntity>
+
+
     @Query("DELETE FROM trades")
     suspend fun clearTradesForRestore()
+
+    @Query("DELETE FROM signals")
+    suspend fun clearSignalsForRestore()
+
+    @Query("DELETE FROM ai_decisions")
+    suspend fun clearAiDecisionsForRestore()
+
+    @Query("DELETE FROM tax_lots")
+    suspend fun clearTaxLotsForRestore()
 
     @Query("DELETE FROM positions")
     suspend fun clearPositionsForRestore()
 
     @Query("DELETE FROM tax_report_rows")
     suspend fun clearTaxReportsForRestore()
+
+    @Query("DELETE FROM learning_feature_snapshots")
+    suspend fun clearLearningFeatureSnapshotsForRestore()
+
+    @Query("DELETE FROM learned_symbol_profiles")
+    suspend fun clearLearnedSymbolProfilesForRestore()
+
+    @Query("DELETE FROM learned_strategy_profiles")
+    suspend fun clearLearnedStrategyProfilesForRestore()
+
+    @Query("DELETE FROM learned_hold_profiles")
+    suspend fun clearLearnedHoldProfilesForRestore()
+
+    @Query("DELETE FROM self_learning_audit")
+    suspend fun clearSelfLearningAuditForRestore()
 
     @Query("SELECT * FROM learned_symbol_profiles WHERE symbol = :symbol LIMIT 1")
     suspend fun learnedSymbolProfile(symbol: String): LearnedSymbolProfileEntity?

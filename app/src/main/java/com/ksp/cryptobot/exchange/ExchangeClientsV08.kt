@@ -468,8 +468,44 @@ class KrakenSpotClient(
             val result = root.getJSONObject("result")
             val txidArray = result.optJSONArray("txid")
             val txid = if (txidArray != null && txidArray.length() > 0) txidArray.getString(0) else request.clientOrderId
-            OrderResult(txid, rule.canonicalSymbol, request.side, BigDecimal.ZERO, request.limitPrice ?: BigDecimal.ZERO, BigDecimal.ZERO, false)
+
+            // Kraken AddOrder usually only returns txid/description, not the actual fill.
+            // QueryOrders gives vol_exec, cost, price and fee so alerts/history do not show 0 values.
+            val queried = runCatching { queryOrderFill(txid, rule, request) }.getOrNull()
+            queried ?: OrderResult(
+                exchangeOrderId = txid,
+                symbol = rule.canonicalSymbol,
+                side = request.side,
+                executedQuantity = BigDecimal.ZERO,
+                averagePrice = request.limitPrice ?: BigDecimal.ZERO,
+                fee = BigDecimal.ZERO,
+                paper = false
+            )
         }
+    }
+
+    private fun queryOrderFill(txid: String, rule: KrakenPairRule, request: OrderRequest): OrderResult {
+        val root = privateJson("/0/private/QueryOrders", mapOf("txid" to txid, "trades" to "true"))
+        val result = root.getJSONObject("result")
+        val order = result.optJSONObject(txid) ?: result.keys().asSequence().asIterable().firstOrNull()?.let { result.optJSONObject(it) }
+        val executed = order?.optString("vol_exec", "0")?.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val cost = order?.optString("cost", "0")?.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val priceFromOrder = order?.optString("price", "0")?.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val fee = order?.optString("fee", "0")?.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val avg = when {
+            priceFromOrder > BigDecimal.ZERO -> priceFromOrder
+            executed > BigDecimal.ZERO && cost > BigDecimal.ZERO -> cost.divide(executed, rule.priceDecimals.coerceAtLeast(8), RoundingMode.HALF_UP)
+            else -> request.limitPrice ?: BigDecimal.ZERO
+        }
+        return OrderResult(
+            exchangeOrderId = txid,
+            symbol = rule.canonicalSymbol,
+            side = request.side,
+            executedQuantity = executed,
+            averagePrice = avg,
+            fee = fee,
+            paper = false
+        )
     }
 
     private fun privateJson(path: String, parameters: Map<String, String>): org.json.JSONObject {

@@ -467,6 +467,40 @@ class AppSettingsStore(context: Context) {
 
     fun discordChannelId(): String? = secure.readEncryptedString("discord_channel_id")?.takeIf { it.isNotBlank() }
 
+    fun secureBackupMap(): Map<String, String> {
+        val out = linkedMapOf<String, String>()
+        ExchangeProvider.values().forEach { provider ->
+            exchangeApiKey(provider)?.let { out["${provider.name.lowercase()}_api_key"] = it }
+            exchangeSecretKey(provider)?.let { out["${provider.name.lowercase()}_secret_key"] = it }
+        }
+        newsApiKey()?.let { out["news_api_key"] = it }
+        telegramBotToken()?.let { out["telegram_bot_token"] = it }
+        telegramChatId()?.let { out["telegram_chat_id"] = it }
+        discordWebhookUrl()?.let { out["discord_webhook_url"] = it }
+        remoteCommandPin()?.let { out["remote_command_pin"] = it }
+        discordBotToken()?.let { out["discord_bot_token"] = it }
+        discordChannelId()?.let { out["discord_channel_id"] = it }
+        return out
+    }
+
+    fun restoreSecureBackupMap(values: Map<String, String>) {
+        ExchangeProvider.values().forEach { provider ->
+            val api = values["${provider.name.lowercase()}_api_key"].orEmpty()
+            val secret = values["${provider.name.lowercase()}_secret_key"].orEmpty()
+            if (api.isNotBlank() || secret.isNotBlank()) saveExchangeKeys(provider, api, secret)
+        }
+        values["news_api_key"]?.let { saveNewsApiKey(it) }
+        if (values.containsKey("telegram_bot_token") || values.containsKey("telegram_chat_id")) {
+            saveTelegramConfig(values["telegram_bot_token"].orEmpty(), values["telegram_chat_id"].orEmpty())
+        }
+        values["discord_webhook_url"]?.let { saveDiscordWebhook(it) }
+        values["remote_command_pin"]?.let { saveRemoteCommandPin(it) }
+        if (values.containsKey("discord_bot_token") || values.containsKey("discord_channel_id")) {
+            saveDiscordBotCommandConfig(values["discord_bot_token"].orEmpty(), values["discord_channel_id"].orEmpty())
+        }
+    }
+
+
     fun telegramCommandOffset(): Long = prefs.getLong("telegram_command_offset", 0L)
     fun saveTelegramCommandOffset(offset: Long) {
         prefs.edit().putLong("telegram_command_offset", offset).apply()

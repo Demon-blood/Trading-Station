@@ -1,6 +1,8 @@
 package com.ksp.cryptobot.core
 
 import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
 import com.ksp.cryptobot.data.*
 import com.ksp.cryptobot.automation.AdvancedAutomationEngine
 import com.ksp.cryptobot.exchange.BinanceReadOnlyClient
@@ -105,6 +107,36 @@ class BotController(
                 remoteAlertClient.sendDiscord(settingsStore.discordWebhookUrl().orEmpty(), text)
             }.onFailure { error: Throwable -> statusStore.write("Discord alert failed: ${error.message}", "ERROR") }
         }
+    }
+
+
+    private fun isCashLikeBaseAsset(asset: String): Boolean {
+        val normalized = asset.uppercase()
+            .removePrefix("X")
+            .removePrefix("Z")
+            .substringBefore(".")
+        return normalized in setOf(
+            "EUR", "USD", "GBP", "CHF", "AUD", "CAD", "JPY",
+            "EURC", "EURT", "EURI", "ZEUR",
+            "USDC", "USDT", "USDG", "USDS", "USDE", "ZUSD",
+            "DAI", "PYUSD", "TUSD", "BUSD", "GUSD"
+        )
+    }
+
+    private fun isCashLikeTradingPairBase(symbol: String, baseAsset: String? = null): Boolean {
+        val base = baseAsset?.takeIf { it.isNotBlank() } ?: baseAssetFromSymbol(symbol)
+        return isCashLikeBaseAsset(base)
+    }
+
+    private fun filterCashLikeBaseSymbols(symbols: List<String>, reason: String): List<String> {
+        val kept = symbols.filterNot { symbol -> isCashLikeTradingPairBase(symbol) }
+        val blocked = symbols.map { it.uppercase().replace("/", "").replace("-", "") }
+            .filter { symbol -> isCashLikeTradingPairBase(symbol) }
+            .distinct()
+        if (blocked.isNotEmpty()) {
+            updateStatus("Currency/stable base filter blocked ${blocked.joinToString(",")} from $reason. These are cash/stablecoin symbols, not trading targets.", "WARN")
+        }
+        return kept
     }
 
     private fun liveSafetyBlockReason(settings: BotSettings): String? {
@@ -254,22 +286,38 @@ class BotController(
     }
 
 
+
+    private fun backupClean(value: String?): String = value.orEmpty()
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .replace("|", "/")
+
+    private fun parseBackupRows(lines: List<String>, expectedHeaderPrefix: String): List<List<String>> {
+        return lines.dropWhile { !it.startsWith(expectedHeaderPrefix) }
+            .drop(1)
+            .map { it.split("|") }
+    }
+
     suspend fun exportFullLocalBackup(settings: BotSettings = settingsStore.load()): String {
         val trades = dao.allTradesSnapshot()
+        val signals = dao.allSignalsSnapshot()
+        val aiDecisions = dao.allAiDecisionsSnapshot()
+        val taxLots = dao.allTaxLotsSnapshot()
         val taxRows = dao.taxReportRowsSnapshot()
         val symbolProfiles = dao.learnedSymbolProfilesSnapshot()
         val strategyProfiles = dao.learnedStrategyProfilesSnapshot()
         val holdProfiles = dao.learnedHoldProfilesSnapshot()
-        val learningSnapshots = dao.learningFeatureSnapshots(1000)
-        val audits = dao.selfLearningAudit(1000)
+        val learningSnapshots = dao.learningFeatureSnapshots(100000)
+        val audits = dao.selfLearningAudit(100000)
         val openPositions = dao.openPositionsSnapshot()
+        val secureValues = settingsStore.secureBackupMap()
 
-        fun clean(value: String): String = value.replace("\n", " ").replace("\r", " ").replace("|", "/")
+        fun clean(value: String): String = backupClean(value)
 
         val sb = StringBuilder()
-        sb.appendLine("CRYPTO_TRADE_STATION_FULL_BACKUP_V1")
+        sb.appendLine("CRYPTO_TRADE_STATION_FULL_BACKUP_V2_FULL")
         sb.appendLine("createdEpochMs=${System.currentTimeMillis()}")
-        sb.appendLine("appVersion=v2.0.7")
+        sb.appendLine("appVersion=v2.8.6")
         sb.appendLine()
         sb.appendLine("[SETTINGS]")
         sb.appendLine("mode=${settings.mode}")
@@ -328,8 +376,12 @@ class BotController(
         sb.appendLine()
         sb.appendLine("[COUNTS]")
         sb.appendLine("trades=${trades.size}")
+        sb.appendLine("signals=${signals.size}")
+        sb.appendLine("aiDecisions=${aiDecisions.size}")
+        sb.appendLine("taxLots=${taxLots.size}")
         sb.appendLine("openPositions=${openPositions.size}")
         sb.appendLine("taxRows=${taxRows.size}")
+        sb.appendLine("secureValues=${secureValues.size}")
         sb.appendLine("learnedSymbolProfiles=${symbolProfiles.size}")
         sb.appendLine("learnedStrategyProfiles=${strategyProfiles.size}")
         sb.appendLine("learnedHoldProfiles=${holdProfiles.size}")
@@ -342,34 +394,76 @@ class BotController(
             sb.appendLine("${it.id}|${it.timestampEpochMs}|${clean(it.symbol)}|${clean(it.side)}|${clean(it.quantity)}|${clean(it.priceEur)}|${clean(it.feeEur)}|${it.paper}|${clean(it.realizedPnlEur)}|${it.aiScore}|${clean(it.clientOrderId)}|${clean(it.exchangeOrderId)}|${clean(it.aiReason)}")
         }
         sb.appendLine()
+        sb.appendLine("[SIGNALS]")
+        sb.appendLine("id|timestampEpochMs|symbol|action|score|riskPercent|reason")
+        signals.forEach {
+            sb.appendLine("${it.id}|${it.timestampEpochMs}|${clean(it.symbol)}|${clean(it.action)}|${it.score}|${clean(it.riskPercent)}|${clean(it.reason)}")
+        }
+        sb.appendLine()
+        sb.appendLine("[AI_DECISIONS]")
+        sb.appendLine("id|timestampEpochMs|symbol|finalAction|finalScore|confidencePercent|technicalScore|newsScore|memoryScore|allowedToTrade|explanation")
+        aiDecisions.forEach {
+            sb.appendLine("${it.id}|${it.timestampEpochMs}|${clean(it.symbol)}|${clean(it.finalAction)}|${it.finalScore}|${it.confidencePercent}|${it.technicalScore}|${it.newsScore}|${it.memoryScore}|${it.allowedToTrade}|${clean(it.explanation)}")
+        }
+        sb.appendLine()
+        sb.appendLine("[TAX_LOTS]")
+        sb.appendLine("id|symbol|quantity|costBasisEur|openedAtEpochMs|closedAtEpochMs|realizedGainEur")
+        taxLots.forEach {
+            sb.appendLine("${it.id}|${clean(it.symbol)}|${clean(it.quantity)}|${clean(it.costBasisEur)}|${it.openedAtEpochMs}|${it.closedAtEpochMs ?: ""}|${clean(it.realizedGainEur)}")
+        }
+        sb.appendLine()
         sb.appendLine("[OPEN_POSITIONS]")
         sb.appendLine("symbol|baseAsset|quantity|entryPriceEur|highestPriceEur|stopPriceEur|takeProfitPriceEur|trailingStopPriceEur|openedAtEpochMs|updatedAtEpochMs|status|source")
         openPositions.forEach {
             sb.appendLine("${clean(it.symbol)}|${clean(it.baseAsset)}|${clean(it.quantity)}|${clean(it.entryPriceEur)}|${clean(it.highestPriceEur)}|${clean(it.stopPriceEur)}|${clean(it.takeProfitPriceEur)}|${clean(it.trailingStopPriceEur)}|${it.openedAtEpochMs}|${it.updatedAtEpochMs}|${clean(it.status)}|${clean(it.source)}")
         }
         sb.appendLine()
+        sb.appendLine("[TAX_REPORT_ROWS]")
+        sb.appendLine("id|timestampEpochMs|symbol|side|quantity|priceEur|feeEur|realizedGainEur|note")
+        taxRows.forEach {
+            sb.appendLine("${it.id}|${it.timestampEpochMs}|${clean(it.symbol)}|${clean(it.side)}|${clean(it.quantity)}|${clean(it.priceEur)}|${clean(it.feeEur)}|${clean(it.realizedGainEur)}|${clean(it.note)}")
+        }
+        sb.appendLine()
         sb.appendLine("[LEARNED_SYMBOL_PROFILES]")
-        symbolProfiles.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine("symbol|updatedAtEpochMs|sampleSize|wins|losses|winRatePercent|profitFactor|averagePnlEur|netPnlEur|scoreAdjustment|minScoreAdjustment|positionMultiplier|cooldownMultiplier|preferredStrategy|disabledUntilEpochMs|confidence|explanation")
+        symbolProfiles.forEach {
+            sb.appendLine("${clean(it.symbol)}|${it.updatedAtEpochMs}|${it.sampleSize}|${it.wins}|${it.losses}|${clean(it.winRatePercent)}|${clean(it.profitFactor)}|${clean(it.averagePnlEur)}|${clean(it.netPnlEur)}|${it.scoreAdjustment}|${it.minScoreAdjustment}|${clean(it.positionMultiplier)}|${clean(it.cooldownMultiplier)}|${clean(it.preferredStrategy)}|${it.disabledUntilEpochMs}|${clean(it.confidence)}|${clean(it.explanation)}")
+        }
         sb.appendLine()
         sb.appendLine("[LEARNED_STRATEGY_PROFILES]")
-        strategyProfiles.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine("strategyKey|updatedAtEpochMs|sampleSize|wins|losses|winRatePercent|profitFactor|scoreAdjustment|positionMultiplier|explanation")
+        strategyProfiles.forEach {
+            sb.appendLine("${clean(it.strategyKey)}|${it.updatedAtEpochMs}|${it.sampleSize}|${it.wins}|${it.losses}|${clean(it.winRatePercent)}|${clean(it.profitFactor)}|${it.scoreAdjustment}|${clean(it.positionMultiplier)}|${clean(it.explanation)}")
+        }
         sb.appendLine()
         sb.appendLine("[LEARNED_HOLD_PROFILES]")
-        holdProfiles.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine("symbol|updatedAtEpochMs|sampleSize|profitableExits|losingExits|continuationWinRatePercent|averageHoldMinutes|averagePnlEur|netPnlEur|holdConfidencePercent|holdMultiplier|shouldDeferTakeProfit|shouldDeferTrailingExit|explanation")
+        holdProfiles.forEach {
+            sb.appendLine("${clean(it.symbol)}|${it.updatedAtEpochMs}|${it.sampleSize}|${it.profitableExits}|${it.losingExits}|${clean(it.continuationWinRatePercent)}|${clean(it.averageHoldMinutes)}|${clean(it.averagePnlEur)}|${clean(it.netPnlEur)}|${it.holdConfidencePercent}|${clean(it.holdMultiplier)}|${it.shouldDeferTakeProfit}|${it.shouldDeferTrailingExit}|${clean(it.explanation)}")
+        }
         sb.appendLine()
         sb.appendLine("[LEARNING_FEATURE_SNAPSHOTS]")
-        learningSnapshots.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine("id|timestampEpochMs|symbol|strategyMode|mode|action|finalScore|technicalScore|newsScore|memoryScore|spreadPercent|volume24h|priceChange24hPercent|allowedToTrade|traded|orderSide|orderType|notionalQuote|reason")
+        learningSnapshots.forEach {
+            sb.appendLine("${it.id}|${it.timestampEpochMs}|${clean(it.symbol)}|${clean(it.strategyMode)}|${clean(it.mode)}|${clean(it.action)}|${it.finalScore}|${it.technicalScore}|${it.newsScore}|${it.memoryScore}|${clean(it.spreadPercent)}|${clean(it.volume24h)}|${clean(it.priceChange24hPercent)}|${it.allowedToTrade}|${it.traded}|${clean(it.orderSide)}|${clean(it.orderType)}|${clean(it.notionalQuote)}|${clean(it.reason)}")
+        }
         sb.appendLine()
         sb.appendLine("[SELF_LEARNING_AUDIT]")
-        audits.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine("id|timestampEpochMs|eventType|symbol|message")
+        audits.forEach {
+            sb.appendLine("${it.id}|${it.timestampEpochMs}|${clean(it.eventType)}|${clean(it.symbol)}|${clean(it.message)}")
+        }
         sb.appendLine()
-        sb.appendLine("[TAX_REPORT_ROWS]")
-        taxRows.forEach { sb.appendLine(clean(it.toString())) }
+        sb.appendLine("[SECURE_VALUES]")
+        sb.appendLine("key|value")
+        secureValues.forEach { (key, value) ->
+            sb.appendLine("${clean(key)}|${clean(value)}")
+        }
         sb.appendLine()
         sb.appendLine("[SECURITY_NOTE]")
-        sb.appendLine("API keys, secret keys, Telegram tokens and Discord webhook URLs are intentionally not exported.")
-        sb.appendLine("Android app updates with the same package name keep SharedPreferences, encrypted key store entries and Room database automatically.")
-        updateStatus("Full local backup generated: trades=${trades.size}, profiles=${symbolProfiles.size + strategyProfiles.size + holdProfiles.size}, taxRows=${taxRows.size}", "INFO")
+        sb.appendLine("This backup includes API keys, secret keys, Telegram/Discord tokens, webhooks and remote command PINs because the user requested a full restore-everything backup.")
+        sb.appendLine("Keep this backup file private and do not share it.")
+        updateStatus("Full local backup generated: trades=${trades.size}, signals=${signals.size}, ai=${aiDecisions.size}, profiles=${symbolProfiles.size + strategyProfiles.size + holdProfiles.size}, secure=${secureValues.size}", "INFO")
         return sb.toString()
     }
 
@@ -383,7 +477,14 @@ class BotController(
             val input = rawInput.trim()
             if (input.isBlank()) return "Restore failed: backup text/path is empty."
 
-            val backupText = if ((input.startsWith("/") || input.startsWith("content:") || input.startsWith("file:")) && input.length < 600) {
+            val backupText = if (input.startsWith("content://") && input.length < 1200) {
+                runCatching {
+                    appContext.contentResolver.openInputStream(Uri.parse(input))?.bufferedReader()?.use { it.readText() }
+                        ?: error("Could not open selected backup URI.")
+                }.getOrElse {
+                    return "Restore failed: could not read backup URI. Paste backup text directly or choose a readable file. ${it.message}"
+                }
+            } else if ((input.startsWith("/") || input.startsWith("file:")) && input.length < 600) {
                 val path = input.removePrefix("file://")
                 runCatching { java.io.File(path).readText() }.getOrElse {
                     return "Restore failed: could not read file path. Paste the backup text directly or enter a readable local file path. ${it.message}"
@@ -465,24 +566,59 @@ class BotController(
 
             if (replaceExistingLocalData) {
                 dao.clearTradesForRestore()
+                dao.clearSignalsForRestore()
+                dao.clearAiDecisionsForRestore()
+                dao.clearTaxLotsForRestore()
                 dao.clearPositionsForRestore()
                 dao.clearTaxReportsForRestore()
+                dao.clearLearningFeatureSnapshotsForRestore()
+                dao.clearLearnedSymbolProfilesForRestore()
+                dao.clearLearnedStrategyProfilesForRestore()
+                dao.clearLearnedHoldProfilesForRestore()
+                dao.clearSelfLearningAuditForRestore()
             }
 
+            val secureValues = sections["SECURE_VALUES"].orEmpty()
+                .dropWhile { !it.startsWith("key|") }
+                .drop(1)
+                .mapNotNull { line ->
+                    val idx = line.indexOf('|')
+                    if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
+                }.toMap()
+            if (secureValues.isNotEmpty()) settingsStore.restoreSecureBackupMap(secureValues)
+
             val restoredTrades = restoreTradesFromSection(sections["TRADES"].orEmpty())
+            val restoredSignals = restoreSignalsFromSection(sections["SIGNALS"].orEmpty())
+            val restoredAiDecisions = restoreAiDecisionsFromSection(sections["AI_DECISIONS"].orEmpty())
+            val restoredTaxLots = restoreTaxLotsFromSection(sections["TAX_LOTS"].orEmpty())
             val restoredPositions = restorePositionsFromSection(sections["OPEN_POSITIONS"].orEmpty())
+            val restoredTaxRows = restoreTaxRowsFromSection(sections["TAX_REPORT_ROWS"].orEmpty())
+            val restoredSymbolProfiles = restoreLearnedSymbolProfilesFromSection(sections["LEARNED_SYMBOL_PROFILES"].orEmpty())
+            val restoredStrategyProfiles = restoreLearnedStrategyProfilesFromSection(sections["LEARNED_STRATEGY_PROFILES"].orEmpty())
+            val restoredHoldProfiles = restoreLearnedHoldProfilesFromSection(sections["LEARNED_HOLD_PROFILES"].orEmpty())
+            val restoredLearningSnapshots = restoreLearningFeatureSnapshotsFromSection(sections["LEARNING_FEATURE_SNAPSHOTS"].orEmpty())
+            val restoredAudits = restoreSelfLearningAuditFromSection(sections["SELF_LEARNING_AUDIT"].orEmpty())
 
             val message = buildString {
                 appendLine("Restore complete.")
                 appendLine("settings=${if (restoredSettings) "restored" else "not found"}")
+                appendLine("secureValues=${secureValues.size}")
                 appendLine("trades=$restoredTrades")
+                appendLine("signals=$restoredSignals")
+                appendLine("aiDecisions=$restoredAiDecisions")
+                appendLine("taxLots=$restoredTaxLots")
                 appendLine("openPositions=$restoredPositions")
+                appendLine("taxRows=$restoredTaxRows")
+                appendLine("symbolProfiles=$restoredSymbolProfiles")
+                appendLine("strategyProfiles=$restoredStrategyProfiles")
+                appendLine("holdProfiles=$restoredHoldProfiles")
+                appendLine("learningSnapshots=$restoredLearningSnapshots")
+                appendLine("audits=$restoredAudits")
                 appendLine("replaceExistingLocalData=$replaceExistingLocalData")
                 appendLine()
-                appendLine("Security note: API keys, Telegram tokens, Discord tokens/webhooks and PINs are intentionally not restored from backup exports.")
-                appendLine("Unstructured legacy sections such as learned profile toString rows are preserved in the backup file but skipped by this importer.")
+                appendLine("Full backup restore includes credentials/tokens/PINs when the backup contains SECURE_VALUES. Keep backups private.")
             }.trim()
-            updateStatus("Backup restore complete. trades=$restoredTrades, positions=$restoredPositions", "INFO")
+            updateStatus("Backup restore complete. trades=$restoredTrades, signals=$restoredSignals, ai=$restoredAiDecisions, positions=$restoredPositions, secure=${secureValues.size}", "INFO")
             message
         } catch (error: Exception) {
             val message = "Restore failed: ${error.message}"
@@ -572,8 +708,38 @@ class BotController(
     ): String {
         return try {
             val backup = exportFullLocalBackup(settings)
-            val defaultBackupDir = java.io.File(appContext.getExternalFilesDir(null), "backups")
             val requested = customDirectoryPath.trim()
+            val filename = "cts_backup_${System.currentTimeMillis()}.txt"
+            val preview = backup.lineSequence().take(80).joinToString("\n")
+
+            if (requested.startsWith("content://")) {
+                val treeUri = Uri.parse(requested)
+                val documentUri = DocumentsContract.createDocument(
+                    appContext.contentResolver,
+                    treeUri,
+                    "text/plain",
+                    filename
+                ) ?: error("Android folder picker did not return a writable document URI.")
+                appContext.contentResolver.openOutputStream(documentUri, "w")?.use { stream ->
+                    stream.write(backup.toByteArray(Charsets.UTF_8))
+                } ?: error("Could not open selected folder for writing.")
+                val result = buildString {
+                    appendLine("BACKUP SAVED SUCCESSFULLY")
+                    appendLine("fileUri=$documentUri")
+                    appendLine("directoryUri=$treeUri")
+                    appendLine("customDirectoryRequested=$customDirectoryPath")
+                    appendLine("sizeBytes=${backup.toByteArray(Charsets.UTF_8).size}")
+                    appendLine()
+                    appendLine("The full backup was written through Android's folder picker permission.")
+                    appendLine()
+                    appendLine("[PREVIEW FIRST 80 LINES]")
+                    appendLine(preview)
+                }
+                updateStatus("Full backup saved through selected Android folder URI.", "INFO")
+                return result
+            }
+
+            val defaultBackupDir = java.io.File(appContext.getExternalFilesDir(null), "backups")
             val backupDir = if (requested.isNotBlank()) java.io.File(requested) else defaultBackupDir
             if (!backupDir.exists()) backupDir.mkdirs()
             if (!backupDir.exists() || !backupDir.isDirectory || !backupDir.canWrite()) {
@@ -581,9 +747,8 @@ class BotController(
                 updateStatus("Custom backup directory is not writable. Falling back to ${defaultBackupDir.absolutePath}", "WARN")
             }
             val finalDir = if (backupDir.exists() && backupDir.isDirectory && backupDir.canWrite()) backupDir else defaultBackupDir
-            val file = java.io.File(finalDir, "cts_backup_${System.currentTimeMillis()}.txt")
+            val file = java.io.File(finalDir, filename)
             file.writeText(backup)
-            val preview = backup.lineSequence().take(80).joinToString("\n")
             val result = buildString {
                 appendLine("BACKUP SAVED SUCCESSFULLY")
                 appendLine("file=${file.absolutePath}")
@@ -1029,9 +1194,10 @@ Crypto TradeStation remote commands:
     }
 
     private suspend fun selectSymbolUniverse(settings: BotSettings, exchange: CryptoExchangeClient, liveBalances: Map<String, BigDecimal> = emptyMap()): List<String> {
-        val fallback = if (settings.tradeOnlyBtcEth) {
+        val fallbackRaw = if (settings.tradeOnlyBtcEth) {
             settings.symbols().filter { it.startsWith("BTC") || it.startsWith("ETH") }
         } else settings.symbols()
+        val fallback = filterCashLikeBaseSymbols(fallbackRaw, "configured symbols")
         if (!settings.autoSymbolDiscoveryEnabled || (settings.exchangeProvider != ExchangeProvider.KRAKEN && settings.exchangeProvider != ExchangeProvider.PAPER && settings.mode != BotMode.PAPER)) {
             updateStatus("Auto symbol discovery disabled or unavailable. Using configured symbols: ${fallback.joinToString(",")}", "INFO")
             return fallback
@@ -1040,7 +1206,7 @@ Crypto TradeStation remote commands:
             updateStatus("Paper mode market data source: Kraken public endpoints for AssetPairs/Ticker/OHLC; fake local wallet for orders.", "INFO")
         }
         val discovered = discoverAutoSymbols(settings, exchange)
-        val enabledCandidates = discovered.filter { it.enabledForRotation }
+        val enabledCandidates = discovered.filter { it.enabledForRotation && !isCashLikeTradingPairBase(it.symbol, it.baseAsset) }
         val balanceAwareCandidates = if (settings.mode == BotMode.PAPER || liveBalances.isEmpty()) {
             enabledCandidates
         } else {
@@ -1068,9 +1234,10 @@ Crypto TradeStation remote commands:
             }
         }
         val rotationSource = if (balanceAwareCandidates.isNotEmpty()) balanceAwareCandidates else enabledCandidates
-        val selected = rotationSource
-            .map { it.symbol }
-            .distinct()
+        val selected = filterCashLikeBaseSymbols(
+            rotationSource.map { it.symbol }.distinct(),
+            "auto-rotation selected symbols"
+        )
             .let { list -> if (settings.tradeOnlyBtcEth) list.filter { it.startsWith("BTC") || it.startsWith("ETH") } else list }
             .take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
         if (selected.isEmpty()) {
@@ -1096,7 +1263,13 @@ Crypto TradeStation remote commands:
             return emptyList()
         }
         val enriched = raw.mapNotNull { candidate ->
-            runCatching {
+            if (isCashLikeTradingPairBase(candidate.symbol, candidate.baseAsset)) {
+                candidate.copy(
+                    score = 0,
+                    enabledForRotation = false,
+                    reason = "Skipped: base asset ${candidate.baseAsset} is a currency/stablecoin/cash-like asset. The bot should use it as quote/cash, not repeatedly buy it as a target."
+                )
+            } else runCatching {
                 val ticker = exchange.getTicker(candidate.symbol)
                 val spreadPercent = if (ticker.lastPrice > BigDecimal.ZERO) {
                     ticker.ask.subtract(ticker.bid).divide(ticker.lastPrice, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100"))
@@ -1229,6 +1402,10 @@ Crypto TradeStation remote commands:
         val quoteAsset = pairInfo?.quoteAsset ?: quoteAssetFromSymbol(ticker.symbol)
         val availableQuote = freeBalanceForAsset(liveBalances, quoteAsset)
         val availableBase = freeBalanceForAsset(liveBalances, baseAsset)
+        if (side == OrderSide.BUY && isCashLikeBaseAsset(baseAsset)) {
+            updateStatus("Trade blocked: ${ticker.symbol} has cash/stablecoin base asset $baseAsset. The bot treats EUR/USD/stables as cash/quote assets, not buy targets.", "WARN")
+            return ExecutionAttemptResult(false)
+        }
         if (side == OrderSide.SELL && availableBase <= BigDecimal.ZERO) {
             updateStatus("Trade skipped: ${ticker.symbol} generated SELL but there is no available $baseAsset balance. This prevents invalid paper/live SELL attempts.", "WARN")
             return ExecutionAttemptResult(false)
@@ -1351,14 +1528,16 @@ Crypto TradeStation remote commands:
             }
         }
 
-        val quantity = if (side == OrderSide.SELL && settings.mode != BotMode.PAPER) {
-            val desiredQuantity = targetNotional.divide(price, 8, RoundingMode.DOWN)
+        val quantity = if (side == OrderSide.SELL) {
             val freeBase = availableBase ?: BigDecimal.ZERO
-            val chosen = desiredQuantity.min(freeBase).setScale(8, RoundingMode.DOWN)
+            val quantityScale = pairInfo?.quantityDecimals ?: 8
+            val chosen = freeBase.setScale(quantityScale, RoundingMode.DOWN)
             val chosenValue = chosen.multiply(price)
-            updateStatus("[${ticker.symbol}] SELL budget: baseAsset=$baseAsset, quoteAsset=$quoteAsset, freeBase=${freeBase.stripTrailingZeros().toPlainString()}, targetQty=${desiredQuantity.stripTrailingZeros().toPlainString()}, chosenQty=${chosen.stripTrailingZeros().toPlainString()}, estimatedValue=${chosenValue.setScale(2, RoundingMode.DOWN)} $quoteAsset", "INFO")
-            if (chosenValue < minimumOrderNotional) {
-                updateStatus("Trade blocked: SELL signal but free $baseAsset value is below minimum. Value=${chosenValue.setScale(2, RoundingMode.DOWN)} $quoteAsset, minimum=$minimumOrderNotional $quoteAsset", "WARN")
+            val dustAfterSell = freeBase.subtract(chosen).max(BigDecimal.ZERO)
+            val dustValue = dustAfterSell.multiply(price)
+            updateStatus("[${ticker.symbol}] SELL all available: baseAsset=$baseAsset, quoteAsset=$quoteAsset, freeBase=${freeBase.stripTrailingZeros().toPlainString()}, chosenQty=${chosen.stripTrailingZeros().toPlainString()}, estimatedValue=${chosenValue.setScale(2, RoundingMode.DOWN)} $quoteAsset, unavoidableDust≈${dustValue.setScale(6, RoundingMode.DOWN)} $quoteAsset", "INFO")
+            if (chosen <= BigDecimal.ZERO || chosenValue < minimumOrderNotional) {
+                updateStatus("Dust remainder detected: $baseAsset balance value is below exchange minimum. Value=${chosenValue.setScale(2, RoundingMode.DOWN)} $quoteAsset, minimum=$minimumOrderNotional $quoteAsset. This cannot be sold automatically until it grows above the minimum or the exchange offers conversion.", "WARN")
                 return ExecutionAttemptResult(false)
             }
             chosen
@@ -1378,7 +1557,8 @@ Crypto TradeStation remote commands:
             clientOrderId = "ksp-${ticker.symbol.lowercase()}-${System.currentTimeMillis()}"
         )
         val orderModeLabel = if (useMarketOrder) "MARKET" else "LIMIT"
-        updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${targetNotional.setScale(2, RoundingMode.DOWN)} $quoteAsset, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
+        val submittedNotionalEstimate = request.quantity.multiply(price).setScale(8, RoundingMode.HALF_UP)
+        updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${submittedNotionalEstimate.setScale(2, RoundingMode.DOWN)} $quoteAsset, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
             updateStatus("Order submit failed: ${error.message}", "ERROR")
             sendRemoteAlert(settings, "Order submit failed", "${request.side} ${request.symbol}: ${error.message}")
@@ -1393,13 +1573,18 @@ Crypto TradeStation remote commands:
             }
             throw error
         }
+        val executedQtyForRecord = result.executedQuantity.takeIf { it > BigDecimal.ZERO } ?: quantity
+        val averagePriceForRecord = result.averagePrice.takeIf { it > BigDecimal.ZERO } ?: price
+        val feeForRecord = result.fee.takeIf { it > BigDecimal.ZERO }
+            ?: averagePriceForRecord.multiply(executedQtyForRecord).multiply(BigDecimal("0.001")).setScale(8, RoundingMode.HALF_UP)
+        val notionalForRecord = averagePriceForRecord.multiply(executedQtyForRecord).setScale(8, RoundingMode.HALF_UP)
         dao.insertTrade(
             TradeEntity(
                 symbol = result.symbol,
                 side = result.side.name,
-                quantity = result.executedQuantity.takeIf { it > BigDecimal.ZERO }?.toPlainString() ?: quantity.toPlainString(),
-                priceEur = (if (result.averagePrice > BigDecimal.ZERO) result.averagePrice else price).toPlainString(),
-                feeEur = result.fee.toPlainString(),
+                quantity = executedQtyForRecord.toPlainString(),
+                priceEur = averagePriceForRecord.toPlainString(),
+                feeEur = feeForRecord.toPlainString(),
                 paper = result.paper,
                 aiScore = decision.finalScore,
                 aiReason = decision.explanation,
@@ -1408,8 +1593,21 @@ Crypto TradeStation remote commands:
                 timestampEpochMs = result.timestamp.toEpochMilli()
             )
         )
-        updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
-        sendRemoteAlert(settings, "Order placed", "${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"} qty=${result.executedQuantity} avg=${result.averagePrice} fee=${result.fee} id=${result.exchangeOrderId}")
+        updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. qty=${executedQtyForRecord.stripTrailingZeros().toPlainString()} avg=${averagePriceForRecord.stripTrailingZeros().toPlainString()} fee=${feeForRecord.stripTrailingZeros().toPlainString()} orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
+        sendRemoteAlert(
+            settings,
+            "Order placed",
+            buildString {
+                appendLine("${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}")
+                appendLine("orderType=$orderModeLabel")
+                appendLine("amount=${executedQtyForRecord.stripTrailingZeros().toPlainString()}")
+                appendLine("price=${averagePriceForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")
+                appendLine("notional≈${notionalForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")
+                appendLine("fee=${feeForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")
+                appendLine("orderId=${result.exchangeOrderId}")
+                if (result.executedQuantity <= BigDecimal.ZERO) appendLine("note=Kraken did not report a fill yet; showing submitted quantity/price estimate.")
+            }
+        )
         val reservedAmount = if (side == OrderSide.BUY) targetNotional.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
         return ExecutionAttemptResult(true, quoteAsset, reservedAmount)
     }

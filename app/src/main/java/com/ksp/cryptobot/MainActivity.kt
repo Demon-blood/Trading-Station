@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.graphics.StrokeCap
@@ -59,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -341,7 +343,7 @@ private fun AdvancedBotApp(
     var status by remember { mutableStateOf(statusStore.latestText()) }
     var statusLevel by remember { mutableStateOf(statusStore.latestLevel()) }
     var statusHistory by remember { mutableStateOf(statusStore.recentLines()) }
-    var decisions by remember { mutableStateOf(sampleDecisions()) }
+    var decisions by remember { mutableStateOf<List<AiDecision>>(emptyList()) }
     var portfolioSnapshot by remember { mutableStateOf<PortfolioSnapshot?>(null) }
     var liveOrders by remember { mutableStateOf<List<LiveOrderInfo>>(emptyList()) }
     var lifecycleSnapshot by remember { mutableStateOf<LifecycleSnapshot?>(null) }
@@ -364,6 +366,29 @@ private fun AdvancedBotApp(
     var discordBotToken by remember { mutableStateOf(store.discordBotToken().orEmpty()) }
     var discordCommandChannelId by remember { mutableStateOf(store.discordChannelId().orEmpty()) }
     var liveChartAutoRefresh by remember { mutableStateOf(true) }
+    val activeChartSymbols = remember(lifecycleSnapshot, portfolioSnapshot, tradeJournal, settings.symbolsCsv) {
+        val lifecycleSymbols = lifecycleSnapshot?.positions
+            ?.filter { it.quantity > BigDecimal.ZERO }
+            ?.map { it.symbol.uppercase().replace("/", "").replace("-", "") }
+            .orEmpty()
+        val portfolioSymbols = portfolioSnapshot?.assets
+            ?.filter { it.total > BigDecimal.ZERO || it.free > BigDecimal.ZERO }
+            ?.mapNotNull { asset ->
+                val clean = asset.asset.uppercase().replace("Z", "").replace(".", "").trim()
+                when {
+                    clean == "EUR" || clean == "USD" || clean == "USDT" || clean == "USDC" -> null
+                    clean.isBlank() -> null
+                    else -> "${clean}EUR"
+                }
+            }
+            .orEmpty()
+        val tradedSymbols = tradeJournal
+            .map { it.symbol.uppercase().replace("/", "").replace("-", "") }
+        (lifecycleSymbols + portfolioSymbols + tradedSymbols + settings.symbols())
+            .map { it.uppercase().replace("/", "").replace("-", "") }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -375,11 +400,37 @@ private fun AdvancedBotApp(
     }
 
     LaunchedEffect(currentTab, settings.exchangeProvider) {
+        if (currentTab == AppTab.DASHBOARD) {
+            onLoadLifecycle(settings) { result ->
+                lifecycleSnapshot = result
+                statusStore.write("Dashboard active-position symbols loaded. positions=${result.positions.size}")
+            }
+            onLoadPortfolio(settings) { result ->
+                portfolioSnapshot = result
+                statusStore.write("Dashboard portfolio symbols loaded. assets=${result.assets.size}")
+            }
+            onLoadTradeJournal(200) { result -> tradeJournal = result }
+        }
+        if (currentTab == AppTab.AI_SIGNALS) {
+            onLoadLifecycle(settings) { result ->
+                lifecycleSnapshot = result
+                statusStore.write("AI Signals active-position symbols loaded. positions=${result.positions.size}")
+            }
+            onLoadPortfolio(settings) { result ->
+                portfolioSnapshot = result
+                statusStore.write("AI Signals portfolio symbols loaded. assets=${result.assets.size}")
+            }
+            onLoadTradeJournal(200) { result -> tradeJournal = result }
+        }
         if (currentTab == AppTab.PORTFOLIO) {
             onLoadPortfolio(settings) { result ->
                 portfolioSnapshot = result
                 statusStore.write("Portfolio auto-refresh complete. Total≈€${result.totalValueEur}")
                 status = "Portfolio loaded: €${result.totalValueEur}"
+            }
+            onLoadLifecycle(settings) { result ->
+                lifecycleSnapshot = result
+                statusStore.write("Portfolio lifecycle guards loaded. positions=${result.positions.size}")
             }
         }
         if (currentTab == AppTab.ORDERS) {
@@ -411,14 +462,41 @@ private fun AdvancedBotApp(
             }
         }
         if (currentTab == AppTab.PERFORMANCE) {
-            onLoadPerformanceLab(settings) { result ->
+            onLoadLifecycle(settings) { result ->
+                lifecycleSnapshot = result
+                statusStore.write("Performance Lab active-position symbols loaded. positions=${result.positions.size}")
+            }
+            onLoadPortfolio(settings) { result ->
+                portfolioSnapshot = result
+                statusStore.write("Performance Lab portfolio symbols loaded. assets=${result.assets.size}")
+            }
+            onLoadTradeJournal(200) { result -> tradeJournal = result }
+            val perfSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+            onLoadPerformanceLab(settings.copy(symbolsCsv = perfSymbols.joinToString(","))) { result ->
                 performanceLabSnapshot = result
-                statusStore.write(result.summaryLine)
+                statusStore.write("${result.summaryLine}. Symbols=${perfSymbols.size}")
                 status = "Performance Lab loaded"
             }
         }
+        if (currentTab == AppTab.AUTO_TUNER) {
+            onLoadLifecycle(settings) { result ->
+                lifecycleSnapshot = result
+                statusStore.write("Auto-Tuner active-position symbols loaded. positions=${result.positions.size}")
+            }
+            onLoadPortfolio(settings) { result ->
+                portfolioSnapshot = result
+                statusStore.write("Auto-Tuner portfolio symbols loaded. assets=${result.assets.size}")
+            }
+            onLoadTradeJournal(200) { result -> tradeJournal = result }
+        }
         if (currentTab == AppTab.CHART || currentTab == AppTab.TRADE_OVERLAY) {
             while (currentTab == AppTab.CHART || currentTab == AppTab.TRADE_OVERLAY) {
+                onLoadLifecycle(settings) { result ->
+                    lifecycleSnapshot = result
+                    val active = result.positions.map { it.symbol }.distinct()
+                    statusStore.write("Chart active-position symbols refreshed. active=${active.joinToString(",").ifBlank { "none" }}")
+                }
+                onLoadPortfolio(settings) { result -> portfolioSnapshot = result }
                 onLoadChartCandles(settings, chartSymbol, chartTimeframe, 240) { result ->
                     chartCandles = result
                     statusStore.write("Live chart auto-refreshed. Symbol=$chartSymbol timeframe=${chartTimeframe.name} candles=${result.size}")
@@ -476,21 +554,26 @@ private fun AdvancedBotApp(
                     settings = settings,
                     status = status,
                     decisions = decisions,
+                    activePositionSymbols = activeChartSymbols,
                     onStart = { statusStore.write("Start button pressed from dashboard."); onStart(); status = "Foreground live scanner started" },
                     onStop = { statusStore.write("Stop button pressed from dashboard.", "WARN"); onStop(); status = "Bot stopped" },
                     onScan = {
                         status = "Scanning market + AI inputs..."
-                        onScan(settings, false) { result ->
-                            decisions = result.ifEmpty { sampleDecisions() }
-                            statusStore.write("Manual scan complete from dashboard. Decisions=${result.size}")
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        val scanSettings = settings.copy(symbolsCsv = scanSymbols.joinToString(","))
+                        onScan(scanSettings, false) { result ->
+                            decisions = result
+                            statusStore.write("Manual scan complete from dashboard. Symbols=${scanSymbols.size}, Decisions=${result.size}")
                             status = "Scan complete"
                         }
                     },
                     onExecute = {
                         status = "Running guarded execution pass..."
-                        onScan(settings, settings.mode == BotMode.PAPER || settings.mode == BotMode.LIVE_AUTO) { result ->
-                            decisions = result.ifEmpty { sampleDecisions() }
-                            statusStore.write("Manual execution pass complete from dashboard. Decisions=${result.size}")
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        val scanSettings = settings.copy(symbolsCsv = scanSymbols.joinToString(","))
+                        onScan(scanSettings, settings.mode == BotMode.PAPER || settings.mode == BotMode.LIVE_AUTO) { result ->
+                            decisions = result
+                            statusStore.write("Manual execution pass complete from dashboard. Symbols=${scanSymbols.size}, Decisions=${result.size}")
                             status = "Execution pass complete"
                         }
                     }
@@ -541,19 +624,35 @@ private fun AdvancedBotApp(
                     performanceLabSnapshot = performanceLabSnapshot,
                     onOpen = { currentTab = it },
                     onRefreshPerformance = {
-                        onLoadPerformanceLab(settings) { result ->
+                        val perfSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        onLoadPerformanceLab(settings.copy(symbolsCsv = perfSymbols.joinToString(","))) { result ->
                             performanceLabSnapshot = result
-                            statusStore.write(result.summaryLine)
+                            statusStore.write("${result.summaryLine}. Symbols=${perfSymbols.size}")
                             status = "Performance Lab refreshed"
                         }
                     }
                 )
-                AppTab.AI_SIGNALS -> AiSignalsScreen(decisions = decisions, settings = settings)
+                AppTab.AI_SIGNALS -> AiSignalsScreen(
+                    decisions = decisions,
+                    settings = settings,
+                    activePositionSymbols = activeChartSymbols,
+                    onScan = {
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        val scanSettings = settings.copy(symbolsCsv = scanSymbols.joinToString(","))
+                        status = "AI Signals scan running..."
+                        onScan(scanSettings, false) { result ->
+                            decisions = result
+                            statusStore.write("AI Signals scan complete. Symbols=${scanSymbols.size}, Decisions=${result.size}")
+                            status = "AI Signals scan complete"
+                        }
+                    }
+                )
                 AppTab.CHART -> ChartScreen(
                     settings = settings,
                     candles = chartCandles,
                     selectedSymbol = chartSymbol,
                     selectedTimeframe = chartTimeframe,
+                    activePositionSymbols = activeChartSymbols,
                     latestDecision = decisions.firstOrNull { it.symbol.equals(chartSymbol, ignoreCase = true) },
                     trades = tradeJournal.filter { it.symbol.equals(chartSymbol, ignoreCase = true) },
                     autoRefresh = liveChartAutoRefresh,
@@ -741,10 +840,12 @@ private fun AdvancedBotApp(
                 AppTab.PERFORMANCE -> PerformanceLabScreen(
                     snapshot = performanceLabSnapshot,
                     settings = settings,
+                    activePositionSymbols = activeChartSymbols,
                     onRefresh = {
-                        onLoadPerformanceLab(settings) { result ->
+                        val perfSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        onLoadPerformanceLab(settings.copy(symbolsCsv = perfSymbols.joinToString(","))) { result ->
                             performanceLabSnapshot = result
-                            statusStore.write(result.summaryLine)
+                            statusStore.write("${result.summaryLine}. Symbols=${perfSymbols.size}")
                             status = "Performance Lab refreshed"
                         }
                     }
@@ -763,11 +864,21 @@ private fun AdvancedBotApp(
                 )
                 AppTab.SMART_EXIT -> SmartExitV2Screen(settings = settings, trades = tradeJournal)
                 AppTab.PORTFOLIO_ROTATION -> PortfolioRotationEngineScreen(settings = settings, decisions = decisions, trades = tradeJournal)
-                AppTab.AUTO_TUNER -> StrategyAutoTunerScreen(settings = settings, onRunHistoricalBacktest = onRunHistoricalBacktest)
+                AppTab.AUTO_TUNER -> StrategyAutoTunerScreen(
+                    settings = settings,
+                    activePositionSymbols = activeChartSymbols,
+                    onApplySettings = { updated ->
+                        persistSettings(updated)
+                        statusStore.write("Auto-Tuner applied best strategy to live settings: strategy=${updated.strategyMode}, symbols=${updated.symbolsCsv}", "INFO")
+                        status = "Auto-Tuner settings applied"
+                    },
+                    onRunHistoricalBacktest = onRunHistoricalBacktest
+                )
                 AppTab.RELEASE_SAFETY -> ReleaseSafetyLockScreen(settings = settings, healthLines = krakenHealthLines)
                 AppTab.PORTFOLIO -> PortfolioScreen(
                     settings = settings,
                     snapshot = portfolioSnapshot,
+                    lifecycleSnapshot = lifecycleSnapshot,
                     onRefresh = {
                         statusStore.write("Portfolio refresh requested from UI.")
                         onLoadPortfolio(settings) { result ->
@@ -775,11 +886,26 @@ private fun AdvancedBotApp(
                             statusStore.write("Portfolio refresh complete. Total≈€${result.totalValueEur}")
                             status = "Portfolio loaded: €${result.totalValueEur}"
                         }
+                        onLoadLifecycle(settings) { result ->
+                            lifecycleSnapshot = result
+                            statusStore.write("Portfolio lifecycle guard refresh complete. positions=${result.positions.size}")
+                        }
                     }
                 )
                 AppTab.NEWS -> NewsScreen(settings = settings, onToggleNews = { persistSettings(settings.copy(useNewsAi = it)) })
                 AppTab.TAX -> TaxScreen()
-                AppTab.HISTORY -> HistoryScreen(settings = settings)
+                AppTab.HISTORY -> HistoryScreen(
+                    settings = settings,
+                    trades = tradeJournal,
+                    events = statusHistory,
+                    onRefresh = {
+                        onLoadTradeJournal(250) { result ->
+                            tradeJournal = result
+                            statusStore.write("History refreshed. trades=${result.size}", "INFO")
+                            status = "History refreshed"
+                        }
+                    }
+                )
                 AppTab.RISK -> RiskScreen(
                     settings = settings,
                     maxPosition = maxPosition,
@@ -1055,7 +1181,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v2.7.6 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v2.8.9 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1094,11 +1220,16 @@ private fun DashboardScreen(
     settings: BotSettings,
     status: String,
     decisions: List<AiDecision>,
+    activePositionSymbols: List<String>,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onScan: () -> Unit,
     onExecute: () -> Unit
 ) {
+    val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
+    val dashboardDecisions = decisions
+        .sortedWith(compareByDescending<AiDecision> { activeSet.contains(it.symbol.uppercase().replace("/", "").replace("-", "")) }
+            .thenByDescending { it.finalScore })
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
@@ -1120,6 +1251,7 @@ private fun DashboardScreen(
                 item { MetricCard("Max Position", "€${settings.maxPositionEur}", "Per trade exposure", Electric) }
                 item { MetricCard("Daily Loss Guard", "€${settings.maxDailyLossEur}", "Auto-block threshold", Danger) }
                 item { MetricCard("Symbols", settings.symbols().size.toString(), settings.symbolsCsv, Mint) }
+                item { MetricCard("Active", activePositionSymbols.size.toString(), activePositionSymbols.take(4).joinToString(",").ifBlank { "none" }, Amber) }
             }
         }
         item {
@@ -1139,8 +1271,30 @@ private fun DashboardScreen(
                 }
             }
         }
-        item { SectionTitle("Top AI Decisions", status) }
-        items(decisions.take(4)) { DecisionCard(it) }
+        item { SectionTitle("Top AI Decisions", if (dashboardDecisions.isEmpty()) "No live scan results yet. Press Scan Market to load real decisions." else status) }
+        if (dashboardDecisions.isEmpty()) {
+            item {
+                GlassCard {
+                    Text("No real AI decisions loaded yet.", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text("Older builds showed hardcoded BTCEUR/ETHEUR sample decisions here. This build removes those placeholder cards. Press Scan Market to scan configured symbols plus active positions.", color = Muted)
+                    if (activePositionSymbols.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Detected active chart symbols: ${activePositionSymbols.joinToString(", ")}", color = Amber)
+                    }
+                }
+            }
+        } else {
+            items(dashboardDecisions.take(8)) { decision ->
+                val normalized = decision.symbol.uppercase().replace("/", "").replace("-", "")
+                Column {
+                    if (activeSet.contains(normalized)) {
+                        Text("ACTIVE POSITION", color = Amber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    }
+                    DecisionCard(decision)
+                }
+            }
+        }
     }
 }
 
@@ -1358,22 +1512,60 @@ private fun MetricMini(label: String, value: String, color: Color) {
 }
 
 @Composable
-private fun AiSignalsScreen(decisions: List<AiDecision>, settings: BotSettings) {
+private fun AiSignalsScreen(
+    decisions: List<AiDecision>,
+    settings: BotSettings,
+    activePositionSymbols: List<String>,
+    onScan: () -> Unit
+) {
+    val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
+    val sortedDecisions = decisions
+        .sortedWith(compareByDescending<AiDecision> { activeSet.contains(it.symbol.uppercase().replace("/", "").replace("-", "")) }
+            .thenByDescending { it.finalScore })
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("AI Signals", "Recovered scalping strategy + news sentiment + previous-trade memory.") }
+        item { SectionTitle("AI Signals", "Real scan decisions for configured symbols plus active positions. No BTC/ETH placeholders.") }
         item {
             GlassCard {
                 ToggleInfo("Recovered scalping strategy", settings.recoveredScalpingStrategyEnabled)
                 ToggleInfo("News sentiment", settings.useNewsAi)
                 ToggleInfo("Trade memory learning", settings.useTradeMemoryAi)
                 ToggleInfo("Tax-aware selling", settings.taxOptimization)
+                ToggleInfo("Active position symbols", activePositionSymbols.isNotEmpty())
+                Spacer(Modifier.height(10.dp))
+                Text("Scan universe: ${(settings.symbols() + activePositionSymbols).distinct().joinToString(", ").ifBlank { "none" }}", color = Muted)
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onScan, colors = ButtonDefaults.buttonColors(containerColor = Electric), modifier = Modifier.fillMaxWidth()) {
+                    Text("Scan AI Signals")
+                }
             }
         }
-        items(decisions) { DecisionCard(decision = it, expanded = true) }
+        if (sortedDecisions.isEmpty()) {
+            item {
+                GlassCard {
+                    Text("No real AI signal scan loaded yet.", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text("Press Scan AI Signals to scan configured symbols plus active positions. Older builds could show BTCEUR/ETHEUR placeholders; this screen now waits for real scan results.", color = Muted)
+                    if (activePositionSymbols.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Detected active symbols: ${activePositionSymbols.joinToString(", ")}", color = Amber)
+                    }
+                }
+            }
+        } else {
+            items(sortedDecisions) { decision ->
+                val normalized = decision.symbol.uppercase().replace("/", "").replace("-", "")
+                Column {
+                    if (activeSet.contains(normalized)) {
+                        Text("ACTIVE POSITION", color = Amber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    }
+                    DecisionCard(decision = decision, expanded = true)
+                }
+            }
+        }
     }
 }
 
@@ -1391,6 +1583,24 @@ private fun StrategyScreen(settings: BotSettings, onToggleStrategy: (Boolean) ->
                 ToggleRow("Enable recovered scalping strategy", settings.recoveredScalpingStrategyEnabled, onToggleStrategy)
                 Text("Entry filter", color = Muted)
                 Text("Buy only when at least ${settings.minTrendAgreement}/3 timeframes agree and the strategy score reaches ${settings.minStrategyScoreToBuy}.", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Strategy Library", "Implemented now plus strong future candidates.")
+                Text("Currently implemented/selectable: SCALPING, TREND, BREAKOUT, REVERSAL, NEWS_MOMENTUM, plus AUTO/adaptive selection.", color = Muted)
+                Divider(color = Stroke)
+                Text("Good next additions:", fontWeight = FontWeight.Bold)
+                Text("• Mean reversion / RSI-Bollinger squeeze", color = Muted)
+                Text("• VWAP pullback / intraday fair-value strategy", color = Muted)
+                Text("• Donchian breakout / volatility expansion", color = Muted)
+                Text("• Range grid with inventory/risk caps", color = Muted)
+                Text("• Market-making spread capture with order-book imbalance", color = Muted)
+                Text("• Funding/news-event risk-off strategy", color = Muted)
+                Text("• Pairs/relative-strength rotation between correlated assets", color = Muted)
+                Text("• DCA accumulation mode with crash protection", color = Muted)
+                Text("• Momentum spike continuation with time-based exit", color = Muted)
+                Text("• Volume anomaly / whale-move detection from order book depth", color = Muted)
             }
         }
         item {
@@ -1494,6 +1704,7 @@ private fun ChartHubScreen(
     trades: List<TradeEntity>,
     selectedSymbol: String,
     selectedTimeframe: Timeframe,
+    activePositionSymbols: List<String>,
     latestDecision: AiDecision?,
     autoRefresh: Boolean,
     onOpen: (AppTab) -> Unit,
@@ -1778,7 +1989,12 @@ private fun ChartScreen(
     onTimeframeChange: (Timeframe) -> Unit,
     onRefresh: () -> Unit
 ) {
-    val symbols = settings.symbols().ifEmpty { listOf("BTCEUR", "ETHEUR") }
+    val symbols = (activePositionSymbols + settings.symbols())
+        .map { it.uppercase().replace("/", "").replace("-", "") }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .ifEmpty { listOf("BTCEUR", "ETHEUR") }
+    val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
     var windowSize by remember { mutableStateOf(72) }
     var panOffset by remember { mutableStateOf(0) }
     LazyColumn(
@@ -1792,14 +2008,30 @@ private fun ChartScreen(
         item {
             GlassCard {
                 Column {
-                    Text("Symbol", fontWeight = FontWeight.Bold)
+                    Text("Active Position Charts", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    if (activePositionSymbols.isEmpty()) {
+                        Text("No active positions detected yet. The list refreshes from Portfolio + Lifecycle while this chart tab is open.", color = Muted)
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(activePositionSymbols) { symbol ->
+                                FilterChip(
+                                    selected = symbol.equals(selectedSymbol, ignoreCase = true),
+                                    onClick = { onSymbolChange(symbol) },
+                                    label = { Text(symbol) }
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("All chart symbols", fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(symbols) { symbol ->
                             FilterChip(
                                 selected = symbol.equals(selectedSymbol, ignoreCase = true),
                                 onClick = { onSymbolChange(symbol) },
-                                label = { Text(symbol) }
+                                label = { Text(if (activeSet.contains(symbol)) "$symbol • ACTIVE" else symbol) }
                             )
                         }
                     }
@@ -1858,6 +2090,7 @@ private fun ChartScreen(
                 ToggleInfo("Candlestick bodies + wicks", true)
                 ToggleInfo("Volume bars", true)
                 ToggleInfo("Zoom / pan controls", true)
+                ToggleInfo("Active position symbols", activePositionSymbols.isNotEmpty())
                 ToggleInfo("Actual entry/exit markers", trades.isNotEmpty())
                 ToggleInfo("TP / SL overlay lines", true)
                 ToggleInfo("Current price marker", true)
@@ -2027,6 +2260,14 @@ private fun BuildHealthScreen(
 
 @Composable
 private fun NotificationCenterScreen(history: List<String>, settings: BotSettings) {
+    val groupedHistory = history
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .groupingBy { it }
+        .eachCount()
+        .entries
+        .toList()
+        .take(50)
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
@@ -2046,11 +2287,12 @@ private fun NotificationCenterScreen(history: List<String>, settings: BotSetting
             GlassCard {
                 Text("Recent bot events", fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(8.dp))
-                if (history.isEmpty()) {
+                if (groupedHistory.isEmpty()) {
                     Text("No events recorded yet.", color = Muted)
                 } else {
-                    history.take(25).forEach {
-                        Text("• $it", color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    groupedHistory.forEach { entry ->
+                        val countText = if (entry.value > 1) " ×${entry.value}" else ""
+                        Text("• ${entry.key}$countText", color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.height(4.dp))
                     }
                 }
@@ -2058,7 +2300,7 @@ private fun NotificationCenterScreen(history: List<String>, settings: BotSetting
         }
         item {
             GlassCard {
-                SectionTitle("Recommended alert types", "Next native notification upgrade can add separate Android channels.")
+                SectionTitle("Notification cleanup", "Repeated identical events are grouped so the same message does not appear three times.")
                 Text("• Buy / sell executed", color = Muted)
                 Text("• Trade blocked with reason", color = Muted)
                 Text("• Risk-off / emergency stop", color = Muted)
@@ -2518,6 +2760,19 @@ private fun BackupRestoreScreen(
 ) {
     var backupText by remember { mutableStateOf("") }
     var customBackupDirectory by remember(backupDirectoryPath) { mutableStateOf(backupDirectoryPath) }
+    val context = LocalContext.current
+    val directoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            customBackupDirectory = it.toString()
+            onBackupDirectoryPathChanged(it.toString())
+        }
+    }
     var restoreInput by remember { mutableStateOf("") }
     var restoreResult by remember { mutableStateOf("") }
     var replaceExistingLocalData by remember { mutableStateOf(false) }
@@ -2581,20 +2836,31 @@ private fun BackupRestoreScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Backup / Restore", "Crash-safe export plus importer for settings, trade journal and open lifecycle positions.") }
+        item { SectionTitle("Backup / Restore", "Folder-picker export/import for the complete local app state.") }
         item {
             GlassCard {
                 Column {
-                    OutlinedTextField(
-                        value = customBackupDirectory,
-                        onValueChange = {
-                            customBackupDirectory = it
-                            onBackupDirectoryPathChanged(it)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Custom backup directory path, empty = default") }
-                    )
-                    Text("Example default: app external files /backups. On Android, custom folders must be writable by the app; if not, export falls back to the default app backup folder.", color = Muted)
+                    GlassCard {
+                        SectionTitle("Backup folder", "Use Android's folder picker. Manual path entry has been removed.")
+                        Text(
+                            if (customBackupDirectory.isBlank()) "No folder selected yet. Export will use the default app backup folder." else "Selected folder: $customBackupDirectory",
+                            color = Muted,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { directoryPicker.launch(null) }, colors = ButtonDefaults.buttonColors(containerColor = Electric)) {
+                                Text("Select Folder")
+                            }
+                            OutlinedButton(onClick = {
+                                customBackupDirectory = ""
+                                onBackupDirectoryPathChanged("")
+                            }) {
+                                Text("Use Default")
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
@@ -2648,16 +2914,16 @@ private fun BackupRestoreScreen(
                     Spacer(Modifier.height(10.dp))
                     Text(restoreResult, color = Mint)
                 }
-                Text("Restores: settings, trade journal and open lifecycle positions. Secrets are intentionally not restored.", color = Amber)
+                Text("Restores: settings, secure credentials, trade journal, positions, tax rows and learning data when present in the backup.", color = Amber)
             }
         }
         item {
             GlassCard {
                 SectionTitle("Automatic save behavior", "Normal app updates keep local data automatically as long as the package name stays the same.")
                 Text("Saved automatically: settings, local database, trade journal, learning profiles, tax rows and local bot history.", color = Muted)
-                Text("Manual export: choose a writable backup directory or leave it empty for the default app backup folder, then press Export All Settings + Data.", color = Muted)
+                Text("Manual path entry was removed. Use Select Folder or Use Default, then press Export All Settings + Data.", color = Muted)
                 Text("Manual restore: paste the backup text or the local file path into Load / Restore Backup.", color = Muted)
-                Text("Not exported/restored for security: Kraken API secrets, Telegram bot token, Discord tokens/webhooks and remote command PIN.", color = Amber)
+                Text("Full backup includes credentials/tokens/PINs because this backup is meant to restore literally everything. Keep the backup file private.", color = Amber)
             }
         }
     }
@@ -2883,22 +3149,67 @@ private fun PortfolioRotationEngineScreen(settings: BotSettings, decisions: List
 @Composable
 private fun StrategyAutoTunerScreen(
     settings: BotSettings,
+    activePositionSymbols: List<String>,
+    onApplySettings: (BotSettings) -> Unit,
     onRunHistoricalBacktest: (BotSettings, String, Timeframe, StrategyMode, Int, (BacktestReport) -> Unit) -> Unit
 ) {
     var reports by remember { mutableStateOf<List<BacktestReport>>(emptyList()) }
     var running by remember { mutableStateOf(false) }
-    val symbol = settings.symbols().firstOrNull() ?: "BTCEUR"
+    var expectedReports by remember { mutableStateOf(0) }
+    var appliedMessage by remember { mutableStateOf("") }
+    val symbols = (settings.symbols() + activePositionSymbols)
+        .map { it.uppercase().replace("/", "").replace("-", "") }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .ifEmpty { listOf("BTCEUR", "ETHEUR") }
+    val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
     val strategies = listOf(StrategyMode.SCALPING, StrategyMode.TREND, StrategyMode.BREAKOUT, StrategyMode.REVERSAL, StrategyMode.NEWS_MOMENTUM)
+
+    fun sortedReports(input: List<BacktestReport>): List<BacktestReport> =
+        input.sortedWith(
+            compareByDescending<BacktestReport> { activeSet.contains(it.symbol.uppercase().replace("/", "").replace("-", "")) }
+                .thenByDescending { it.passedLiveGate }
+                .thenByDescending { it.profitFactor }
+                .thenByDescending { it.netReturnPercent }
+        )
 
     fun runAutoTune() {
         running = true
+        appliedMessage = ""
         reports = emptyList()
-        strategies.forEach { strategy ->
-            onRunHistoricalBacktest(settings, symbol, Timeframe.M15, strategy, 720) { report ->
-                reports = (reports + report).sortedWith(compareByDescending<BacktestReport> { it.passedLiveGate }.thenByDescending { it.profitFactor })
-                if (reports.size >= strategies.size) running = false
+        expectedReports = symbols.size * strategies.size
+        symbols.forEach { symbol ->
+            strategies.forEach { strategy ->
+                onRunHistoricalBacktest(settings.copy(symbolsCsv = symbols.joinToString(",")), symbol, Timeframe.M15, strategy, 720) { report ->
+                    val updated = sortedReports(reports + report)
+                    reports = updated
+                    if (updated.size >= expectedReports) running = false
+                }
             }
         }
+    }
+
+    fun applyBestToLiveSettings() {
+        val best = reports.firstOrNull()
+        if (best == null) {
+            appliedMessage = "No auto-tune result to apply yet."
+            return
+        }
+        if (!best.passedLiveGate) {
+            appliedMessage = "Best candidate did not pass the live gate, so it was not applied."
+            return
+        }
+        val updated = settings.copy(
+            symbolsCsv = symbols.joinToString(","),
+            strategyMode = best.strategy,
+            enableBacktestGate = true,
+            enableForwardTestGate = true,
+            adaptiveStrategyLearningEnabled = true,
+            autoTradeMultipleSymbolsPerScan = true,
+            autoSymbolDiscoveryEnabled = true
+        )
+        onApplySettings(updated)
+        appliedMessage = "Applied to live settings: strategy=${best.strategy.name}, universe=${symbols.joinToString(",")}. Existing LIVE_AUTO safety gates still apply."
     }
 
     LazyColumn(
@@ -2906,29 +3217,65 @@ private fun StrategyAutoTunerScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Strategy Auto-Tuner", "Tests strategies on Kraken OHLC and recommends the strongest candidate.") }
+        item { SectionTitle("Strategy Auto-Tuner", "Tests strategies on Kraken OHLC for configured symbols plus active positions, then can apply the best passed strategy to live settings.") }
         item {
             HeroCard(
-                title = "Auto-tune $symbol",
-                subtitle = if (running) "Running OHLC tests..." else "Compares strategy candidates against live-gate thresholds.",
+                title = "Auto-tune ${symbols.size} symbol(s)",
+                subtitle = if (running) "Running ${reports.size}/$expectedReports OHLC tests..." else "Universe: ${symbols.joinToString(", ")}",
                 primaryButton = if (running) "Running..." else "Run Auto-Tune",
                 secondaryButton = "Clear",
                 onPrimary = { if (!running) runAutoTune() },
-                onSecondary = { reports = emptyList(); running = false }
+                onSecondary = { reports = emptyList(); running = false; appliedMessage = "" }
             )
+        }
+        item {
+            GlassCard {
+                Text("Live usage", fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(6.dp))
+                Text("Auto-Tune is no longer recommendation-only. After tests finish, you can apply the best passed candidate to the live strategy settings.", color = Muted)
+                Text("This changes strategyMode and symbol universe, but does not bypass LIVE_AUTO preflight, release safety, risk limits, or order-book guards.", color = Amber)
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = { applyBestToLiveSettings() },
+                    enabled = !running && reports.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Electric),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Apply Best Passed Strategy To Live Settings")
+                }
+                if (appliedMessage.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(appliedMessage, color = if (appliedMessage.startsWith("Applied")) Mint else Amber)
+                }
+            }
         }
         if (reports.isNotEmpty()) {
             val best = reports.first()
             item {
                 GlassCard {
-                    Text("Recommended: ${best.strategy.name}", fontWeight = FontWeight.ExtraBold, color = Mint)
-                    Text("Profit factor ${best.profitFactor}, win ${best.winRatePercent}%, drawdown ${best.maxDrawdownPercent}%", color = Muted)
-                    Text("Use this as a recommendation only; settings are not auto-written yet.", color = Amber)
+                    Text("Best: ${best.symbol} — ${best.strategy.name}", fontWeight = FontWeight.ExtraBold, color = Mint)
+                    Text("Profit factor ${best.profitFactor}, win ${best.winRatePercent}%, drawdown ${best.maxDrawdownPercent}%, liveGate=${best.passedLiveGate}", color = Muted)
+                    if (activeSet.contains(best.symbol.uppercase().replace("/", "").replace("-", ""))) {
+                        Text("Best candidate is from an ACTIVE POSITION symbol.", color = Amber, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-            items(reports) { BacktestReportCard(title = "Auto-tune ${it.strategy.name}", report = it) }
+            items(reports) { report ->
+                val normalized = report.symbol.uppercase().replace("/", "").replace("-", "")
+                Column {
+                    if (activeSet.contains(normalized)) {
+                        Text("ACTIVE POSITION", color = Amber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    }
+                    BacktestReportCard(title = "Auto-tune ${report.symbol} ${report.strategy.name}", report = report)
+                }
+            }
         } else {
-            item { GlassCard { Text("No auto-tune results yet.", color = Muted) } }
+            item {
+                GlassCard {
+                    Text("No auto-tune results yet.", color = Muted)
+                    Text("Press Run Auto-Tune to test every strategy across configured symbols and active positions.", color = Muted)
+                }
+            }
         }
     }
 }
@@ -3332,27 +3679,67 @@ private fun PositionCard(position: com.ksp.cryptobot.core.PositionInfo) {
 }
 
 @Composable
-private fun HistoryScreen(settings: BotSettings) {
+private fun HistoryScreen(
+    settings: BotSettings,
+    trades: List<TradeEntity>,
+    events: List<String>,
+    onRefresh: () -> Unit
+) {
+    val realized = trades.mapNotNull { it.realizedPnlEur.toBigDecimalOrNull() }.fold(BigDecimal.ZERO) { a, b -> a + b }
+    val buyCount = trades.count { it.side.uppercase().contains("BUY") }
+    val sellCount = trades.count { it.side.uppercase().contains("SELL") }
+    val uniqueEvents = events.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(60)
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Trade Memory Brain", "Every trade can become training data for future AI decisions.") }
+        item {
+            SectionTitle("Actual History", "Real local trade journal plus deduplicated bot events. This replaces the old static Trade Memory explanation screen.")
+        }
         item {
             GlassCard {
-                ToggleInfo("Previous-trade memory AI", settings.useTradeMemoryAi)
-                Text("Stored factors: symbol, strategy, regime, score, news score, volatility, spread, result, hold time and TP/SL outcome.", color = Muted)
-                Divider(color = Stroke)
-                Text("Example learned rule", fontWeight = FontWeight.Bold)
-                Text("SOL high-ATR setups underperform → apply penalty until performance improves.", color = Muted)
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("History Summary", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+                        Text("Trades=${trades.size} • Events=${uniqueEvents.size}", color = Muted)
+                    }
+                    Button(onClick = onRefresh, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text("Refresh") }
+                }
+                Spacer(Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item { MetricCard("Buys", buyCount.toString(), "Entries", Mint) }
+                    item { MetricCard("Sells", sellCount.toString(), "Exits", Danger) }
+                    item { MetricCard("Realized P/L", "€${realized.setScale(2, RoundingMode.HALF_UP)}", "Known local DB", if (realized >= BigDecimal.ZERO) Mint else Danger) }
+                    item { MetricCard("Mode", settings.mode.name, "Current mode", modeColor(settings.mode)) }
+                }
             }
         }
         item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                item { MetricCard("Memory Window", "75", "Recent similar trades", Electric) }
-                item { MetricCard("Loss Cooldown", "${settings.lossCooldownMinutes}m", "After losing streak", Danger) }
-                item { MetricCard("Safe Mode", if (settings.enableAutoSafeMode) "ON" else "OFF", "Auto-lock risk", Mint) }
+            GlassCard {
+                SectionTitle("Trade History", "Last 100 paper/live trade rows recorded by the app.")
+                if (trades.isEmpty()) {
+                    Text("No trade rows found yet. Run PAPER/LIVE execution or restore a backup with trades.", color = Muted)
+                } else {
+                    trades.take(100).forEach { trade ->
+                        Text("${trade.symbol} ${trade.side} • qty=${trade.quantity} • price=€${trade.priceEur} • fee=€${trade.feeEur} • ${if (trade.paper) "PAPER" else "LIVE"}", color = TextPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("P/L €${trade.realizedPnlEur} • AI ${trade.aiScore} • id=${trade.exchangeOrderId}", color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+            }
+        }
+        item {
+            GlassCard {
+                SectionTitle("Bot Event History", "Deduplicated recent status/events from the foreground service and UI.")
+                if (uniqueEvents.isEmpty()) {
+                    Text("No bot events recorded yet.", color = Muted)
+                } else {
+                    uniqueEvents.forEach { event ->
+                        Text("• $event", color = Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
             }
         }
     }
@@ -3362,9 +3749,12 @@ private fun HistoryScreen(settings: BotSettings) {
 private fun PortfolioScreen(
     settings: BotSettings,
     snapshot: PortfolioSnapshot?,
+    lifecycleSnapshot: LifecycleSnapshot?,
     onRefresh: () -> Unit
 ) {
     val assets = snapshot?.assets.orEmpty()
+    val lifecyclePositions = lifecycleSnapshot?.positions.orEmpty()
+    val positionsByAsset = lifecyclePositions.associateBy { it.baseAsset.uppercase() }
     val total = snapshot?.totalValueEur ?: BigDecimal.ZERO
     val freeEur = snapshot?.freeEur ?: BigDecimal.ZERO
     LazyColumn(
@@ -3388,6 +3778,7 @@ private fun PortfolioScreen(
                 item { MetricCard("Total Value", "€${total.setScale(2, java.math.RoundingMode.DOWN)}", "Estimated from live balances", Mint) }
                 item { MetricCard("Free EUR", "€${freeEur.setScale(2, java.math.RoundingMode.DOWN)}", "BUY budget", Electric) }
                 item { MetricCard("Assets", assets.size.toString(), "Positive balances", Amber) }
+                item { MetricCard("Guarded", lifecyclePositions.size.toString(), "TP/SL/trailing positions", Electric) }
                 item { MetricCard("Mode", settings.mode.name, "Execution mode", modeColor(settings.mode)) }
             }
         }
@@ -3402,7 +3793,7 @@ private fun PortfolioScreen(
                     val pct = if (total > BigDecimal.ZERO && asset.eurValue > BigDecimal.ZERO) {
                         asset.eurValue.divide(total, 4, java.math.RoundingMode.HALF_UP).toFloat().coerceIn(0f, 1f)
                     } else 0f
-                    LiveBalanceRow(asset = asset, progress = pct)
+                    LiveBalanceRow(asset = asset, progress = pct, position = positionsByAsset[asset.asset.uppercase()])
                 }
             }
         }
@@ -3410,7 +3801,11 @@ private fun PortfolioScreen(
 }
 
 @Composable
-private fun LiveBalanceRow(asset: com.ksp.cryptobot.core.BalanceInfo, progress: Float) {
+private fun LiveBalanceRow(
+    asset: com.ksp.cryptobot.core.BalanceInfo,
+    progress: Float,
+    position: com.ksp.cryptobot.core.PositionInfo? = null
+) {
     GlassCard {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
@@ -4425,7 +4820,36 @@ private fun AllocationRow(symbol: String, value: String, progress: Float) {
             Text(value, color = Mint, fontWeight = FontWeight.Bold)
         }
         LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(8.dp), color = Mint, trackColor = Stroke)
+        if (asset.eurValue > BigDecimal.ZERO && asset.eurValue < BigDecimal("5.00")) {
+            Spacer(Modifier.height(8.dp))
+            Text("Dust balance: below typical exchange minimum order value, may be impossible to sell/convert automatically.", color = Amber)
+        }
+        position?.let { pos ->
+            Spacer(Modifier.height(10.dp))
+            Divider(color = Stroke)
+            Spacer(Modifier.height(8.dp))
+            val pnlColor = if (pos.unrealizedPnlEur >= BigDecimal.ZERO) Mint else Danger
+            val trailingArmed = settingsTrailingArmedPlaceholder(pos)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Position guards", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                StatusPill(if (pos.managed) "MANAGED" else "WATCH", if (pos.managed) Mint else Amber)
+            }
+            Spacer(Modifier.height(6.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { StatusPill(if (pos.takeProfitPrice > BigDecimal.ZERO) "TP ARMED" else "TP OFF", if (pos.takeProfitPrice > BigDecimal.ZERO) Mint else Muted) }
+                item { StatusPill(if (pos.stopPrice > BigDecimal.ZERO) "SL ARMED" else "SL OFF", if (pos.stopPrice > BigDecimal.ZERO) Danger else Muted) }
+                item { StatusPill(if (trailingArmed) "TRAILING ARMED" else "TRAILING WAIT", if (trailingArmed) Amber else Muted) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("entry=${pos.entryPrice.setScale(4, java.math.RoundingMode.DOWN)} • now=${pos.currentPrice.setScale(4, java.math.RoundingMode.DOWN)} • high=${pos.highestPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
+            Text("TP=${pos.takeProfitPrice.setScale(4, java.math.RoundingMode.DOWN)} • SL=${pos.stopPrice.setScale(4, java.math.RoundingMode.DOWN)} • trail=${pos.trailingStopPrice.setScale(4, java.math.RoundingMode.DOWN)}", color = Muted)
+            Text("P/L≈€${pos.unrealizedPnlEur.setScale(2, java.math.RoundingMode.HALF_UP)} • ${pos.unrealizedPnlPercent.setScale(2, java.math.RoundingMode.HALF_UP)}% • ${pos.reason}", color = pnlColor)
+        }
     }
+}
+
+private fun settingsTrailingArmedPlaceholder(position: com.ksp.cryptobot.core.PositionInfo): Boolean {
+    return position.trailingStopPrice > BigDecimal.ZERO && position.highestPrice > position.entryPrice
 }
 
 @Composable
@@ -4510,8 +4934,10 @@ private fun actionColor(action: SignalAction): Color = when (action) {
 private fun PerformanceLabScreen(
     snapshot: PerformanceLabSnapshot?,
     settings: BotSettings,
+    activePositionSymbols: List<String>,
     onRefresh: () -> Unit
 ) {
+    val activeSet = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -4522,9 +4948,13 @@ private fun PerformanceLabScreen(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text("Performance Lab", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     Text(
-                        "Paper vs live comparison with automatic strategy promotion gates.",
+                        "Paper vs live comparison with automatic strategy promotion gates for configured symbols plus active positions.",
                         color = Muted
                     )
+                    Text("Promotion universe: ${(settings.symbols() + activePositionSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct().joinToString(", ").ifBlank { "none" }}", color = Muted)
+                    if (activePositionSymbols.isNotEmpty()) {
+                        Text("Active positions included: ${activePositionSymbols.joinToString(", ")}", color = Amber)
+                    }
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         StatusPill("Approved ${snapshot?.approvedCount ?: 0}", Mint)
@@ -4552,6 +4982,9 @@ private fun PerformanceLabScreen(
         }
 
         val candidates = snapshot?.candidates.orEmpty()
+            .sortedWith(compareByDescending<StrategyPromotionCandidate> { activeSet.contains(it.symbol.uppercase().replace("/", "").replace("-", "")) }
+                .thenByDescending { it.status == PromotionStatus.APPROVED }
+                .thenByDescending { it.performanceScore })
         if (candidates.isEmpty()) {
             item {
                 GlassCard {
@@ -4560,7 +4993,13 @@ private fun PerformanceLabScreen(
             }
         } else {
             items(candidates) { candidate ->
-                PerformanceCandidateCard(candidate)
+                val normalized = candidate.symbol.uppercase().replace("/", "").replace("-", "")
+                Column {
+                    if (activeSet.contains(normalized)) {
+                        Text("ACTIVE POSITION", color = Amber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    }
+                    PerformanceCandidateCard(candidate)
+                }
             }
         }
     }
