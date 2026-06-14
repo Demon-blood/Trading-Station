@@ -94,10 +94,11 @@ class TradeLifecycleManager(
             out += "[$symbol] ${spikeTiming.explanation}"
         }
 
+        val hardPriceExit = hitStop || hitTrailing || hitTakeProfit
         val reason = when {
-            hitTrailing && !spikeTiming.shouldHold -> "trailing-stop profit capture"
-            hitTakeProfit && !spikeTiming.shouldHold -> "take-profit target reached"
             hitStop -> "stop-loss protection"
+            hitTrailing -> "trailing-stop profit capture"
+            hitTakeProfit -> "take-profit target reached"
             riskOffSell -> "AI bearish/risk-off sell signal"
             spikeTiming.shouldSellNow -> "spike-exhaustion profit capture"
             else -> null
@@ -109,18 +110,22 @@ class TradeLifecycleManager(
         }
 
         if ((hitTrailing || hitTakeProfit) && spikeTiming.shouldHold) {
-            out += "[$symbol] Spike timing HOLD instead of sell: ${spikeTiming.explanation}"
-            log(out.last(), "LEARN")
-            return out
+            out += "[$symbol] Spike timing wanted HOLD, but hard exit is active ($reason). Selling anyway. ${spikeTiming.explanation}"
+            log(out.last(), "WARN")
         }
 
         val learnedHold = selfLearningEngine.evaluateLearnedHoldExit(dao, settings, position, reason, decision)
-        if (learnedHold.shouldHold) {
+        if (learnedHold.shouldHold && !hardPriceExit) {
             out += "[$symbol] Learned HOLD instead of sell: ${learnedHold.explanation}"
             log(out.last(), "LEARN")
             return out
         } else if (settings.learnedHoldForProfitEnabled && learnedHold.explanation.isNotBlank()) {
-            out += "[$symbol] Learned hold check: ${learnedHold.explanation}"
+            out += if (hardPriceExit && learnedHold.shouldHold) {
+                "[$symbol] Learned hold wanted HOLD, but hard exit is active ($reason). Selling anyway. ${learnedHold.explanation}"
+            } else {
+                "[$symbol] Learned hold check: ${learnedHold.explanation}"
+            }
+            log(out.last(), if (hardPriceExit && learnedHold.shouldHold) "WARN" else "LEARN")
         }
 
         if (hasSellOrder && !settings.enableMarketOrders) {
