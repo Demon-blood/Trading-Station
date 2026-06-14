@@ -17,6 +17,7 @@ class NewsApiClient(
     private val baseUrl: String = "https://newsapi.org",
     private val providerName: String = "NewsAPI"
 ) : NewsClient {
+    fun label(): String = providerName
     private val client = OkHttpClient.Builder().build()
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val adapter = moshi.adapter(NewsApiResponse::class.java)
@@ -52,9 +53,16 @@ class NewsApiClient(
             .build()
         val request = Request.Builder().url(url).get().build()
         return client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return emptyList()
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val detail = body.take(220).replace("\n", " ")
+                error("$providerName HTTP ${response.code}: ${response.message}. $detail")
+            }
+            if (body.isBlank()) return emptyList()
             val parsed = adapter.fromJson(body) ?: return emptyList()
+            if (!parsed.status.equals("ok", ignoreCase = true)) {
+                error("$providerName status=${parsed.status ?: "unknown"}: ${parsed.message.orEmpty().take(220)}")
+            }
             parsed.articles.mapNotNull { article ->
                 val title = article.title ?: return@mapNotNull null
                 if (title.equals("[Removed]", ignoreCase = true)) return@mapNotNull null
@@ -119,7 +127,7 @@ class NewsApiClient(
     }
 }
 
-data class NewsApiResponse(val status: String?, val totalResults: Int?, val articles: List<NewsApiArticle> = emptyList())
+data class NewsApiResponse(val status: String?, val totalResults: Int?, val articles: List<NewsApiArticle> = emptyList(), val message: String? = null)
 data class NewsApiArticle(
     val source: NewsApiSource?,
     val title: String?,

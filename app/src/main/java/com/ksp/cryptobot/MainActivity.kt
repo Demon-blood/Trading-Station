@@ -922,7 +922,7 @@ private fun AdvancedBotApp(
                     },
                     onScanNews = { symbol ->
                         val scanSymbol = symbol.ifBlank { settings.symbols().firstOrNull() ?: "BTCEUR" }
-                        onScan(settings.copy(symbolsCsv = scanSymbol), false) { result ->
+                        onScan(settings.copy(symbolsCsv = scanSymbol, useNewsAi = true), false) { result ->
                             decisions = result
                             onLoadNewsHistory(scanSymbol, 200) { rows -> newsHistory = rows }
                             statusStore.write("News scan complete for $scanSymbol. decisions=${result.size}")
@@ -1218,7 +1218,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v3.2.1 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v3.2.2 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }

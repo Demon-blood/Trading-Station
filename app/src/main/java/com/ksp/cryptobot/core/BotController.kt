@@ -1232,16 +1232,7 @@ Crypto TradeStation remote commands:
                 val rec = recommendationEngine.recommend(ticker, settings, candlesByTimeframe = candlesByTimeframe)
                 dao.insertSignal(rec.toEntity())
                 val news = if (settings.useNewsAi) {
-                    runCatching { newsClient.latestCryptoNews(symbol) }
-                        .onSuccess { articles ->
-                            cacheNewsArticles(symbol, articles)
-                            val topTitles = articles.take(3).joinToString(" | ") { it.title.take(90) }
-                            updateStatus("[$symbol] News check complete: articles=${articles.size}${articles.firstOrNull()?.source?.takeIf { it.isNotBlank() }?.let { ", topSource=$it" } ?: ""}${if (topTitles.isNotBlank()) ", top=$topTitles" else ""}.", if (articles.isEmpty()) "WARN" else "INFO")
-                        }
-                        .onFailure { error ->
-                            updateStatus("[$symbol] News check failed: ${error.message}", "WARN")
-                        }
-                        .getOrDefault(emptyList())
+                    fetchNewsForSymbol(symbol)
                 } else emptyList()
                 val newsTitles = news.take(3).joinToString(" | ") { it.title.take(100) }
                 val baseDecision = aiDecisionEngine.decide(rec, news, recentTrades, settings).let { decision ->
@@ -1917,6 +1908,48 @@ Crypto TradeStation remote commands:
             ExchangeProvider.BITVAVO -> BitvavoClient(apiKey, secret)
             ExchangeProvider.MANUAL -> ManualExecutionClient()
         }
+    }
+
+
+
+    private suspend fun fetchNewsForSymbol(symbol: String): List<NewsArticle> {
+        val providers = mutableListOf<Pair<String, NewsClient>>()
+        val keys = settingsStore.newsApiKey()
+            ?.split(',', ';', '\n')
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+        keys.forEachIndexed { index, key ->
+            val client = NewsApiClient(key, providerName = "NewsAPI-${index + 1}")
+            providers += client.label() to client
+        }
+        providers += "CryptoCompare" to CryptoCompareNewsClient()
+
+        if (providers.isEmpty()) {
+            updateStatus("[$symbol] News check skipped: no news providers configured.", "WARN")
+            return emptyList()
+        }
+
+        val all = mutableListOf<NewsArticle>()
+        providers.forEach { (name, provider) ->
+            runCatching { provider.latestCryptoNews(symbol) }
+                .onSuccess { articles ->
+                    all += articles
+                    updateStatus("[$symbol] $name API call complete: articles=${articles.size}.", if (articles.isEmpty()) "WARN" else "INFO")
+                }
+                .onFailure { error ->
+                    updateStatus("[$symbol] $name API call failed: ${error.message}", "WARN")
+                }
+        }
+
+        val deduped = all
+            .distinctBy { it.title.lowercase().take(120) }
+            .sortedByDescending { it.publishedAt }
+            .take(40)
+        cacheNewsArticles(symbol, deduped)
+        val topTitles = deduped.take(3).joinToString(" | ") { it.title.take(90) }
+        updateStatus("[$symbol] News check complete: providers=${providers.size}, totalArticles=${deduped.size}${deduped.firstOrNull()?.source?.takeIf { it.isNotBlank() }?.let { ", topSource=$it" } ?: ""}${if (topTitles.isNotBlank()) ", top=$topTitles" else ""}.", if (deduped.isEmpty()) "WARN" else "INFO")
+        return deduped
     }
 
 
