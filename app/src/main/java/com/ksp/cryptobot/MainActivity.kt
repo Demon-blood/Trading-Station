@@ -538,6 +538,11 @@ private fun AdvancedBotApp(
     var apiKey by remember { mutableStateOf("") }
     var secretKey by remember { mutableStateOf("") }
     var newsKey by remember { mutableStateOf("") }
+    var cryptoPanicKey by remember { mutableStateOf("") }
+    var marketauxKey by remember { mutableStateOf("") }
+    var newsDataKey by remember { mutableStateOf("") }
+    var gNewsKey by remember { mutableStateOf("") }
+    var guardianKey by remember { mutableStateOf("") }
     var symbols by remember { mutableStateOf(settings.symbolsCsv) }
     var maxPosition by remember { mutableStateOf(settings.maxPositionEur.toPlainString()) }
     var maxLoss by remember { mutableStateOf(settings.maxDailyLossEur.toPlainString()) }
@@ -1039,9 +1044,19 @@ private fun AdvancedBotApp(
                     apiKey = apiKey,
                     secretKey = secretKey,
                     newsKey = newsKey,
+                    cryptoPanicKey = cryptoPanicKey,
+                    marketauxKey = marketauxKey,
+                    newsDataKey = newsDataKey,
+                    gNewsKey = gNewsKey,
+                    guardianKey = guardianKey,
                     onApiKey = { apiKey = it },
                     onSecretKey = { secretKey = it },
                     onNewsKey = { newsKey = it },
+                    onCryptoPanicKey = { cryptoPanicKey = it },
+                    onMarketauxKey = { marketauxKey = it },
+                    onNewsDataKey = { newsDataKey = it },
+                    onGNewsKey = { gNewsKey = it },
+                    onGuardianKey = { guardianKey = it },
                     settings = settings,
                     onExchangeProvider = { provider ->
                         persistSettings(settings.copy(
@@ -1073,7 +1088,12 @@ private fun AdvancedBotApp(
                             statusStore.write("${settings.exchangeProvider.name} API credentials saved locally.")
                         }
                         if (newsKey.isNotBlank()) store.saveNewsApiKey(newsKey)
-                        status = "${settings.exchangeProvider.name.replace('_', ' ')} secrets saved locally"
+                        if (cryptoPanicKey.isNotBlank()) store.saveCryptoPanicApiKey(cryptoPanicKey)
+                        if (marketauxKey.isNotBlank()) store.saveMarketauxApiKey(marketauxKey)
+                        if (newsDataKey.isNotBlank()) store.saveNewsDataApiKey(newsDataKey)
+                        if (gNewsKey.isNotBlank()) store.saveGNewsApiKey(gNewsKey)
+                        if (guardianKey.isNotBlank()) store.saveGuardianApiKey(guardianKey)
+                        status = "${settings.exchangeProvider.name.replace('_', ' ')} / news secrets saved locally"
                     }
                 )
                 AppTab.HEALTH -> BuildHealthScreen(
@@ -1218,7 +1238,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v3.2.3 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v3.2.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -3974,11 +3994,11 @@ private fun NewsScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("News Dashboard", "Cached per-symbol articles from NewsAPI + CryptoCompare, used by AI signal scoring.") }
+        item { SectionTitle("News Dashboard", "Cached per-symbol articles from GDELT, RSS, Marketaux, NewsData.io, GNews, Guardian and NewsAPI.org, used by AI signal scoring.") }
         item {
             GlassCard {
                 ToggleRow("Use news sentiment in AI decisions", settings.useNewsAi, onToggleNews)
-                Text("During scans, every symbol fetches news, stores articles locally, and adds article titles into the AI decision explanation.", color = Muted)
+                Text("During scans, every symbol checks GDELT + RSS + Marketaux + NewsData.io + GNews + Guardian + NewsAPI.org, stores articles locally, and adds article titles into the AI decision explanation.", color = Muted)
                 Spacer(Modifier.height(10.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item {
@@ -4825,9 +4845,19 @@ private fun SettingsScreen(
     apiKey: String,
     secretKey: String,
     newsKey: String,
+    cryptoPanicKey: String,
+    marketauxKey: String,
+    newsDataKey: String,
+    gNewsKey: String,
+    guardianKey: String,
     onApiKey: (String) -> Unit,
     onSecretKey: (String) -> Unit,
     onNewsKey: (String) -> Unit,
+    onCryptoPanicKey: (String) -> Unit,
+    onMarketauxKey: (String) -> Unit,
+    onNewsDataKey: (String) -> Unit,
+    onGNewsKey: (String) -> Unit,
+    onGuardianKey: (String) -> Unit,
     settings: BotSettings,
     onExchangeProvider: (ExchangeProvider) -> Unit,
     onModeChange: (BotMode) -> Unit,
@@ -4882,7 +4912,12 @@ private fun SettingsScreen(
                 SectionTitle("Secure API Credentials", "Stored locally through Android Keystore-backed encrypted storage.")
                 OutlinedTextField(value = apiKey, onValueChange = onApiKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = secretKey, onValueChange = onSecretKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} secret key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
-                OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI key(s), comma-separated") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI.org key(s), comma-separated") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = marketauxKey, onValueChange = onMarketauxKey, label = { Text("Marketaux API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = newsDataKey, onValueChange = onNewsDataKey, label = { Text("NewsData.io API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = gNewsKey, onValueChange = onGNewsKey, label = { Text("GNews API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = guardianKey, onValueChange = onGuardianKey, label = { Text("Guardian API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                Text("News stack: GDELT + RSS + Marketaux + NewsData.io + GNews + Guardian + NewsAPI.org.", color = Muted)
                 Button(onClick = onSaveKeys, modifier = Modifier.fillMaxWidth()) { Text("Save Secure Keys") }
             }
         }

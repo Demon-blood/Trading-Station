@@ -18,7 +18,14 @@ import com.ksp.cryptobot.execution.AdvancedRiskManager
 import com.ksp.cryptobot.intelligence.AiDecisionEngine
 import com.ksp.cryptobot.news.NewsApiClient
 import com.ksp.cryptobot.news.CompositeNewsClient
-import com.ksp.cryptobot.news.CryptoCompareNewsClient
+import com.ksp.cryptobot.news.CryptoPanicNewsClient
+import com.ksp.cryptobot.news.GdeltNewsClient
+import com.ksp.cryptobot.news.MarketauxNewsClient
+import com.ksp.cryptobot.news.RssFeedNewsClient
+import com.ksp.cryptobot.news.NewsDataNewsClient
+import com.ksp.cryptobot.news.GNewsNewsClient
+import com.ksp.cryptobot.news.GuardianNewsClient
+import com.ksp.cryptobot.news.CoinGeckoNewsClient
 import com.ksp.cryptobot.news.NewsClient
 import com.ksp.cryptobot.news.NoopNewsClient
 import com.ksp.cryptobot.settings.AppSettingsStore
@@ -1182,8 +1189,11 @@ Crypto TradeStation remote commands:
                 ?.map { it.trim() }
                 ?.count { it.isNotBlank() }
                 ?: 0
-            val keyConfigured = newsApiKeyCount > 0
-            updateStatus("News AI ${if (keyConfigured) "enabled with $newsApiKeyCount NewsAPI key(s) + CryptoCompare" else "enabled with CryptoCompare only; save NewsAPI key(s) for extra coverage"}.", if (keyConfigured) "INFO" else "WARN")
+            val marketauxKey = !settingsStore.marketauxApiKey().isNullOrBlank()
+            val newsDataKey = !settingsStore.newsDataApiKey().isNullOrBlank()
+            val gNewsKey = !settingsStore.gNewsApiKey().isNullOrBlank()
+            val guardianKey = !settingsStore.guardianApiKey().isNullOrBlank()
+            updateStatus("News AI enabled: GDELT + RSS + ${if (marketauxKey) "Marketaux" else "Marketaux(no key)"} + ${if (newsDataKey) "NewsData.io" else "NewsData.io(no key)"} + ${if (gNewsKey) "GNews" else "GNews(no key)"} + ${if (guardianKey) "Guardian" else "Guardian(no key)"} + $newsApiKeyCount NewsAPI key(s).", "INFO")
         }
         val recentTrades = dao.recentTradesSnapshot(settings.selfLearningLookbackTrades.coerceAtLeast(100))
         if (settings.trueSelfLearningEnabled) {
@@ -1914,20 +1924,38 @@ Crypto TradeStation remote commands:
 
     private suspend fun fetchNewsForSymbol(symbol: String): List<NewsArticle> {
         val providers = mutableListOf<Pair<String, NewsClient>>()
-        val keys = settingsStore.newsApiKey()
+
+        // Requested provider stack.
+        providers += "GDELT" to GdeltNewsClient()
+        providers += "RSS" to RssFeedNewsClient()
+
+        settingsStore.marketauxApiKey()?.trim()?.takeIf { it.isNotBlank() }?.let {
+            providers += "Marketaux" to MarketauxNewsClient(it)
+        } ?: updateStatus("[$symbol] Marketaux skipped: no API key saved.", "WARN")
+
+        settingsStore.newsDataApiKey()?.trim()?.takeIf { it.isNotBlank() }?.let {
+            providers += "NewsData.io" to NewsDataNewsClient(it)
+        } ?: updateStatus("[$symbol] NewsData.io skipped: no API key saved.", "WARN")
+
+        settingsStore.gNewsApiKey()?.trim()?.takeIf { it.isNotBlank() }?.let {
+            providers += "GNews" to GNewsNewsClient(it)
+        } ?: updateStatus("[$symbol] GNews skipped: no API key saved.", "WARN")
+
+        settingsStore.guardianApiKey()?.trim()?.takeIf { it.isNotBlank() }?.let {
+            providers += "Guardian" to GuardianNewsClient(it)
+        } ?: updateStatus("[$symbol] Guardian skipped: no API key saved.", "WARN")
+
+        val newsApiKeys = settingsStore.newsApiKey()
             ?.split(',', ';', '\n')
             ?.map { it.trim() }
             ?.filter { it.isNotBlank() }
             .orEmpty()
-        keys.forEachIndexed { index, key ->
+        newsApiKeys.forEachIndexed { index, key ->
             val client = NewsApiClient(key, providerName = "NewsAPI-${index + 1}")
             providers += client.label() to client
         }
-        providers += "CryptoCompare" to CryptoCompareNewsClient()
-
-        if (providers.isEmpty()) {
-            updateStatus("[$symbol] News check skipped: no news providers configured.", "WARN")
-            return emptyList()
+        if (newsApiKeys.isEmpty()) {
+            updateStatus("[$symbol] NewsAPI.org skipped: no API key saved.", "WARN")
         }
 
         val all = mutableListOf<NewsArticle>()
@@ -1945,7 +1973,7 @@ Crypto TradeStation remote commands:
         val deduped = all
             .distinctBy { it.title.lowercase().take(120) }
             .sortedByDescending { it.publishedAt }
-            .take(40)
+            .take(80)
         cacheNewsArticles(symbol, deduped)
         val topTitles = deduped.take(3).joinToString(" | ") { it.title.take(90) }
         updateStatus("[$symbol] News check complete: providers=${providers.size}, totalArticles=${deduped.size}${deduped.firstOrNull()?.source?.takeIf { it.isNotBlank() }?.let { ", topSource=$it" } ?: ""}${if (topTitles.isNotBlank()) ", top=$topTitles" else ""}.", if (deduped.isEmpty()) "WARN" else "INFO")
@@ -1984,7 +2012,14 @@ Crypto TradeStation remote commands:
 
     private fun createNewsClient(settings: BotSettings): NewsClient {
         if (!settings.useNewsAi) return NoopNewsClient()
-        val providers = mutableListOf<NewsClient>()
+        val providers = mutableListOf<NewsClient>(
+            GdeltNewsClient(),
+            RssFeedNewsClient()
+        )
+        settingsStore.marketauxApiKey()?.takeIf { it.isNotBlank() }?.let { providers += MarketauxNewsClient(it) }
+        settingsStore.newsDataApiKey()?.takeIf { it.isNotBlank() }?.let { providers += NewsDataNewsClient(it) }
+        settingsStore.gNewsApiKey()?.takeIf { it.isNotBlank() }?.let { providers += GNewsNewsClient(it) }
+        settingsStore.guardianApiKey()?.takeIf { it.isNotBlank() }?.let { providers += GuardianNewsClient(it) }
         val keys = settingsStore.newsApiKey()
             ?.split(',', ';', '\n')
             ?.map { it.trim() }
@@ -1993,8 +2028,7 @@ Crypto TradeStation remote commands:
         keys.forEachIndexed { index, key ->
             providers += NewsApiClient(key, providerName = "NewsAPI-${index + 1}")
         }
-        providers += CryptoCompareNewsClient()
-        return if (providers.isEmpty()) NoopNewsClient() else CompositeNewsClient(providers)
+        return CompositeNewsClient(providers)
     }
 
 

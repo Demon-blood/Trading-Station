@@ -436,6 +436,11 @@ class AppSettingsStore(context: Context) {
     fun binanceSecretKey(): String? = exchangeSecretKey(ExchangeProvider.BINANCE_READ_ONLY)
 
     fun saveNewsApiKey(apiKey: String) = secure.saveEncryptedString("news_api_key", apiKey.trim())
+    fun saveCryptoPanicApiKey(apiKey: String) = secure.saveEncryptedString("cryptopanic_api_key", apiKey.trim())
+    fun saveMarketauxApiKey(apiKey: String) = secure.saveEncryptedString("marketaux_api_key", apiKey.trim())
+    fun saveNewsDataApiKey(apiKey: String) = secure.saveEncryptedString("newsdata_api_key", apiKey.trim())
+    fun saveGNewsApiKey(apiKey: String) = secure.saveEncryptedString("gnews_api_key", apiKey.trim())
+    fun saveGuardianApiKey(apiKey: String) = secure.saveEncryptedString("guardian_api_key", apiKey.trim())
 
     fun saveTelegramConfig(botToken: String, chatId: String) {
         secure.saveEncryptedString("telegram_bot_token", botToken.trim())
@@ -474,6 +479,11 @@ class AppSettingsStore(context: Context) {
             exchangeSecretKey(provider)?.let { out["${provider.name.lowercase()}_secret_key"] = it }
         }
         newsApiKey()?.let { out["news_api_key"] = it }
+        cryptoPanicApiKey()?.let { out["cryptopanic_api_key"] = it }
+        marketauxApiKey()?.let { out["marketaux_api_key"] = it }
+        newsDataApiKey()?.let { out["newsdata_api_key"] = it }
+        gNewsApiKey()?.let { out["gnews_api_key"] = it }
+        guardianApiKey()?.let { out["guardian_api_key"] = it }
         telegramBotToken()?.let { out["telegram_bot_token"] = it }
         telegramChatId()?.let { out["telegram_chat_id"] = it }
         discordWebhookUrl()?.let { out["discord_webhook_url"] = it }
@@ -490,6 +500,11 @@ class AppSettingsStore(context: Context) {
             if (api.isNotBlank() || secret.isNotBlank()) saveExchangeKeys(provider, api, secret)
         }
         values["news_api_key"]?.let { saveNewsApiKey(it) }
+        values["cryptopanic_api_key"]?.let { saveCryptoPanicApiKey(it) }
+        values["marketaux_api_key"]?.let { saveMarketauxApiKey(it) }
+        values["newsdata_api_key"]?.let { saveNewsDataApiKey(it) }
+        values["gnews_api_key"]?.let { saveGNewsApiKey(it) }
+        values["guardian_api_key"]?.let { saveGuardianApiKey(it) }
         if (values.containsKey("telegram_bot_token") || values.containsKey("telegram_chat_id")) {
             saveTelegramConfig(values["telegram_bot_token"].orEmpty(), values["telegram_chat_id"].orEmpty())
         }
@@ -517,4 +532,9 @@ class AppSettingsStore(context: Context) {
     }
 
     fun newsApiKey(): String? = secure.readEncryptedString("news_api_key")?.takeIf { it.isNotBlank() }
+    fun cryptoPanicApiKey(): String? = secure.readEncryptedString("cryptopanic_api_key")?.takeIf { it.isNotBlank() }
+    fun marketauxApiKey(): String? = secure.readEncryptedString("marketaux_api_key")?.takeIf { it.isNotBlank() }
+    fun newsDataApiKey(): String? = secure.readEncryptedString("newsdata_api_key")?.takeIf { it.isNotBlank() }
+    fun gNewsApiKey(): String? = secure.readEncryptedString("gnews_api_key")?.takeIf { it.isNotBlank() }
+    fun guardianApiKey(): String? = secure.readEncryptedString("guardian_api_key")?.takeIf { it.isNotBlank() }
 }
