@@ -818,19 +818,26 @@ class BotController(
 
             if (requested.startsWith("content://")) {
                 val treeUri = Uri.parse(requested)
-                val documentUri = DocumentsContract.createDocument(
-                    appContext.contentResolver,
+                val resolver = appContext.contentResolver
+                val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
                     treeUri,
+                    DocumentsContract.getTreeDocumentId(treeUri)
+                )
+                val documentUri = DocumentsContract.createDocument(
+                    resolver,
+                    parentDocumentUri,
                     "text/plain",
                     filename
-                ) ?: error("Android folder picker did not return a writable document URI.")
-                appContext.contentResolver.openOutputStream(documentUri, "w")?.use { stream ->
+                ) ?: error("Android folder picker did not return a writable document URI. Select the backup folder again and allow write access.")
+                resolver.openOutputStream(documentUri, "w")?.use { stream ->
                     stream.write(backup.toByteArray(Charsets.UTF_8))
-                } ?: error("Could not open selected folder for writing.")
+                    stream.flush()
+                } ?: error("Could not open selected folder for writing. Select the backup folder again and allow write access.")
                 val result = buildString {
                     appendLine("BACKUP SAVED SUCCESSFULLY")
                     appendLine("fileUri=$documentUri")
                     appendLine("directoryUri=$treeUri")
+                    appendLine("parentDocumentUri=$parentDocumentUri")
                     appendLine("customDirectoryRequested=$customDirectoryPath")
                     appendLine("sizeBytes=${backup.toByteArray(Charsets.UTF_8).size}")
                     appendLine()
@@ -839,7 +846,7 @@ class BotController(
                     appendLine("[PREVIEW FIRST 80 LINES]")
                     appendLine(preview)
                 }
-                updateStatus("Full backup saved through selected Android folder URI.", "INFO")
+                updateStatus("Full backup saved to selected folder: $filename", "INFO")
                 return result
             }
 
