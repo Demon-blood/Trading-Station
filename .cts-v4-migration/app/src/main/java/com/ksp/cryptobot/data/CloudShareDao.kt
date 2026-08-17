@@ -141,15 +141,15 @@ interface CloudShareDao {
     @Query("""
         SELECT strftime('%Y-%m-%d', timestampEpochMs / 1000, 'unixepoch') AS day,
                UPPER(symbol) AS symbol,
-               UPPER(action) AS action,
+               UPPER(`action`) AS `action`,
                COUNT(*) AS sampleCount,
                SUM(score) AS scoreSum,
                MIN(timestampEpochMs) AS firstTimestampEpochMs,
                MAX(timestampEpochMs) AS lastTimestampEpochMs
         FROM signals
         WHERE timestampEpochMs>=:sinceMs
-        GROUP BY day, symbol, action
-        ORDER BY day ASC, symbol ASC, action ASC
+        GROUP BY day, symbol, `action`
+        ORDER BY day ASC, symbol ASC, `action` ASC
     """)
     suspend fun signalDailyAggregates(sinceMs: Long): List<CloudShareSignalDailyProjection>
 
@@ -158,7 +158,7 @@ interface CloudShareDao {
                UPPER(strategyMode) AS strategy,
                UPPER(symbol) AS symbol,
                UPPER(mode) AS mode,
-               UPPER(action) AS action,
+               UPPER(`action`) AS `action`,
                COUNT(*) AS sampleCount,
                SUM(finalScore) AS scoreSum,
                SUM(CASE WHEN traded THEN 1 ELSE 0 END) AS tradedCount,
@@ -166,7 +166,7 @@ interface CloudShareDao {
                MAX(timestampEpochMs) AS lastTimestampEpochMs
         FROM learning_feature_snapshots
         WHERE timestampEpochMs>=:sinceMs
-        GROUP BY day, strategy, symbol, mode, action
+        GROUP BY day, strategy, symbol, mode, `action`
         ORDER BY day ASC, symbol ASC, strategy ASC
     """)
     suspend fun learningDailyAggregates(sinceMs: Long): List<CloudShareLearningDailyProjection>
