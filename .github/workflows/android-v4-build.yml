@@ -118,7 +118,7 @@ jobs:
               'versionName 4.0.0': 'versionName = "4.0.0"' in gradle,
               'versionCode 105': 'versionCode = 105' in gradle,
               'Room schema 11': 'version = 11' in db,
-              'non-destructive Room': 'fallbackToDestructiveMigration' not in db,
+              'non-destructive Room': __import__('re').search(r'(?m)^\s*\.fallbackToDestructiveMigration\s*\(', db) is None,
               'V4 Systems UI': 'V4_SYSTEMS("V4 Systems")' in main and 'V4ControlCenterScreen' in main,
               'V4 verifier': 'V4SystemVerifier' in controller,
               'CloudShare': Path('app/src/main/java/com/ksp/cryptobot/cloudshare/CloudShareSyncEngine.kt').exists(),

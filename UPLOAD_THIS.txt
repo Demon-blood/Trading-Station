@@ -1,0 +1,5 @@
+Upload/replace this file in your GitHub repository:
+
+.github/workflows/android-v4-build.yml
+
+That is the only file required for Fix 1.
