@@ -1,0 +1,74 @@
+{
+  "milestone": "M2 Collective Learning",
+  "target_android_source": "Demon-blood/Trading-Station main, verified Android 3.2.5 / versionCode 97",
+  "output_version_name": "4.0.0-m2",
+  "output_version_code": 101,
+  "room_database_version": 8,
+  "cloudshare_protocol": "2026-07-26",
+  "validation": {
+    "desktop_reference_pytest": {
+      "status": "PASS",
+      "passed": 34,
+      "failed": 0
+    },
+    "cloudshare_worker_node_tests": {
+      "status": "PASS",
+      "passed": 8,
+      "failed": 0
+    },
+    "pure_kotlin_core_compile": {
+      "status": "PASS",
+      "compiler": "kotlinc-jvm 1.9.0"
+    },
+    "shared_aggregate_key_parity": {
+      "status": "PASS",
+      "shared_trade_daily_vector": "658a810e62ecd3f7f4761ebe047545245c7d9baa22839b262c30f975cef739b8"
+    },
+    "collective_score_parity": {
+      "status": "PASS",
+      "desktop_adjustment": 2,
+      "android_kotlin_adjustment": 2,
+      "samples": 30,
+      "tier": "symbol+strategy"
+    },
+    "sqlite_aggregate_and_migration_smoke": {
+      "status": "PASS"
+    },
+    "installer_from_android_3_2_5": {
+      "status": "PASS"
+    },
+    "installer_from_m1": {
+      "status": "PASS"
+    },
+    "python_installer_compile": {
+      "status": "PASS"
+    },
+    "full_android_gradle_build": {
+      "status": "NOT_RUN",
+      "reason": "Android SDK/full Gradle dependency cache is not installed in this container"
+    }
+  },
+  "safety": {
+    "collective_min_samples_default": 25,
+    "collective_max_adjustment_default": 6,
+    "collective_weight_default": 1.0,
+    "insufficient_evidence_adjustment": 0,
+    "strategy_vote_hint_bound": 2,
+    "decision_blocking": false,
+    "existing_live_safety_gates_bypassed": false,
+    "uploaded_outbox_payload_cleared_after_receipt": true,
+    "bootstrap_contains_secrets": false
+  },
+  "upgrade": {
+    "explicit_migrations": [
+      "6->7",
+      "7->8"
+    ],
+    "destructive_migration_fallback": false,
+    "m1_downloaded_intelligence_reindexed": true,
+    "historical_raw_backfill": true,
+    "full_historical_aggregate_snapshot_once": true,
+    "rolling_aggregate_refresh_days": 7
+  },
+  "generated_at_utc": "2026-08-17T00:29:53.840620+00:00"
+}

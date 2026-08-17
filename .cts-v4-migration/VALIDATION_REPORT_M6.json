@@ -1,0 +1,48 @@
+{
+  "milestone": "M6_FINAL",
+  "title": "Unified UI + Hardening + Recovery + Final Integration",
+  "target": {
+    "versionName": "4.0.0",
+    "versionCode": 105,
+    "roomVersion": 11,
+    "explicitMigrations": ["6->7", "7->8", "8->9", "9->10", "10->11"],
+    "destructiveFallback": false,
+    "cloudShareProtocol": "2026-07-26",
+    "migrationStagesComplete": 6,
+    "migrationStagesTotal": 6
+  },
+  "validation": {
+    "desktopPython": {"status": "PASS", "passed": 34, "failed": 0},
+    "cloudShareWorker": {"status": "PASS", "passed": 8, "failed": 0},
+    "m5ToM6Installer": "PASS",
+    "m6Reapply": "PASS",
+    "mainActivityIntegrationAnchors": "PASS against current GitHub MainActivity structure",
+    "finalVersionPatch": "PASS: 4.0.0 / 105",
+    "roomSchema": "PASS: remains v11; no destructive fallback",
+    "finalDaoMaintenanceSqliteSmoke": "PASS",
+    "supplementalBackupSecretRedactionStatic": "PASS",
+    "researchSettingsKotlinStubCompile": "PASS",
+    "v4ReleaseInfoKotlinCompile": "PASS",
+    "stage6KotlinParserSweep": "PASS",
+    "releaseSigningGuardInstallerSmoke": "PASS",
+    "fullAndroidGradleBuild": {
+      "status": "NOT_RUN",
+      "reason": "This execution environment does not contain an Android SDK or the full Android Gradle dependency cache."
+    }
+  },
+  "finalUi": ["Overview", "CloudShare", "Research", "Recovery"],
+  "backupSecretPolicy": {
+    "supplementalSecretsIncluded": false,
+    "excluded": ["exchange API secrets", "CloudShare client token", "CloudShare admin token", "remote-control secrets", "Whale Alert API key"]
+  },
+  "safetyInvariants": [
+    "M5 research executes before M3 production governance.",
+    "M3 safety gates remain authoritative.",
+    "M4 post-balance capital ceiling remains authoritative.",
+    "Research cannot modify or block an upstream SELL exit.",
+    "Research-created LIVE entries remain disabled by default.",
+    "CloudShare collective evidence remains bounded and advisory.",
+    "Release packaging requires signing.properties.",
+    "Supplemental migration backups do not export secret credentials."
+  ]
+}

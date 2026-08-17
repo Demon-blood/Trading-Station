@@ -1,0 +1,66 @@
+{
+  "milestone": "M3 Governance + Production Safety",
+  "target_android_source": "Demon-blood/Trading-Station main, Android 3.2.5 / versionCode 97 baseline",
+  "output_version_name": "4.0.0-m3",
+  "output_version_code": 102,
+  "room_database_version": 9,
+  "cloudshare_protocol": "2026-07-26",
+  "validation": {
+    "desktop_reference_pytest": {
+      "status": "PASS",
+      "passed": 34,
+      "failed": 0
+    },
+    "cloudshare_worker_node_tests": {
+      "status": "PASS",
+      "passed": 8,
+      "failed": 0
+    },
+    "governance_kotlin_core_compile": {
+      "status": "PASS",
+      "compiler": "kotlinc-jvm 1.9.0"
+    },
+    "execution_guard_kotlin_compile": {
+      "status": "PASS"
+    },
+    "shared_anomaly_aggregate_key_parity": {
+      "status": "PASS",
+      "key": "72298f7c351b10c2d938cbe665bce87b52446f5ee06b784f40bc7e7c882fa2c9"
+    },
+    "sqlite_migration_8_9_smoke": {
+      "status": "PASS"
+    },
+    "installer_from_android_3_2_5": {
+      "status": "PASS"
+    },
+    "installer_from_m2": {
+      "status": "PASS"
+    },
+    "python_installer_compile": {
+      "status": "PASS"
+    },
+    "full_android_gradle_build": {
+      "status": "NOT_RUN",
+      "reason": "Android SDK/full Gradle dependency cache is not installed in this container"
+    }
+  },
+  "safety": {
+    "production_score_adjustment_bounds": "-12..+6",
+    "risk_budget_default_effective_cap_eur": "min(maxDailyLossEur, 10.00)",
+    "risk_budget_exhaustion_blocks_new_entries": true,
+    "size_multiplier_applied_to_actual_order_notional": false,
+    "size_multiplier_deferred_to": "M4",
+    "existing_android_hard_guards_bypassed": false,
+    "paper_allowed_to_trade_bypass_fixed": true,
+    "cloudshare_payload_sanitization_preserved": true
+  },
+  "upgrade": {
+    "explicit_migrations": [
+      "6->7",
+      "7->8",
+      "8->9"
+    ],
+    "destructive_migration_fallback": false
+  },
+  "generated_at_utc": "2026-08-17T00:39:02.862812+00:00"
+}

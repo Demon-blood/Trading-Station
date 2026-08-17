@@ -1,0 +1,50 @@
+{
+  "milestone": "M5",
+  "title": "Research + Strategy/AI Expansion",
+  "target": {
+    "versionName": "4.0.0-m5",
+    "versionCode": 104,
+    "roomVersion": 11,
+    "explicitMigrations": ["6->7", "7->8", "8->9", "9->10", "10->11"],
+    "destructiveFallback": false
+  },
+  "validation": {
+    "desktopPython": {"status": "PASS", "passed": 34, "failed": 0},
+    "cloudShareWorker": {"status": "PASS", "passed": 8, "failed": 0},
+    "expandedStrategyVotes": {"status": "PASS", "count": 23},
+    "researchStrategyKotlinCompile": "PASS",
+    "sequenceRlKotlinCompile": "PASS",
+    "researchCoordinatorKotlinStubCompile": "PASS",
+    "externalContextKotlinStubCompile": "PASS",
+    "metaParameterKotlinStubCompile": "PASS",
+    "cloudShareResearchCollectorKotlinStubCompile": "PASS",
+    "room10To11SqliteSmoke": "PASS",
+    "m4ToM5Installer": "PASS",
+    "m5Reapply": "PASS",
+    "olderSourceUpgrade": "uses exact bundled M4 cumulative baseline before M5; M4's older-source paths were validated in the M4 checkpoint",
+    "researchAggregateParity": {
+      "status": "PASS",
+      "sourceTable": "shared_research_daily",
+      "aggregateKeyPython": "276a84e3e842ff2192c4137a807bd673a037da0f75943c9ea6c1f14b42a28a97",
+      "aggregateKeyKotlin": "276a84e3e842ff2192c4137a807bd673a037da0f75943c9ea6c1f14b42a28a97"
+    },
+    "fullAndroidGradleBuild": {
+      "status": "NOT_RUN",
+      "reason": "This execution environment does not contain the Android SDK/full Gradle dependency cache."
+    }
+  },
+  "safetyInvariants": [
+    "Research executes before M3 production governance.",
+    "M4 post-balance capital ceiling remains authoritative.",
+    "Default research score adjustment is bounded to -8..+6.",
+    "Research-originated LIVE entries are disabled by default.",
+    "Upstream SELL decisions are preserved by the M5 research layer.",
+    "Kraken Futures, labeled-wallet and cross-market modules are context-only; Kraken remains the execution venue."
+  ],
+  "cloudShareResearchFamilies": [
+    "shared_research_daily",
+    "shared_strategy_variant_daily",
+    "shared_walk_forward_daily",
+    "shared_onchain_daily"
+  ]
+}

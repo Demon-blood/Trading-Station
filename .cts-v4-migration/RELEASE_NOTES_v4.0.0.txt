@@ -1,0 +1,34 @@
+Crypto TradeStation Android v4.0.0
+=================================
+
+Final six-stage desktop v1.0.50 -> Android migration checkpoint.
+
+Build identity
+- versionName 4.0.0
+- versionCode 105
+- Room schema 11
+- CloudShare protocol 2026-07-26
+
+Major integrated systems
+- CloudShare Worker/D1/R2 client, admin and collective learning
+- governance/anomaly/safe-mode/kill-switch/risk-budget layer
+- execution-quality and counterfactual learning
+- advanced execution, liquidity sizing, portfolio allocation and exit optimization
+- realistic paper execution
+- 23-strategy research ensemble, advanced regimes, walk-forward, Monte Carlo, meta/cross-symbol, sequence/RL research
+- futures/on-chain/cross-market advisory context
+- V4 Systems UI with final verification, research controls, CloudShare controls and recovery
+- v4 supplemental backup/restore and redacted diagnostics export
+- Android-native operational compaction/storage audit
+- signing-lineage verification and release-signing build guard
+
+Safety
+- Research cannot override SELL exits.
+- M3 safety gates remain authoritative.
+- M4 post-balance sizing ceiling remains authoritative.
+- Research-created LIVE entries default OFF.
+- Supplemental backup excludes migration secrets.
+- Release packaging requires signing.properties.
+
+Validation limitation
+- Full Android assembleDebug/assembleRelease was not executed in the ChatGPT runtime because no Android SDK/full Gradle dependency cache is installed there.

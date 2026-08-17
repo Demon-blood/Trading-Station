@@ -1,0 +1,241 @@
+name: Crypto TradeStation v4 Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: APK build type
+        required: true
+        default: debug
+        type: choice
+        options:
+          - debug
+          - release
+      run_tests:
+        description: Run unit tests before APK build
+        required: true
+        default: true
+        type: boolean
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cts-v4-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  CTS_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'debug' }}
+  CTS_RUN_TESTS: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.run_tests }}
+
+jobs:
+  build-v4:
+    name: Build CTS v4 ${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'debug' }} APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | head -n 1 || true)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under $ANDROID_HOME/cmdline-tools" >&2
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply cumulative v4.0.0 migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .cts-v4-migration/apply_milestone6.py "$GITHUB_WORKSPACE" | tee migration.log
+
+      - name: Add JUnit 4 test dependency when missing
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          dep = '    testImplementation("junit:junit:4.13.2")\n'
+          if 'testImplementation("junit:junit:4.13.2")' not in text:
+              marker = 'dependencies {\n'
+              if marker not in text:
+                  raise SystemExit('dependencies block not found in app/build.gradle.kts')
+              text = text.replace(marker, marker + dep, 1)
+              p.write_text(text, encoding='utf-8')
+              print('Added JUnit 4.13.2 for v4 parity tests.')
+          else:
+              print('JUnit dependency already present.')
+          PY
+
+      - name: Validate migrated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          gradle = Path('app/build.gradle.kts').read_text(encoding='utf-8')
+          db = Path('app/src/main/java/com/ksp/cryptobot/data/AppDatabase.kt').read_text(encoding='utf-8')
+          main = Path('app/src/main/java/com/ksp/cryptobot/MainActivity.kt').read_text(encoding='utf-8')
+          controller = Path('app/src/main/java/com/ksp/cryptobot/core/BotController.kt').read_text(encoding='utf-8')
+          checks = {
+              'versionName 4.0.0': 'versionName = "4.0.0"' in gradle,
+              'versionCode 105': 'versionCode = 105' in gradle,
+              'Room schema 11': 'version = 11' in db,
+              'non-destructive Room': 'fallbackToDestructiveMigration' not in db,
+              'V4 Systems UI': 'V4_SYSTEMS("V4 Systems")' in main and 'V4ControlCenterScreen' in main,
+              'V4 verifier': 'V4SystemVerifier' in controller,
+              'CloudShare': Path('app/src/main/java/com/ksp/cryptobot/cloudshare/CloudShareSyncEngine.kt').exists(),
+              'Governance': Path('app/src/main/java/com/ksp/cryptobot/governance/ProductionIntelligenceEngine.kt').exists(),
+              'Advanced execution': Path('app/src/main/java/com/ksp/cryptobot/execution/AdvancedExecutionCoordinator.kt').exists(),
+              'Research': Path('app/src/main/java/com/ksp/cryptobot/research/ResearchCoordinator.kt').exists(),
+          }
+          for name, ok in checks.items():
+              print(('PASS' if ok else 'FAIL') + ' | ' + name)
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Migration validation failed: ' + ', '.join(failed))
+          PY
+
+      - name: Prepare release signing
+        if: env.CTS_BUILD_TYPE == 'release'
+        shell: bash
+        env:
+          CTS_RELEASE_KEYSTORE_B64: ${{ secrets.CTS_RELEASE_KEYSTORE_B64 }}
+          CTS_RELEASE_STORE_PASSWORD: ${{ secrets.CTS_RELEASE_STORE_PASSWORD }}
+          CTS_RELEASE_KEY_ALIAS: ${{ secrets.CTS_RELEASE_KEY_ALIAS }}
+          CTS_RELEASE_KEY_PASSWORD: ${{ secrets.CTS_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in CTS_RELEASE_KEYSTORE_B64 CTS_RELEASE_STORE_PASSWORD CTS_RELEASE_KEY_ALIAS CTS_RELEASE_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required GitHub Actions secret: $name" >&2
+              exit 1
+            fi
+          done
+          mkdir -p .github-ci
+          printf '%s' "$CTS_RELEASE_KEYSTORE_B64" | base64 --decode > .github-ci/release.jks
+          {
+            printf 'storeFile=../.github-ci/release.jks\n'
+            printf 'storePassword=%s\n' "$CTS_RELEASE_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$CTS_RELEASE_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$CTS_RELEASE_KEY_PASSWORD"
+          } > signing.properties
+          chmod 600 signing.properties .github-ci/release.jks
+          echo "Release signing material prepared from GitHub Actions secrets."
+
+      - name: Compile debug Kotlin
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:compileDebugKotlin 2>&1 | tee compile-debug.log
+
+      - name: Run v4 unit tests
+        if: env.CTS_RUN_TESTS == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee unit-tests.log
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -o pipefail
+          if [ "$CTS_BUILD_TYPE" = "release" ]; then
+            gradle --no-daemon :app:assembleRelease 2>&1 | tee apk-build.log
+          else
+            gradle --no-daemon :app:assembleDebug 2>&1 | tee apk-build.log
+          fi
+
+      - name: Collect APK metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-output
+          if [ "$CTS_BUILD_TYPE" = "release" ]; then
+            APK="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          else
+            APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          fi
+          if [ -z "${APK:-}" ] || [ ! -f "$APK" ]; then
+            echo "APK output not found." >&2
+            exit 1
+          fi
+          cp "$APK" "ci-output/CryptoTradeStation-v4.0.0-${CTS_BUILD_TYPE}.apk"
+          sha256sum "ci-output/CryptoTradeStation-v4.0.0-${CTS_BUILD_TYPE}.apk" | tee ci-output/SHA256SUMS.txt
+          {
+            echo "versionName=4.0.0"
+            echo "versionCode=105"
+            echo "roomSchema=11"
+            echo "buildType=$CTS_BUILD_TYPE"
+            echo "commit=$GITHUB_SHA"
+            echo "runId=$GITHUB_RUN_ID"
+            echo "runNumber=$GITHUB_RUN_NUMBER"
+          } > ci-output/build-metadata.txt
+
+      - name: Upload CTS v4 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CryptoTradeStation-v4.0.0-${{ env.CTS_BUILD_TYPE }}-apk
+          path: ci-output/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-failure
+          cp migration.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
+          git diff --stat > ci-failure/git-diff-stat.txt 2>&1 || true
+          git diff --name-only > ci-failure/git-diff-files.txt 2>&1 || true
+          java -version > ci-failure/java-version.txt 2>&1 || true
+          gradle --version > ci-failure/gradle-version.txt 2>&1 || true
+          find app/build/reports -type f -maxdepth 5 -print > ci-failure/report-files.txt 2>&1 || true
+          # Deliberately do not collect signing.properties, keystores, Actions secrets, local.properties, or app data.
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CryptoTradeStation-v4-build-failure-${{ github.run_number }}
+          path: ci-failure/
+          if-no-files-found: warn
+          retention-days: 14

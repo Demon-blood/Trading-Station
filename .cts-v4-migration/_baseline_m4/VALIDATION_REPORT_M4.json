@@ -1,0 +1,94 @@
+{
+  "milestone": "M4 Advanced Execution + Portfolio/Risk",
+  "target_android_source": "Demon-blood/Trading-Station main, Android 3.2.5 / versionCode 97 baseline",
+  "output_version_name": "4.0.0-m4",
+  "output_version_code": 103,
+  "room_database_version": 10,
+  "cloudshare_protocol": "2026-07-26",
+  "validation": {
+    "desktop_reference_pytest": {
+      "status": "PASS",
+      "passed": 34,
+      "failed": 0
+    },
+    "cloudshare_worker_node_tests": {
+      "status": "PASS",
+      "passed": 8,
+      "failed": 0
+    },
+    "advanced_execution_kotlin_compile": {
+      "status": "PASS",
+      "compiler": "kotlinc-jvm 1.9.0"
+    },
+    "paper_execution_patch_kotlin_syntax_compile": {
+      "status": "PASS",
+      "note": "patched block compiled against API stubs; full Android SDK build not available"
+    },
+    "m4_safety_vector": {
+      "status": "PASS",
+      "capital_protection_level_for_50pct_budget_used": 2,
+      "capital_multiplier": "0.50",
+      "allocation_never_exceeds_requested_quote": true,
+      "liquidity_sizing_never_exceeds_requested_quote": true
+    },
+    "sqlite_migration_9_10_smoke": {
+      "status": "PASS"
+    },
+    "installer_from_android_3_2_5": {
+      "status": "PASS"
+    },
+    "installer_from_m3": {
+      "status": "PASS"
+    },
+    "python_installer_compile": {
+      "status": "PASS"
+    },
+    "shared_order_type_aggregate_key_parity": {
+      "status": "PASS",
+      "key": "e8ff93dfaea6b29a7c92d11fc7b1b0597519db32f19f0d7e503033f732ed7c1b"
+    },
+    "full_android_gradle_build": {
+      "status": "NOT_RUN",
+      "reason": "Android SDK/full Gradle dependency cache is not installed in this container"
+    }
+  },
+  "safety": {
+    "post_balance_requested_quote_is_absolute_ceiling": true,
+    "production_multiplier_can_raise_notional": false,
+    "portfolio_allocator_can_raise_above_requested_quote": false,
+    "liquidity_sizer_can_raise_above_requested_quote": false,
+    "fee_efficiency_floor_can_raise_after_safety_reduction": false,
+    "fee_efficiency_floor_behavior": "fail closed when a normal-size live request is reduced below the economic floor",
+    "automatic_limit_to_live_market_upgrade": false,
+    "market_to_limit_downgrade_supported": true,
+    "hard_risk_exit_delayed_by_soft_fee_rule": false,
+    "existing_android_hard_guards_bypassed": false,
+    "live_reconciliation_quantity_tolerance_percent": 2.0,
+    "paper_orders_send_real_exchange_orders": false
+  },
+  "paper_execution": {
+    "maker_fee_assumption_percent": 0.16,
+    "taker_fee_assumption_percent": 0.26,
+    "market_base_slippage_percent": 0.03,
+    "depth_slippage_factor_percent": 0.18,
+    "partial_fill_simulation": true,
+    "kraken_public_depth_used_when_available": true
+  },
+  "cloudshare_new_aggregate_families": [
+    "shared_order_type_daily",
+    "shared_liquidity_sizing_daily",
+    "shared_exit_daily",
+    "shared_reconciliation_daily",
+    "shared_paper_execution_daily"
+  ],
+  "upgrade": {
+    "explicit_migrations": [
+      "6->7",
+      "7->8",
+      "8->9",
+      "9->10"
+    ],
+    "destructive_migration_fallback": false
+  },
+  "generated_at_utc": "2026-08-17T01:01:57.008189+00:00"
+}
