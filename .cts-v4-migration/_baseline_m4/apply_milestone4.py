@@ -143,6 +143,17 @@ def patch_controller(path: Path) -> None:
                     updateStatus("[${result.symbol}] Persisted handoff plan: strategy=${handoff.strategyId}, stop=${sourceStop.stripTrailingZeros().toPlainString()}, targets=${sourceTargets.joinToString(",") { it.stripTrailingZeros().toPlainString() }}.", "LIVE")
                 }
             }
+            productionIntelligence.observeExecution(
+                symbol = result.symbol,
+                side = result.side,
+                mode = if (result.paper) "PAPER" else "LIVE",
+                orderType = request.orderType,
+                expectedPrice = price,
+                actualPrice = averagePriceForRecord,
+                quantity = executedQtyForRecord,
+                clientOrderId = request.clientOrderId,
+                exchangeOrderId = result.exchangeOrderId
+            )
             updateStatus("Order fill confirmed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. qty=${executedQtyForRecord.stripTrailingZeros().toPlainString()} avg=${averagePriceForRecord.stripTrailingZeros().toPlainString()} fee=${feeForRecord.stripTrailingZeros().toPlainString()} orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
         } else {
             if (result.side == OrderSide.BUY) {
@@ -167,7 +178,32 @@ def patch_controller(path: Path) -> None:
             updateStatus("Order accepted but fill not confirmed: ${result.side} ${result.symbol} type=${request.orderType}, submittedQty=${quantity.stripTrailingZeros().toPlainString()}, orderId=${result.exchangeOrderId}. No trade/PnL row is created until exchange fill evidence arrives.", "LIVE")
         }
 '''
-        text = replace_once(text, old, new, "controller exchange fill truth")
+        # M3 inserts productionIntelligence.observeExecution(...) between the trade row and
+        # the legacy "Order placed" status line. Accept either the pre-M3 or post-M3 form
+        # instead of requiring one obsolete exact text block.
+        if text.count(old) == 1:
+            text = text.replace(old, new, 1)
+        else:
+            m3_observe = '''        productionIntelligence.observeExecution(
+            symbol = result.symbol,
+            side = result.side,
+            mode = if (result.paper) "PAPER" else "LIVE",
+            orderType = request.orderType,
+            expectedPrice = price,
+            actualPrice = averagePriceForRecord,
+            quantity = executedQtyForRecord,
+            clientOrderId = request.clientOrderId,
+            exchangeOrderId = result.exchangeOrderId
+        )
+'''
+            legacy_status = '''        updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. qty=${executedQtyForRecord.stripTrailingZeros().toPlainString()} avg=${averagePriceForRecord.stripTrailingZeros().toPlainString()} fee=${feeForRecord.stripTrailingZeros().toPlainString()} orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
+'''
+            # Build the exact post-M3 variant from the pre-M3 block.
+            old_m3 = old.replace(legacy_status, m3_observe + legacy_status, 1)
+            if text.count(old_m3) == 1:
+                text = text.replace(old_m3, new, 1)
+            else:
+                fail(f"Cannot patch controller exchange fill truth: expected pre-M3 or post-M3 block; preM3={text.count(old)}, postM3={text.count(old_m3)}.")
         text = text.replace('appendLine("amount=${executedQtyForRecord.stripTrailingZeros().toPlainString()}")', 'appendLine("fillConfirmed=$fillConfirmed")\\n                appendLine("amount=${if (fillConfirmed) executedQtyForRecord.stripTrailingZeros().toPlainString() else quantity.stripTrailingZeros().toPlainString()}")', 1)
         text = text.replace('appendLine("notional≈${notionalForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")', 'appendLine("notional≈${if (fillConfirmed) notionalForRecord.stripTrailingZeros().toPlainString() else submittedNotionalEstimate.stripTrailingZeros().toPlainString()} $quoteAsset")', 1)
         text = text.replace('appendLine("fee=${feeForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")', 'appendLine("fee=${if (fillConfirmed) feeForRecord.stripTrailingZeros().toPlainString() else "pending"} $quoteAsset")', 1)
