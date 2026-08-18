@@ -207,7 +207,19 @@ def patch_kraken_exchange(path:Path)->None:
     }
 
 '''
-        text=replace_once(text,anchor,block+anchor,'Kraken current fee tier')
+        # ExchangeClientsV08.kt contains multiple exchange implementations with
+        # the same getAvailableBalances() signature. Scope this insertion to
+        # KrakenSpotClient instead of requiring a globally unique anchor.
+        class_marker = 'class KrakenSpotClient('
+        class_start = text.find(class_marker)
+        if class_start < 0:
+            fail('Cannot patch Kraken current fee tier: KrakenSpotClient not found.')
+        next_class = text.find('\nclass ', class_start + len(class_marker))
+        class_end = next_class if next_class >= 0 else len(text)
+        anchor_index = text.find(anchor, class_start, class_end)
+        if anchor_index < 0:
+            fail('Cannot patch Kraken current fee tier: getAvailableBalances() not found inside KrakenSpotClient.')
+        text = text[:anchor_index] + block + text[anchor_index:]
     # Install minimum-cost/tick-price validation before anything refers to the tick helper.
     if 'private fun roundKrakenPriceToTick' not in text:
         old = '''        if (request.orderType != OrderType.MARKET) {
