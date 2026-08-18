@@ -1,0 +1,81 @@
+{
+  "artifact": "CryptoTradeStation v4 Research Handoff Truth Automation",
+  "generatedAtUtc": "2026-08-18T00:05:51.879644+00:00",
+  "target": {
+    "versionName": "4.0.0",
+    "versionCode": 105,
+    "roomSchema": 11,
+    "cloudShareProtocol": "2026-07-26",
+    "executionVenue": "Kraken spot"
+  },
+  "handoff": {
+    "embeddedAssetFiles": 15,
+    "strategyRecords": 31,
+    "sourceRegistryEntries": 46,
+    "sourceUnknownBlockedCount": 2,
+    "sourceUnknownBlockedStrategyIds": [
+      "krown_vmp_exact",
+      "cowen_price_risk_exact"
+    ],
+    "currentPositiveLiveTruthPassCount": 0,
+    "catalogSha256": "d61f6209f93caa71e5f4236a85a3534677601114c9d0958fb3821bff77fcd2d8"
+  },
+  "automationTruth": {
+    "allCatalogStrategiesEvaluatedAutomatically": true,
+    "paperEligibleEntriesCanExecuteAutomatically": true,
+    "protectiveExitReduceCanExecuteAutomatically": true,
+    "positiveLiveEntriesRequireSourceTruthPass": true,
+    "positiveLiveEntriesRequireEmpiricalPromotionPass": true,
+    "unknownOrProprietaryRulesAreNeverInvented": true,
+    "researchMayIncreaseAboveM4CapitalCeiling": false
+  },
+  "executionTruth": {
+    "krakenAssetPairsOrderMinIntegrated": true,
+    "krakenAssetPairsCostMinIntegrated": true,
+    "krakenTickSizeIntegrated": true,
+    "krakenTradeVolumeFeeScheduleIntegrated": true,
+    "postOnlySemanticsIntegrated": true,
+    "conditionalProtectiveStopIntegrated": true,
+    "acceptedButUnfilledOrdersAreNotRecordedAsFills": true,
+    "paperRestingLimitAndStopPendingSemantics": true,
+    "paperCostBasisAndRealizedPnl": true,
+    "sourceSpecificStopsTargetsPersistAcrossLifecycle": true,
+    "exchangeMinimumNeverRaisesRiskBudget": true
+  },
+  "validation": {
+    "handoffPayloadValidator": "PASS",
+    "desktopPytest": {
+      "status": "PASS",
+      "passed": 34
+    },
+    "cloudflareWorkerNodeTests": {
+      "status": "PASS",
+      "passed": 8,
+      "failed": 0
+    },
+    "all31HandoffDetectorRuntime": {
+      "status": "PASS",
+      "evaluated": 31
+    },
+    "handoffCostRiskTruthRuntime": "PASS",
+    "paperPendingWalletTruthRuntime": "PASS",
+    "protectiveStopManagerKotlinCompile": "PASS",
+    "controllerProtectionFixtureKotlinCompile": "PASS",
+    "lifecycleProtectionFixtureKotlinCompile": "PASS",
+    "advancedExecutionKotlinCompile": "PASS",
+    "krakenPatchFixture": "PASS",
+    "krakenPatchIdempotentReapply": "PASS",
+    "milestone4InstallerPythonCompile": "PASS",
+    "milestone6InstallerPythonCompile": "PASS",
+    "fullAndroidGradleBuild": {
+      "status": "NOT_RUN_HERE",
+      "reason": "This runtime has no complete Android SDK/Gradle dependency environment. GitHub Actions is the authoritative APK compile/test gate."
+    }
+  },
+  "releaseBoundary": {
+    "apkIncluded": false,
+    "githubActionsRequired": true,
+    "workflowExpectedPath": ".github/workflows/android-v4-build.yml",
+    "migrationEntrypoint": ".cts-v4-migration/apply_milestone6.py"
+  }
+}

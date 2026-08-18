@@ -1,71 +1,68 @@
-# Crypto TradeStation Android v4.0.0 — Final Stage 6 Pack
+# Crypto TradeStation Android v4.0.0 — Cumulative M1→M6 + Research Handoff Truth Payload
 
-This is the **final cumulative Android v4 migration overlay** for `Demon-blood/Trading-Station`. It contains Stages 1 through 6 and upgrades the current Android 3.2.5 source (or any previous validated v4 milestone) to the final v4 integration.
+This directory is the cumulative migration payload consumed by the repository's existing GitHub Actions workflow.
 
-## Apply on Windows
+## Canonical build path
 
-```powershell
-python .\apply_milestone6.py C:\path\to\Trading-Station
-cd C:\path\to\Trading-Station
-.\gradlew clean :app:assembleDebug
+The authoritative build is GitHub Actions:
+
+```text
+Actions → Crypto TradeStation v4 Build
 ```
 
-For a release build, configure `signing.properties` and run:
+The workflow checks out the repository and runs:
 
-```powershell
-.\gradlew clean :app:assembleRelease
+```bash
+python3 .cts-v4-migration/apply_milestone6.py "$GITHUB_WORKSPACE"
 ```
 
-The final build hardening refuses release packaging when `signing.properties` is missing. Debug builds continue to use the project's stable CTS debug update key.
+before Kotlin/KSP compilation, unit tests and APK assembly. The repository does not need a committed Gradle wrapper for this workflow because CI provisions Gradle 8.9.
 
 ## Final target
 
-- versionName: `4.0.0`
-- versionCode: `105`
-- Room database: `11`
-- explicit migrations: `6 -> 7 -> 8 -> 9 -> 10 -> 11`
-- no `fallbackToDestructiveMigration()`
-- CloudShare protocol: `2026-07-26`
-- migration stages complete: `6 / 6`
+- `versionName = 4.0.0`
+- `versionCode = 105`
+- Room schema `11`
+- explicit migrations `6→7→8→9→10→11`
+- no destructive Room fallback
+- CloudShare protocol `2026-07-26`
+- original migration stages complete `6/6`
 
-## Stage 6 adds
+## Additional truth-automation layer
 
-- top-level **V4 Systems** Android tab;
-- Overview, CloudShare, Research, and Recovery sub-panels;
-- final v4 verification integrated into the existing System Test;
-- runtime install/signing-lineage verification;
-- release-signing Gradle guard;
-- complete Stage-5 research controls, including secure Whale Alert key storage;
-- complete CloudShare sync interval/backfill/admin/client controls;
-- v4 supplemental backup/restore for governance, execution-quality, advanced-execution, production-state, research-event, research-profile, and research-state data;
-- redacted v4 diagnostics ZIP export;
-- native v4 operational data compaction/storage audit;
-- final visible UI version `v4.0.0 CTS`.
+The cumulative payload now also contains:
 
-## Recovery model
+- desktop-parity strategy/research behavior;
+- professional/practitioner variants as a separate auditable layer;
+- all 15 supplied research-handoff assets;
+- 31 versioned handoff strategy records evaluated automatically;
+- explicit proprietary/source-unknown blocking;
+- market-data integrity gates;
+- account/pair Kraken fee-tier retrieval;
+- `ordermin`, `costmin` and `tick_size` enforcement;
+- source cost/risk sizing and correlated-risk cap;
+- strategy-ID-specific empirical promotion using realized outcomes, walk-forward and Monte Carlo;
+- truthful pending PAPER LIMIT/STOP/TP execution and realized P&L;
+- accepted-but-unfilled LIVE order accounting;
+- source-specific stop/target persistence;
+- exchange-level Kraken protective-stop attachment/verification;
+- emergency `UNPROTECTED_POSITION` fail-safe;
+- stop-aware partial/managed exits with protection restoration.
 
-Use two files for a full v4 device migration:
+## Truth gate
 
-1. **Core Full Backup** from the existing CTS Backup/Restore system — core settings, trades, positions, learning profiles, etc.
-2. **v4 Supplemental Backup** from V4 Systems -> Recovery — v4 governance/execution/research history and non-secret CloudShare/research settings.
+The supplied research freeze currently contains **zero** positive `live_truth_gate=PASS` rows. The payload preserves that constraint. Positive handoff strategies can automatically PAPER trade and accumulate evidence, but they do not become positive LIVE entries until a deliberate future source-reverification update marks the source gate PASS and the empirical gate also passes.
 
-The supplemental backup deliberately does **not** export CloudShare client tokens, CloudShare owner/admin tokens, exchange credentials, remote-control secrets, or the Whale Alert API key. Re-enter/rejoin those secrets on the destination device.
+Protective/risk-reducing actions remain automatic when their own controls and safety conditions permit.
 
-CloudShare downloaded intelligence is not required in the supplemental backup because it can be re-downloaded from the Worker. Uploaded outbox payloads are already erased after successful upload.
+## Validation
 
-## Maintenance
+Run the payload-only validation anywhere Python is available:
 
-`Compact v4 Operational Data` prunes operational/research telemetry older than 365 days by default, old successfully uploaded CloudShare outbox rows, and old CloudShare audit rows. It does **not** delete core trade history or learned profiles. It then checkpoints the WAL and attempts SQLite `VACUUM`.
+```bash
+python3 .cts-v4-migration/validate_handoff_truth.py
+```
 
-## Safety invariants
+GitHub Actions remains the final Android SDK/KSP/Compose/APK validation gate.
 
-1. M5 research executes before M3 production governance.
-2. M3 anomaly, safe-mode, kill-switch and risk-budget gates remain authoritative.
-3. M4 post-balance capital ceiling remains authoritative and cannot be increased by later intelligence.
-4. Research cannot alter/block an upstream SELL exit.
-5. Research-created LIVE entries remain disabled by default.
-6. CloudShare collective evidence remains bounded and cannot bypass live safety gates.
-7. Supplemental backups exclude migration secrets.
-8. Release packaging requires explicit release signing configuration.
-
-See `docs/MILESTONE_6.md`, `docs/PORT_ROADMAP.md`, and `VALIDATION_REPORT_M6.json`.
+See `docs/RESEARCH_HANDOFF_TRUTH.md` and the upload-patch audit for the full boundary.

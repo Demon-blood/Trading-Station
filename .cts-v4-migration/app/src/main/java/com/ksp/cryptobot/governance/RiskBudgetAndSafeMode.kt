@@ -37,9 +37,14 @@ class SafeModeController {
         val modeLive = settings.mode == BotMode.LIVE_AUTO || settings.mode == BotMode.LIVE_CONFIRM
         val dailyLimit = abs(settings.maxDailyLossEur.toDouble())
         val recentBad = recentEvents.take(80).count {
-            it.eventType in setOf("anomaly_event", "watchdog_error", "order_error") || it.severity in setOf("HIGH", "CRITICAL")
+            it.eventType in setOf("anomaly_event", "watchdog_error", "order_error", "handoff_protective_exit_failure") || it.severity in setOf("HIGH", "CRITICAL")
+        }
+        val unresolvedProtectiveFailure = recentEvents.take(40).any {
+            it.eventType == "handoff_protective_exit_failure" && System.currentTimeMillis() - it.timestampEpochMs <= 6 * 60 * 60 * 1000L
         }
         return when {
+            modeLive && unresolvedProtectiveFailure ->
+                SafeModeAssessment("PAPER_ONLY", "protective source exit/reduction failed within the last 6h; new live entries paused until execution health is re-established", -10, 0.0, true)
             modeLive && dailyLimit > 0.0 && realizedToday <= -dailyLimit ->
                 SafeModeAssessment("PAUSED", "live daily loss limit reached; real new entries paused", -10, 0.0, true)
             recentBad >= 6 ->

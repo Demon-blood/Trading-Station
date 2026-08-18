@@ -41,7 +41,8 @@ data class AdvancedEntryPlan(
     val limitPrice: BigDecimal?,
     val combinedMultiplier: BigDecimal,
     val protectionLevel: Int,
-    val reason: String
+    val reason: String,
+    val postOnly: Boolean = false
 )
 
 data class ExitOptimizationPlan(

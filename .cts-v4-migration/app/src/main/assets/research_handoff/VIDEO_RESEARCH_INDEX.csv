@@ -1,0 +1,47 @@
+trader,title,year_or_status,video_id_or_type,topics,extraction_depth,source_strength,kraken_small_account_fit,url
+Peter Brandt,How a 50-Year Veteran Thinks About Risk Management (Chat With Traders #329),2026,podcast/video,risk; sizing; weekly/daily process; ADX; 18DMA; ATR breakout; payoff distribution,HIGH,DIRECT_PRIMARY,HIGH,https://chatwithtraders.com/episode/329-peter-brandt
+Peter Brandt,48 Years of Trading Lessons with Market Wizard Peter Brandt,2023/24,R1sNTB2Vh7w,process; classical charts; risk; loss handling,MEDIUM,DIRECT_INTERVIEW,HIGH,https://www.youtube.com/watch?v=R1sNTB2Vh7w
+Peter Brandt,Real Vision Series Ep. 1 — A Life in Charts,2017,series,background; chart philosophy; risk mindset,MEDIUM,DIRECT_PRIMARY_INDEX,MEDIUM,https://www.peterlbrandt.com/factor-knowledge-center/
+Peter Brandt,Real Vision Series Ep. 2 — Risk Management,2017,series,risk rules; ratios; survival,MEDIUM,DIRECT_PRIMARY_INDEX,HIGH,https://www.peterlbrandt.com/factor-knowledge-center/
+Peter Brandt,Real Vision Series Ep. 3 — Classical Charting & Technical Analysis,2017,series,patterns; false breakouts; practical examples,MEDIUM,DIRECT_PRIMARY_INDEX,HIGH,https://www.peterlbrandt.com/factor-knowledge-center/
+Peter Brandt,Three Day Trailing Stop (Video),2025,site-video,3DTSR; protective stop management,MEDIUM,DIRECT_PRIMARY,HIGH,https://www.peterlbrandt.com/three-day-trailing-stop-video/
+CryptoCred,Risk Management UPDATED,public,XeQV2ECtZVQ,risk; stop; position sizing; R multiple,HIGH,DIRECT_PUBLIC_VIDEO,VERY_HIGH,https://www.youtube.com/watch?v=XeQV2ECtZVQ
+CryptoCred,Entry Triggers UPDATED,public,7mnz-JxhHnk,trading plan; entry trigger; confirmation,MEDIUM,DIRECT_PUBLIC_VIDEO,VERY_HIGH,https://www.youtube.com/watch?v=7mnz-JxhHnk
+CryptoCred,Horizontal Support/Resistance UPDATED,public,j5pBnAiQz-c,S/R; level quality; flips; retests,HIGH,DIRECT_PUBLIC_VIDEO,VERY_HIGH,https://www.youtube.com/watch?v=j5pBnAiQz-c
+CryptoCred,Support/Resistance Trade Setup (CDC),public,owF4u48hUKI,complete S/R trade setup; confirmation,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/watch?v=owF4u48hUKI
+CryptoCred,Retests,public,inqHN8q57X4,micro vs rounded retest; breakout/retest,HIGH,DIRECT_PUBLIC_VIDEO,VERY_HIGH,https://www.youtube.com/watch?v=inqHN8q57X4
+CryptoCred,First Trouble Area,public,Yp0k8HD5xro,target; management; entry obstacle,HIGH,DIRECT_PUBLIC_VIDEO,VERY_HIGH,https://www.youtube.com/watch?v=Yp0k8HD5xro
+CryptoCred,Pattern Failure,public,f9mkEe-Y67A,failed breakouts; reversal context,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/watch?v=f9mkEe-Y67A
+CryptoCred,Daily Open Trade Strategy,public,jUTKg5SiSZ0,daily open; intraday context,MEDIUM,DIRECT_PUBLIC_VIDEO,MEDIUM,https://www.youtube.com/watch?v=jUTKg5SiSZ0
+CryptoCred,How To Use Candlestick Highs/Lows to Trade Reversals,public,nPDk5qPbf08,candle H/L; reversal structure,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/watch?v=nPDk5qPbf08
+CryptoCred,Market Structure,public,BHwoN7VPrBE,HH/HL; LH/LL; structure,HIGH,DIRECT_PUBLIC_VIDEO,VERY_HIGH,https://www.youtube.com/watch?v=BHwoN7VPrBE
+CryptoCred,Overthrow — Stop Loss Placement,public,uDoi2EwJy8E,stop placement; invalidation,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/watch?v=uDoi2EwJy8E
+Dan McDermitt / Chart Guys,Stair Step Trading Strategy,2021,gkoJ5QoDiic,countertrend; tight stop; entry location,MEDIUM,DIRECT_PRIMARY_HOST,HIGH,https://www.chartguys.com/educational-videos/stair-step-trading-strategy
+Dan McDermitt / Chart Guys,BackBurner Trade Strategy,2020,site-video,first countertrend pullback; oversold/overbought; MTF,HIGH,DIRECT_PRIMARY_HOST,HIGH,https://www.chartguys.com/educational-videos/backburner-trade-strategy
+Dan McDermitt / Chart Guys,EMA Rider Strategy,2025,site-video,EMA12; trend pullback; risk; exits,MEDIUM,DIRECT_PRIMARY_HOST,HIGH,https://www.chartguys.com/educational-videos/ema-rider-strategy
+Dan McDermitt / Chart Guys,How I Trade Crypto Breakdowns,2022,site-video,crypto breakdowns; execution; trade review,MEDIUM,DIRECT_PRIMARY_HOST,MEDIUM,https://www.chartguys.com/educational-videos
+Dan McDermitt / Chart Guys,How I Scalp Trade,2022,site-video,scalping; execution; risk,MEDIUM,DIRECT_PRIMARY_HOST,LOW_SMALL_ACCOUNT_FEES,https://www.chartguys.com/educational-videos
+Dan McDermitt / Chart Guys,Trading Equilibriums,2020,site-video,tightening ranges; breakout direction,HIGH,DIRECT_PRIMARY_HOST,HIGH,https://www.chartguys.com/educational-videos
+Dan McDermitt / Chart Guys,Inside Bar / tightening education,public,site-video,mother bar; inside range; lower-TF equilibrium,HIGH,DIRECT_PRIMARY_HOST,HIGH,https://www.chartguys.com/educational-videos
+Dan McDermitt / Chart Guys,Trading Correlations,2022,site-video,relative strength; relative weakness; correlated markets,MEDIUM,DIRECT_PRIMARY_HOST,HIGH,https://www.chartguys.com/educational-videos
+Dan McDermitt / Chart Guys,Later Morning Strategy,2023,site-video,wait for direction/strength clarity; avoid open noise,MEDIUM,DIRECT_PRIMARY_HOST,LOW_FOR_24_7_CRYPTO,https://www.chartguys.com/educational-videos
+Dan McDermitt / Chart Guys,"How $3,000 turned into Day Trading Full Time",2025,VoeKsIBAWIA,career story; small account; evolution,LOW_RULE_EXTRACTION,DIRECT_PRIMARY_HOST,CONTEXT,https://www.chartguys.com/watch?v=VoeKsIBAWIA
+Eric Krown,TA 101 / Free Technical Analysis Course,current,course/playlist,trend; structure; S/R; MA; RSI; volatility; confluence; risk,HIGH_CURRICULUM,DIRECT_PRIMARY,HIGH,https://krown-trading.teachable.com/
+Eric Krown,Krown Quant Project — 12 Statistically Tested Bitcoin Trading Strategies,public,vacro9FmdHE,systematic strategies; statistics; Bitcoin,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH_RESEARCH,https://www.youtube.com/watch?v=vacro9FmdHE
+Eric Krown,Beginner-Friendly 15-Min Crypto Day Trading,public,wqhLch_L8Lg,15m; systematic setup,MEDIUM,DIRECT_PUBLIC_VIDEO,LOW_SMALL_ACCOUNT_FEES,https://www.youtube.com/watch?v=wqhLch_L8Lg
+Eric Krown,Krown Trading Jewel Lite Indicator Tutorial,public,imev_QEGPuA,Jewel Lite; oscillator workflow,MEDIUM,DIRECT_PUBLIC_VIDEO,PROPRIETARY_BOUNDARY,https://www.youtube.com/watch?v=imev_QEGPuA
+Eric Krown,Strategies — Live Krown playlist,public,playlist,live strategy examples; daily analysis,VARIABLE,DIRECT_PUBLIC_VIDEO_INDEX,RESEARCH_ONLY,https://www.youtube.com/c/KrownsCryptoCave/playlists
+Benjamin Cowen,Bitcoin: Entry/Exit Strategies,2023,ReziClqylXA,DCA; risk-based entry/exit; plan,HIGH_CONCEPT,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/watch?v=ReziClqylXA
+Benjamin Cowen,Bitcoin Dynamic DCA: How I Navigate Crypto,public,hx_neha7BVQ,dynamic DCA; risk metric; allocation,HIGH_CONCEPT,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/watch?v=hx_neha7BVQ
+Benjamin Cowen,Bitcoin: Risk Metric,public,g_ryyK58svM,risk bands; allocation context,MEDIUM,DIRECT_PUBLIC_VIDEO,PROPRIETARY_FORMULA,https://www.youtube.com/watch?v=g_ryyK58svM
+Benjamin Cowen,Bitcoin Risk Metric,2024/25,Y_WtgM8nSHw,risk metric update,MEDIUM,DIRECT_PUBLIC_VIDEO,PROPRIETARY_FORMULA,https://www.youtube.com/watch?v=Y_WtgM8nSHw
+Benjamin Cowen,Using On-Chain Metrics To Identify Market Cycle Risk,public,Di8YR9nX8Q8,on-chain risk; cycle context,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH_CONTEXT,https://www.youtube.com/watch?v=Di8YR9nX8Q8
+Bob Loukas,The Next 4-Year Cycle Started,2019,PZvOhJYW_Hw,4y cycle; position framework,HIGH_CONCEPT,DIRECT_PUBLIC_VIDEO,HIGH_REGIME,https://www.youtube.com/watch?v=PZvOhJYW_Hw
+Bob Loukas,Watch That Swing — Bitcoin,2019,oPXQa47iT28,4y journey; swing/cycle position,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH_REGIME,https://www.youtube.com/watch?v=oPXQa47iT28
+Bob Loukas,Bitcoin Cycles — A Trader's Perspective,public,video,60-day cycle; tactical cycle,MEDIUM,DIRECT_PUBLIC_VIDEO,MEDIUM,https://www.youtube.com/@bobloukas3493
+Bob Loukas,Divorce Yourself from Emotion — 4-Year Journey,public,video,allocation; risk; emotional discipline,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/@bobloukas3493
+Bob Loukas,Turn in Cycle / 2026 model portfolio update,2026,video/post,cycle window; model portfolio; allocation,MEDIUM,DIRECT_PUBLIC_VIDEO,HIGH_REGIME,https://www.youtube.com/@bobloukas3493
+Jason Pizzino,How To Swing Trade For Beginners — Part 1,public,wrNFtyCJsNY,plan; entry; stop; target; TA,HIGH_CONCEPT,DIRECT_PUBLIC_VIDEO,HIGH,https://www.youtube.com/watch?v=wrNFtyCJsNY
+Jason Pizzino,Swing Trading for Beginners playlist,public,playlist,swing setup; money management; psychology,VARIABLE,DIRECT_PUBLIC_VIDEO_INDEX,HIGH,https://www.youtube.com/@JasonPizzinoOfficial
+Alessio Rastani,Opening Gap — Live Example,public,LeadingTrader site,previous close; current open; gap-fill target; 5m/2m Dow example,HIGH_FOR_ORIGINAL_MARKET,DIRECT_PRIMARY,ADAPTATION_ONLY,https://leadingtrader.com/
+Alessio Rastani,Elliott Wave Method / Trading Tutorial,public,YouTube,Elliott Wave; Fibonacci; trend; scenarios,MEDIUM_CONCEPT,DIRECT_PUBLIC_VIDEO,LOW_EXACTNESS,https://www.youtube.com/user/alessiorastani

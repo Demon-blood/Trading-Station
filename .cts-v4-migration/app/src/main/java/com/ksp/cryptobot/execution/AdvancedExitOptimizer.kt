@@ -3,17 +3,28 @@ package com.ksp.cryptobot.execution
 import com.ksp.cryptobot.core.*
 import com.ksp.cryptobot.data.AdvancedExecutionEventEntity
 import com.ksp.cryptobot.data.GovernanceDao
+import com.ksp.cryptobot.research.HandoffSideIntent
+import com.ksp.cryptobot.research.ResearchExecutionRuntime
 import java.math.BigDecimal
 import java.math.RoundingMode
 
 class AdvancedExitOptimizer(private val governanceDao: GovernanceDao? = null) {
     suspend fun optimize(settings: BotSettings, position: PositionInfo, decision: AiDecision?, triggerReason: String): ExitOptimizationPlan {
         val text = triggerReason.lowercase()
-        val hardRisk = "stop-loss" in text || "risk-off" in text || "bearish" in text
+        val researchDirective = ResearchExecutionRuntime.snapshot(position.symbol)
+        val researchIntent = researchDirective?.sideIntent
+        val hardStop = "stop-loss" in text
+        val hardRisk = hardStop || "risk-off" in text || "bearish" in text || researchIntent == HandoffSideIntent.EXIT
         val pnl = position.unrealizedPnlPercent
         val method: String
         val fraction: BigDecimal
         when {
+            hardStop -> { method = "HARD_STOP_FULL"; fraction = BigDecimal.ONE }
+            researchIntent == HandoffSideIntent.EXIT -> { method = "HANDOFF_SOURCE_EXIT_FULL"; fraction = BigDecimal.ONE }
+            researchIntent == HandoffSideIntent.REDUCE -> {
+                method = "HANDOFF_SOURCE_REDUCE"
+                fraction = settings.partialExitPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP).coerceIn(BigDecimal("0.05"), BigDecimal.ONE)
+            }
             hardRisk -> { method = "HARD_RISK_FULL"; fraction = BigDecimal.ONE }
             "trailing" in text -> { method = "TRAIL_FULL"; fraction = BigDecimal.ONE }
             "spike-exhaustion" in text -> { method = "SPIKE_EXHAUSTION_PARTIAL"; fraction = BigDecimal("0.50") }
@@ -25,7 +36,8 @@ class AdvancedExitOptimizer(private val governanceDao: GovernanceDao? = null) {
         }
         // Avoid fee/spread churn only on soft profit exits. Hard risk exits are never delayed here.
         val economicFloor = BigDecimal("0.25")
-        val shouldExit = hardRisk || !(method == "TP_PARTIAL" && pnl < economicFloor)
+        val handoffProtective = researchIntent in setOf(HandoffSideIntent.EXIT, HandoffSideIntent.REDUCE)
+        val shouldExit = hardRisk || handoffProtective || !(method == "TP_PARTIAL" && pnl < economicFloor)
         val finalFraction = if (shouldExit) fraction else BigDecimal.ZERO
         val orderType = if (hardRisk && settings.enableMarketOrders) OrderType.MARKET else OrderType.LIMIT
         val qualityTier = when {
@@ -35,7 +47,8 @@ class AdvancedExitOptimizer(private val governanceDao: GovernanceDao? = null) {
             hardRisk -> "risk_exit"
             else -> "loss"
         }
-        val reason = "exit optimizer: method=$method, pnl=${pnl.setScale(2, RoundingMode.HALF_UP)}%, fraction=${finalFraction.setScale(2, RoundingMode.HALF_UP)}, orderType=$orderType, trigger=$triggerReason"
+        val sourceNote = if (handoffProtective) ", handoff=${researchDirective?.strategyId}/${researchIntent}, truth=${researchDirective?.liveTruthGate}" else ""
+        val reason = "exit optimizer: method=$method, pnl=${pnl.setScale(2, RoundingMode.HALF_UP)}%, fraction=${finalFraction.setScale(2, RoundingMode.HALF_UP)}, orderType=$orderType, trigger=$triggerReason$sourceNote"
         governanceDao?.insertAdvancedExecution(AdvancedExecutionEventEntity(
             eventType = "exit_optimization", symbol = position.symbol, strategy = settings.strategyMode.name,
             mode = if (settings.mode == BotMode.PAPER) "PAPER" else "LIVE", side = "SELL",

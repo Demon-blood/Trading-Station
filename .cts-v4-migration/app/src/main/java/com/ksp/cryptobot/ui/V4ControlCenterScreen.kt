@@ -129,6 +129,14 @@ private fun V4ResearchPanel() {
     val store = remember { ResearchSettingsStore(context) }
     var enabled by remember { mutableStateOf(store.enabled()) }
     var strategies by remember { mutableStateOf(store.advancedStrategiesEnabled()) }
+    var professionalStrategies by remember { mutableStateOf(store.professionalStrategiesEnabled()) }
+    var desktopParityIntelligence by remember { mutableStateOf(store.desktopParityIntelligenceEnabled()) }
+    var multiExchangeReference by remember { mutableStateOf(store.multiExchangeReferenceEnabled()) }
+    var btcMempool by remember { mutableStateOf(store.btcMempoolEnabled()) }
+    var defillama by remember { mutableStateOf(store.defillamaEnabled()) }
+    var etherscan by remember { mutableStateOf(store.etherscanEnabled()) }
+    var dropstab by remember { mutableStateOf(store.dropstabUnlocksEnabled()) }
+    var onchainCacheSeconds by remember { mutableStateOf(store.onchainCacheSeconds().toString()) }
     var walkForward by remember { mutableStateOf(store.walkForwardEnabled()) }
     var monteCarlo by remember { mutableStateOf(store.monteCarloEnabled()) }
     var sequence by remember { mutableStateOf(store.sequenceModelEnabled()) }
@@ -137,21 +145,34 @@ private fun V4ResearchPanel() {
     var wallets by remember { mutableStateOf(store.labeledWalletEnabled()) }
     var paperPromotion by remember { mutableStateOf(store.researchPromotionInPaper()) }
     var livePromotion by remember { mutableStateOf(store.researchPromotionInLive()) }
+    var handoffEngine by remember { mutableStateOf(store.handoffEngineEnabled()) }
+    var handoffAutoPaper by remember { mutableStateOf(store.handoffAutoPaperExecutionEnabled()) }
+    var handoffLiveSource by remember { mutableStateOf(store.handoffSourceTruthLiveEntriesEnabled()) }
+    var handoffProtectiveLive by remember { mutableStateOf(store.handoffProtectiveLiveActionsEnabled()) }
+    var handoffFormalizedPaper by remember { mutableStateOf(store.handoffFormalizedPaperExecutionEnabled()) }
+    var handoffRiskPct by remember { mutableStateOf(store.handoffRiskPerTradeFraction().multiply(java.math.BigDecimal("100")).stripTrailingZeros().toPlainString()) }
+    var handoffCostMarginPct by remember { mutableStateOf(store.handoffCostSafetyMarginPct().stripTrailingZeros().toPlainString()) }
+    var handoffClusterRiskPct by remember { mutableStateOf(store.handoffCorrelatedRiskCapFraction().multiply(java.math.BigDecimal("100")).stripTrailingZeros().toPlainString()) }
+    var handoffFreshnessDays by remember { mutableStateOf(store.handoffFreshnessWarnDays().toString()) }
     var positive by remember { mutableStateOf(store.maxPositiveAdjustment().toString()) }
     var negative by remember { mutableStateOf(store.maxNegativeAdjustment().toString()) }
     var simulations by remember { mutableStateOf(store.monteCarloSimulations().toString()) }
     var samples by remember { mutableStateOf(store.minimumOutcomeSamples().toString()) }
     var whaleKey by remember { mutableStateOf(store.whaleAlertApiKey()) }
+    var etherscanKey by remember { mutableStateOf(store.etherscanApiKey()) }
+    var dropstabKey by remember { mutableStateOf(store.dropstabApiKey()) }
     var whaleMin by remember { mutableStateOf(store.whaleAlertMinUsd().toString()) }
     var whaleRisk by remember { mutableStateOf(store.whaleAlertExchangeRiskUsd().toString()) }
     var whaleOutflow by remember { mutableStateOf(store.whaleAlertExchangeOutflowBullUsd().toString()) }
     var status by remember { mutableStateOf("Research-created LIVE entries remain OFF by default.") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Stage 5 Research Controls", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Research runs before M3 governance and M4 execution. These switches cannot bypass hard live-trading safety gates.")
+        Text("Desktop-Parity + Professional Research", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Desktop-parity algorithms reproduce the v1.0.50 research/strategy behavior where platform-equivalent. Professional variants add practitioner-style MTF, ATR/volatility, volume, VWAP, DMI/ADX and execution-quality confirmation. Research runs before M3 governance and M4 execution and cannot raise M4's approved capital ceiling.")
         ResearchToggle("Research ensemble", enabled) { enabled = it }
-        ResearchToggle("23 advanced strategy votes", strategies) { strategies = it }
+        ResearchToggle("Desktop-parity strategy families", strategies) { strategies = it }
+        ResearchToggle("Professional practitioner variants", professionalStrategies) { professionalStrategies = it }
+        ResearchToggle("Desktop parity smart intelligence", desktopParityIntelligence) { desktopParityIntelligence = it }
         ResearchToggle("Walk-forward validation", walkForward) { walkForward = it }
         ResearchToggle("Monte Carlo robustness", monteCarlo) { monteCarlo = it }
         ResearchToggle("Sequence model", sequence) { sequence = it }
@@ -161,10 +182,34 @@ private fun V4ResearchPanel() {
         ResearchToggle("Allow research promotion in PAPER", paperPromotion) { paperPromotion = it }
         ResearchToggle("Allow research-created LIVE entries", livePromotion) { livePromotion = it }
         if (livePromotion) Text("Warning: LIVE research promotion is enabled. M3/M4 guards still apply, but the recommended default is OFF.", color = MaterialTheme.colorScheme.error)
+        HorizontalDivider()
+        Text("2026-08-17 Research Handoff — Truth & Automatic Execution", fontWeight = FontWeight.Bold)
+        Text("All 31 handoff strategies/processes are evaluated automatically. PAPER executes mechanically eligible A/B rules and explicitly-labelled C formalizations when their cost/risk gates pass. Protective EXIT/REDUCE may act automatically in LIVE. Positive LIVE source entries require the per-strategy source-truth gate to PASS; this switch is permission, never an override. Proprietary/unknown rules remain BLOCKED_SOURCE_UNKNOWN.")
+        ResearchToggle("Handoff truth engine", handoffEngine) { handoffEngine = it }
+        ResearchToggle("Automatic eligible PAPER execution", handoffAutoPaper) { handoffAutoPaper = it }
+        ResearchToggle("Permit source-truth LIVE entries", handoffLiveSource) { handoffLiveSource = it }
+        ResearchToggle("Automatic protective LIVE EXIT/REDUCE", handoffProtectiveLive) { handoffProtectiveLive = it }
+        ResearchToggle("Allow explicitly formalized public-core rules in PAPER", handoffFormalizedPaper) { handoffFormalizedPaper = it }
+        OutlinedTextField(handoffRiskPct, { v -> handoffRiskPct = v.filter { it.isDigit() || it == '.' } }, label = { Text("Risk per handoff trade % (0.05–1.00)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(handoffCostMarginPct, { v -> handoffCostMarginPct = v.filter { it.isDigit() || it == '.' } }, label = { Text("Cost safety margin % (0–2)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(handoffClusterRiskPct, { v -> handoffClusterRiskPct = v.filter { it.isDigit() || it == '.' } }, label = { Text("Correlated campaign risk cap % (0.25–5)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(handoffFreshnessDays, { handoffFreshnessDays = it.filter(Char::isDigit) }, label = { Text("Source revalidation warning days (1–90)") }, modifier = Modifier.fillMaxWidth())
+        Text("Default small-account risk is 0.35% per trade and 2.0% correlated campaign risk. These are app product-policy defaults, not claims about any creator's exact risk rule.", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(positive, { positive = it.filter(Char::isDigit) }, label = { Text("Max positive research adjustment (0–10)") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(negative, { negative = it.filter(Char::isDigit) }, label = { Text("Max negative research adjustment (0–15)") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(simulations, { simulations = it.filter(Char::isDigit) }, label = { Text("Monte Carlo simulations (100–5000)") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(samples, { samples = it.filter(Char::isDigit) }, label = { Text("Minimum outcome samples (5–100)") }, modifier = Modifier.fillMaxWidth())
+        HorizontalDivider()
+        Text("External / on-chain professional context", fontWeight = FontWeight.Bold)
+        Text("External feeds are advisory and fail neutral. Kraken remains the execution venue.")
+        ResearchToggle("Multi-exchange reference validation", multiExchangeReference) { multiExchangeReference = it }
+        ResearchToggle("Bitcoin mempool context", btcMempool) { btcMempool = it }
+        ResearchToggle("DefiLlama stablecoin/chain context", defillama) { defillama = it }
+        ResearchToggle("Etherscan gas context", etherscan) { etherscan = it }
+        ResearchToggle("DropsTab token-unlock context", dropstab) { dropstab = it }
+        OutlinedTextField(onchainCacheSeconds, { onchainCacheSeconds = it.filter(Char::isDigit) }, label = { Text("External context cache seconds (30–3600)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(etherscanKey, { etherscanKey = it }, label = { Text("Etherscan API key") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(dropstabKey, { dropstabKey = it }, label = { Text("DropsTab API key") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
         HorizontalDivider()
         Text("Optional labeled-wallet / Whale Alert context", fontWeight = FontWeight.Bold)
         OutlinedTextField(whaleKey, { whaleKey = it }, label = { Text("Whale Alert API key") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -172,17 +217,29 @@ private fun V4ResearchPanel() {
         OutlinedTextField(whaleRisk, { whaleRisk = it.filter(Char::isDigit) }, label = { Text("Exchange inflow risk threshold USD") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(whaleOutflow, { whaleOutflow = it.filter(Char::isDigit) }, label = { Text("Exchange outflow bullish threshold USD") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = {
-            store.setEnabled(enabled); store.setAdvancedStrategiesEnabled(strategies); store.setWalkForwardEnabled(walkForward)
+            store.setEnabled(enabled); store.setAdvancedStrategiesEnabled(strategies)
+            store.setProfessionalStrategiesEnabled(professionalStrategies); store.setDesktopParityIntelligenceEnabled(desktopParityIntelligence)
+            store.setMultiExchangeReferenceEnabled(multiExchangeReference); store.setBtcMempoolEnabled(btcMempool)
+            store.setDefillamaEnabled(defillama); store.setEtherscanEnabled(etherscan); store.setDropstabUnlocksEnabled(dropstab)
+            store.setOnchainCacheSeconds(onchainCacheSeconds.toIntOrNull() ?: 300)
+            store.setWalkForwardEnabled(walkForward)
             store.setMonteCarloEnabled(monteCarlo); store.setSequenceModelEnabled(sequence); store.setRlSandboxEnabled(rl)
             store.setFuturesContextEnabled(futures); store.setLabeledWalletEnabled(wallets)
             store.setResearchPromotionInPaper(paperPromotion); store.setResearchPromotionInLive(livePromotion)
+            store.setHandoffEngineEnabled(handoffEngine); store.setHandoffAutoPaperExecutionEnabled(handoffAutoPaper)
+            store.setHandoffSourceTruthLiveEntriesEnabled(handoffLiveSource); store.setHandoffProtectiveLiveActionsEnabled(handoffProtectiveLive)
+            store.setHandoffFormalizedPaperExecutionEnabled(handoffFormalizedPaper)
+            store.setHandoffRiskPerTradeFraction((handoffRiskPct.toBigDecimalOrNull() ?: java.math.BigDecimal("0.35")).divide(java.math.BigDecimal("100"), 8, java.math.RoundingMode.HALF_UP))
+            store.setHandoffCostSafetyMarginPct(handoffCostMarginPct.toBigDecimalOrNull() ?: java.math.BigDecimal("0.25"))
+            store.setHandoffCorrelatedRiskCapFraction((handoffClusterRiskPct.toBigDecimalOrNull() ?: java.math.BigDecimal("2.0")).divide(java.math.BigDecimal("100"), 8, java.math.RoundingMode.HALF_UP))
+            store.setHandoffFreshnessWarnDays(handoffFreshnessDays.toIntOrNull() ?: 7)
             store.setMaxPositiveAdjustment(positive.toIntOrNull() ?: 6); store.setMaxNegativeAdjustment(negative.toIntOrNull() ?: 8)
             store.setMonteCarloSimulations(simulations.toIntOrNull() ?: 500); store.setMinimumOutcomeSamples(samples.toIntOrNull() ?: 10)
-            store.saveWhaleAlertApiKey(whaleKey)
+            store.saveWhaleAlertApiKey(whaleKey); store.saveEtherscanApiKey(etherscanKey); store.saveDropstabApiKey(dropstabKey)
             store.setWhaleAlertMinUsd(whaleMin.toLongOrNull() ?: 500_000L)
             store.setWhaleAlertExchangeRiskUsd(whaleRisk.toLongOrNull() ?: 1_000_000L)
             store.setWhaleAlertExchangeOutflowBullUsd(whaleOutflow.toLongOrNull() ?: 1_000_000L)
-            status = "Research settings saved. LIVE promotion=${store.researchPromotionInLive()}, WhaleAlertConfigured=${store.whaleAlertApiKey().isNotBlank()}."
+            status = "Research settings saved. Handoff=${store.handoffEngineEnabled()}, AutoPaper=${store.handoffAutoPaperExecutionEnabled()}, SourceTruthLivePermission=${store.handoffSourceTruthLiveEntriesEnabled()} (per-strategy truth gate still authoritative), ProtectiveLive=${store.handoffProtectiveLiveActionsEnabled()}, risk=${store.handoffRiskPerTradeFraction().multiply(java.math.BigDecimal("100"))}%. Professional=${store.professionalStrategiesEnabled()}, DesktopParity=${store.desktopParityIntelligenceEnabled()}."
         }) { Text("Save Research Settings") }
         Text(status)
     }

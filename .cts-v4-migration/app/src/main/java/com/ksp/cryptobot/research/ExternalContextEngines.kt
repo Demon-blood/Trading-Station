@@ -41,8 +41,8 @@ class FuturesAndWalletContextEngine(private val settings: ResearchSettingsStore)
             val data=adapter.fromJson(body).orEmpty(); val ref=num(data["price"]); if(ref<=0.0)return neutral("Binance public","NO_PRICE","Cross-market reference unavailable for $candidate.")
             val dev=(krakenPrice-ref)/ref*100.0; val absDev=kotlin.math.abs(dev)
             if(quote=="EUR" && absDev>3.0) return neutral("Binance public","DIFFERENT_QUOTE","Cross-market reference uses USDT for an EUR pair; deviation=${"%.2f".format(dev)}% is informational only.")
-            when{ absDev>.85 -> ContextAssessment(true,-4,.90,"Binance public","DIVERGENCE","Cross-market price divergence=${"%.2f".format(dev)}% vs $candidate.")
-                absDev<.25 -> ContextAssessment(true,1,1.0,"Binance public","CONFIRMED","Cross-market price confirmation=${"%.2f".format(dev)}% vs $candidate.")
+            when{ absDev>.85 -> ContextAssessment(true,-7,.90,"Binance public","DIVERGENCE","Cross-market price divergence=${"%.2f".format(dev)}% vs $candidate.")
+                absDev<.25 -> ContextAssessment(true,2,1.0,"Binance public","CONFIRMED","Cross-market price confirmation=${"%.2f".format(dev)}% vs $candidate.")
                 else -> neutral("Binance public","NEUTRAL","Cross-market deviation=${"%.2f".format(dev)}% vs $candidate.") }
         }.getOrElse{ neutral("Binance public","ERROR","Cross-market reference unavailable: ${it.message}") }
     }
