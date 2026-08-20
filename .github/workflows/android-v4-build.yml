@@ -33,8 +33,8 @@ env:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   CTS_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'debug' }}
   CTS_RUN_TESTS: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.run_tests }}
-  CTS_VERSION_NAME: 4.0.1
-  CTS_VERSION_CODE: 106
+  CTS_VERSION_NAME: 4.0.2
+  CTS_VERSION_CODE: 107
   CTS_DEBUG_CERT_SHA256: b690958cb434544e7f8963ecc86559562a82155ffbd915cb2088c9333e06aa28
 
 jobs:
@@ -103,34 +103,78 @@ jobs:
           set -euo pipefail
           python3 .cts-v4-migration/apply_full_integration_cleanup.py "$GITHUB_WORKSPACE" | tee integration-cleanup.log
 
-      - name: Apply approved exact-preview UI
+      - name: Preflight exact-preview migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .cts-v4-migration/apply_exact_preview_ui.py
+          python3 -m py_compile .cts-v4-migration/apply_exact_preview_ui.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.cts-v4-migration/apply_exact_preview_ui.py')
+          text = p.read_text(encoding='utf-8')
+          required = [
+              'PreviewReplicaUi.kt',
+              'NewsProviderHealthRegistry',
+              'PreviewNewsScreen',
+              'PreviewBottomNavigation',
+              'PreviewDashboardScreen',
+              'PreviewSettingsScreen',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit('Exact-preview migration is incomplete: ' + ', '.join(missing))
+          print(f'Exact-preview migration preflight PASS ({p.stat().st_size} bytes)')
+          PY
+
+      - name: Apply approved preview-exact UI redesign
         shell: bash
         run: |
           set -euo pipefail
           python3 .cts-v4-migration/apply_exact_preview_ui.py "$GITHUB_WORKSPACE" | tee exact-preview-ui.log
 
-      - name: Validate approved visual contract
+      - name: Validate preview visual contracts
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY' | tee exact-preview-ui-contract.log
+          python3 - <<'PY' | tee preview-visual-contracts.log
           from pathlib import Path
+
           main = Path('app/src/main/java/com/ksp/cryptobot/MainActivity.kt').read_text(encoding='utf-8')
+          ui = Path('app/src/main/java/com/ksp/cryptobot/PreviewReplicaUi.kt').read_text(encoding='utf-8')
+          gradle = Path('app/build.gradle.kts').read_text(encoding='utf-8')
+
           checks = {
-              'purple premium accent': '0xFF8B5CF6' in main,
-              'five root bottom nav': 'listOf(AppTab.DASHBOARD, AppTab.PORTFOLIO, AppTab.AI, AppTab.NEWS, AppTab.SETTINGS)' in main,
-              'portfolio area graph': 'PremiumPortfolioAreaChart' in main,
-              'allocation donut': 'AllocationDonut' in main,
-              'AI confidence gauge': 'ConfidenceGauge' in main,
-              'news sentiment card': 'Overall News Sentiment' in main,
-              'segmented Settings': 'Connection & Trading","Automation & Risk' in main,
-              'system operational card': 'ALL SYSTEMS OPERATIONAL' in main,
+              'approved fixed bottom navigation': 'PreviewBottomNavigation(currentTab = currentTab' in main,
+              'approved compact top bar': 'PreviewAppTopBar(' in main,
+              'dashboard preview screen': 'AppTab.DASHBOARD -> PreviewDashboardScreen' in main,
+              'portfolio preview screen': 'AppTab.PORTFOLIO -> PreviewPortfolioScreen' in main,
+              'AI & Research preview screen': 'AppTab.AI -> PreviewAiHubScreen' in main,
+              'News & Intelligence preview screen': 'AppTab.NEWS -> PreviewNewsScreen' in main,
+              'single Settings preview screen': 'AppTab.SETTINGS -> PreviewSettingsScreen' in main,
+              'System Test preview screen': 'AppTab.SYSTEM_TEST -> PreviewSystemTestScreen' in main,
+              'Active Positions preview screen': 'AppTab.POSITIONS -> PreviewPositionsScreen' in main,
+              'Backup & Recovery preview screen': 'AppTab.BACKUP -> PreviewBackupRecoveryScreen' in main,
+              'AI signal detail preview screen': 'AppTab.AI_SIGNAL_DETAIL -> PreviewAiSignalDetailScreen' in main,
+              'line/area graph': 'PreviewAreaSparkline' in ui,
+              'allocation donut': 'AssetAllocationDonut' in ui,
+              'confidence gauge': 'PreviewConfidenceGauge' in ui,
+              'purple accent': '0xFF8B5CF6' in ui,
+              'green accent': '0xFF62DE67' in ui,
+              'card background': '0xFF141D2A' in ui,
+              'navy background': '0xFF0C1522' in ui,
+              'real data not mock portfolio balance': '14582.36' not in ui and '327.64' not in ui,
+              'material icons available': 'material-icons-extended' in gradle,
+              'deep screens share compact 8dp cards': 'Column(modifier = Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(7.dp), content = content)' in main,
+              'deep settings use green switches': 'checkedTrackColor = Mint' in main and 'SwitchDefaults.colors' in main,
+              'legacy hero gradients removed': 'Brush.linearGradient(listOf(Color(0xFF14345F)' not in main,
+              'legacy GlassCard uses compact padding': 'Column(modifier = Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(7.dp), content = content)' in main,
           }
           for name, ok in checks.items():
               print(('PASS' if ok else 'FAIL') + ' | ' + name)
           failed = [name for name, ok in checks.items() if not ok]
           if failed:
-              raise SystemExit('Exact-preview visual contract failed: ' + ', '.join(failed))
+              raise SystemExit('Preview visual contract failure: ' + ', '.join(failed))
           PY
 
       - name: Validate integration contracts
@@ -142,6 +186,7 @@ jobs:
           import re
 
           main = Path('app/src/main/java/com/ksp/cryptobot/MainActivity.kt').read_text(encoding='utf-8')
+          ui = Path('app/src/main/java/com/ksp/cryptobot/PreviewReplicaUi.kt').read_text(encoding='utf-8')
           lifecycle = Path('app/src/main/java/com/ksp/cryptobot/lifecycle/TradeLifecycleManager.kt').read_text(encoding='utf-8')
           controller = Path('app/src/main/java/com/ksp/cryptobot/core/BotController.kt').read_text(encoding='utf-8')
           models = Path('app/src/main/java/com/ksp/cryptobot/core/Models.kt').read_text(encoding='utf-8')
@@ -157,7 +202,7 @@ jobs:
               'same-scan buy/sell context': 'enteredSymbolsThisScan' in controller and 'exitedSymbolsThisScan' in controller,
               'confirmed-fill lifecycle accounting': 'Lifecycle SELL accepted without confirmed fill' in lifecycle,
               'reopened position entry reset': 'latestBuyIsNewLifecycle' in lifecycle and 'reopenedByLatestBuy' in lifecycle,
-              'provider health belongs to News': 'NewsProviderHealthRegistry.snapshot()' in main,
+              'provider health belongs to News': 'NewsProviderHealthRegistry.snapshot()' in ui and 'PreviewNewsScreen' in ui,
               'verified settings save/reload': 'lastSaveVerification()' in store and 'return exactMatch' in store,
           }
           for name, ok in checks.items():
@@ -230,8 +275,8 @@ jobs:
           from pathlib import Path
           import re
 
-          version_name = "4.0.1"
-          version_code = 106
+          version_name = "4.0.2"
+          version_code = 107
 
           gradle = Path("app/build.gradle.kts")
           text = gradle.read_text(encoding="utf-8")
@@ -251,7 +296,7 @@ jobs:
 
           main = Path("app/src/main/java/com/ksp/cryptobot/MainActivity.kt")
           if main.exists():
-              text = main.read_text(encoding="utf-8").replace("v4.0.0 CTS", "v4.0.1 CTS")
+              text = main.read_text(encoding="utf-8").replace("v4.0.0 CTS", "v4.0.2 CTS")
               main.write_text(text, encoding="utf-8")
 
           print(f"Canonical update identity set: {version_name} ({version_code})")
@@ -286,9 +331,9 @@ jobs:
           release = Path('app/src/main/java/com/ksp/cryptobot/release/V4ReleaseInfo.kt').read_text(encoding='utf-8')
           checks = {
               'applicationId com.ksp.cryptobot': 'applicationId = "com.ksp.cryptobot"' in gradle,
-              'versionName 4.0.1': 'versionName = "4.0.1"' in gradle,
-              'versionCode 106': 'versionCode = 106' in gradle,
-              'V4ReleaseInfo 4.0.1': 'VERSION_NAME = "4.0.1"' in release and 'VERSION_CODE = 106' in release,
+              'versionName 4.0.2': 'versionName = "4.0.2"' in gradle,
+              'versionCode 107': 'versionCode = 107' in gradle,
+              'V4ReleaseInfo 4.0.2': 'VERSION_NAME = "4.0.2"' in release and 'VERSION_CODE = 107' in release,
               'Room schema 11': 'version = 11' in db,
               'non-destructive Room': re.search(r'(?m)^\s*\.fallbackToDestructiveMigration\s*\(', db) is None,
               'research handoff': Path('app/src/main/java/com/ksp/cryptobot/research/ResearchHandoffEngine.kt').exists(),
@@ -378,8 +423,8 @@ jobs:
 
           PACKAGE_LINE="$(cat ci-output/apk-package.txt)"
           echo "$PACKAGE_LINE" | grep -q "name='com.ksp.cryptobot'" || { echo "Wrong applicationId in built APK" >&2; exit 1; }
-          echo "$PACKAGE_LINE" | grep -q "versionCode='106'" || { echo "Wrong versionCode in built APK" >&2; exit 1; }
-          echo "$PACKAGE_LINE" | grep -q "versionName='4.0.1'" || { echo "Wrong versionName in built APK" >&2; exit 1; }
+          echo "$PACKAGE_LINE" | grep -q "versionCode='107'" || { echo "Wrong versionCode in built APK" >&2; exit 1; }
+          echo "$PACKAGE_LINE" | grep -q "versionName='4.0.2'" || { echo "Wrong versionName in built APK" >&2; exit 1; }
 
           if [ "$CTS_BUILD_TYPE" = "debug" ]; then
             EXPECTED="$(echo "$CTS_DEBUG_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
@@ -412,7 +457,7 @@ jobs:
       - name: Upload canonical CTS update APK
         uses: actions/upload-artifact@v4
         with:
-          name: CryptoTradeStation-v4.0.1-${{ env.CTS_BUILD_TYPE }}-update-apk
+          name: CryptoTradeStation-v4.0.2-${{ env.CTS_BUILD_TYPE }}-update-apk
           path: ci-output/
           if-no-files-found: error
           retention-days: 30
@@ -423,7 +468,7 @@ jobs:
         run: |
           set +e
           mkdir -p ci-failure
-          cp migration.log diagnostics-fix.log integration-cleanup.log integration-contracts.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
+          cp migration.log diagnostics-fix.log integration-cleanup.log exact-preview-ui.log preview-visual-contracts.log integration-contracts.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
           git diff --stat > ci-failure/git-diff-stat.txt 2>&1 || true
           git diff --name-only > ci-failure/git-diff-files.txt 2>&1 || true
           java -version > ci-failure/java-version.txt 2>&1 || true

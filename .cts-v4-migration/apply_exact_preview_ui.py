@@ -1,904 +1,579 @@
 #!/usr/bin/env python3
+# Apply the approved Crypto TradeStation preview UI as the real Compose shell.
+# Run AFTER apply_full_integration_cleanup.py.
 from __future__ import annotations
+
+import re
 import sys
 from pathlib import Path
 
-def fail(msg: str) -> None:
-    raise SystemExit("[CTS exact preview UI] " + msg)
+
+def fail(message: str) -> None:
+    raise SystemExit(f"[CTS preview-exact redesign] {message}")
+
+
+def require(path: Path) -> None:
+    if not path.exists():
+        fail(f"Required file missing: {path}")
+
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
-    n = text.count(old)
-    if n != 1:
-        fail(f"{label}: expected 1 match, found {n}")
+    count = text.count(old)
+    if count != 1:
+        fail(f"{label}: expected exactly one match, found {count}")
     return text.replace(old, new, 1)
 
-def replace_composable(text: str, name: str, replacement: str) -> str:
-    marker = "@Composable\nprivate fun " + name
-    start = text.find(marker)
-    if start < 0:
-        fail(f"Composable {name} not found")
-    nxt = text.find("\n@Composable\nprivate fun ", start + len(marker))
-    if nxt < 0:
-        fail(f"Composable {name} end not found")
-    return text[:start] + replacement.rstrip() + "\n\n" + text[nxt + 1:]
 
-def patch_imports(text: str) -> str:
-    if "import androidx.compose.foundation.clickable\n" not in text:
-        text = text.replace(
-            "import androidx.compose.foundation.background\n",
-            "import androidx.compose.foundation.background\nimport androidx.compose.foundation.clickable\n",
-            1,
-        )
-    if "import androidx.compose.material3.Switch\n" not in text:
-        text = text.replace(
-            "import androidx.compose.material3.Surface\n",
-            "import androidx.compose.material3.Surface\nimport androidx.compose.material3.Switch\n",
-            1,
-        )
-    return text
+def replace_regex_once(text: str, pattern: str, replacement: str, label: str) -> str:
+    updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    if count != 1:
+        fail(f"{label}: expected exactly one regex match, found {count}")
+    return updated
 
-HEADER = r"""@Composable
-private fun HeaderBar(currentTab: AppTab, status: String, mode: BotMode, level: String) {
-    val title = when (currentTab) {
-        AppTab.DASHBOARD -> "Dashboard"
-        AppTab.PORTFOLIO, AppTab.POSITIONS, AppTab.ORDERS, AppTab.HISTORY -> "Portfolio"
-        AppTab.AI, AppTab.AI_SIGNALS, AppTab.STRATEGY, AppTab.BACKTEST, AppTab.REGIME,
-        AppTab.PERFORMANCE, AppTab.SANDBOX, AppTab.PORTFOLIO_ROTATION, AppTab.AUTO_TUNER,
-        AppTab.SELF_LEARNING, AppTab.SELF_LEARNING_MAIN, AppTab.LEARNING_INSPECTOR,
-        AppTab.SMART_EXIT, AppTab.RESEARCH_SETTINGS -> "AI & Research"
-        AppTab.NEWS -> "News & Intelligence"
-        AppTab.SETTINGS, AppTab.BASIC_SETTINGS, AppTab.ADVANCED_SETTINGS, AppTab.BACKUP,
-        AppTab.CLOUDSHARE_SETTINGS, AppTab.RECOVERY_TOOLS, AppTab.SYSTEM_TEST, AppTab.HEALTH,
-        AppTab.REMOTE_ALERTS, AppTab.NOTIFICATIONS, AppTab.NOTIFICATION_LOGS,
-        AppTab.KRAKEN_HEALTH, AppTab.RISK -> "Settings"
-        else -> currentTab.label
+
+def write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+PREVIEW_SOURCE = 'package com.ksp.cryptobot\n\nimport androidx.activity.compose.rememberLauncherForActivityResult\nimport androidx.activity.result.contract.ActivityResultContracts\nimport androidx.compose.foundation.Canvas\nimport androidx.compose.foundation.background\nimport androidx.compose.foundation.border\nimport androidx.compose.foundation.clickable\nimport androidx.compose.foundation.layout.Arrangement\nimport androidx.compose.foundation.layout.Box\nimport androidx.compose.foundation.layout.Column\nimport androidx.compose.foundation.layout.PaddingValues\nimport androidx.compose.foundation.layout.Row\nimport androidx.compose.foundation.layout.Spacer\nimport androidx.compose.foundation.layout.fillMaxHeight\nimport androidx.compose.foundation.layout.fillMaxSize\nimport androidx.compose.foundation.layout.fillMaxWidth\nimport androidx.compose.foundation.layout.height\nimport androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.layout.size\nimport androidx.compose.foundation.layout.width\nimport androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.foundation.lazy.LazyRow\nimport androidx.compose.foundation.lazy.items\nimport androidx.compose.foundation.shape.CircleShape\nimport androidx.compose.foundation.shape.RoundedCornerShape\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.rounded.AccountBalanceWallet\nimport androidx.compose.material.icons.rounded.Analytics\nimport androidx.compose.material.icons.rounded.ArrowBack\nimport androidx.compose.material.icons.rounded.Backup\nimport androidx.compose.material.icons.rounded.CheckCircle\nimport androidx.compose.material.icons.rounded.ChevronRight\nimport androidx.compose.material.icons.rounded.CloudDone\nimport androidx.compose.material.icons.rounded.ErrorOutline\nimport androidx.compose.material.icons.rounded.Home\nimport androidx.compose.material.icons.rounded.Info\nimport androidx.compose.material.icons.rounded.Menu\nimport androidx.compose.material.icons.rounded.Newspaper\nimport androidx.compose.material.icons.rounded.Refresh\nimport androidx.compose.material.icons.rounded.Restore\nimport androidx.compose.material.icons.rounded.Security\nimport androidx.compose.material.icons.rounded.Settings\nimport androidx.compose.material.icons.rounded.Sync\nimport androidx.compose.material.icons.rounded.Tune\nimport androidx.compose.material.icons.rounded.WarningAmber\nimport androidx.compose.material3.Button\nimport androidx.compose.material3.ButtonDefaults\nimport androidx.compose.material3.Divider\nimport androidx.compose.material3.Icon\nimport androidx.compose.material3.IconButton\nimport androidx.compose.material3.LinearProgressIndicator\nimport androidx.compose.material3.OutlinedButton\nimport androidx.compose.material3.Surface\nimport androidx.compose.material3.Switch\nimport androidx.compose.material3.SwitchDefaults\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.Composable\nimport androidx.compose.runtime.getValue\nimport androidx.compose.runtime.mutableIntStateOf\nimport androidx.compose.runtime.mutableStateOf\nimport androidx.compose.runtime.remember\nimport androidx.compose.runtime.setValue\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.geometry.Offset\nimport androidx.compose.ui.graphics.Brush\nimport androidx.compose.ui.graphics.Color\nimport androidx.compose.ui.graphics.Path\nimport androidx.compose.ui.graphics.StrokeCap\nimport androidx.compose.ui.graphics.drawscope.Stroke\nimport androidx.compose.ui.graphics.vector.ImageVector\nimport androidx.compose.ui.text.font.FontWeight\nimport androidx.compose.ui.text.style.TextOverflow\nimport androidx.compose.ui.unit.dp\nimport androidx.compose.ui.unit.sp\nimport com.ksp.cryptobot.cloudshare.CloudShareSettingsStore\nimport com.ksp.cryptobot.core.AiDecision\nimport com.ksp.cryptobot.core.BotMode\nimport com.ksp.cryptobot.core.BotSettings\nimport com.ksp.cryptobot.core.Candle\nimport com.ksp.cryptobot.core.ExchangeProvider\nimport com.ksp.cryptobot.core.LifecycleSnapshot\nimport com.ksp.cryptobot.core.OrderSide\nimport com.ksp.cryptobot.core.PortfolioSnapshot\nimport com.ksp.cryptobot.core.SignalAction\nimport com.ksp.cryptobot.data.NewsArticleEntity\nimport com.ksp.cryptobot.data.TradeEntity\nimport com.ksp.cryptobot.news.NewsProviderHealthRegistry\nimport java.math.BigDecimal\nimport java.math.RoundingMode\nimport java.time.Instant\nimport java.time.ZoneId\nimport java.time.format.DateTimeFormatter\nimport kotlin.math.max\n\nprivate val PreviewBackground = Color(0xFF0C1522)\nprivate val PreviewTop = Color(0xFF0A1320)\nprivate val PreviewCard = Color(0xFF141D2A)\nprivate val PreviewCardAlt = Color(0xFF111A27)\nprivate val PreviewDivider = Color(0xFF243143)\nprivate val PreviewPurple = Color(0xFF8B5CF6)\nprivate val PreviewPurpleSoft = Color(0xFF9C75FF)\nprivate val PreviewGreen = Color(0xFF62DE67)\nprivate val PreviewRed = Color(0xFFFF5D69)\nprivate val PreviewOrange = Color(0xFFFFA31A)\nprivate val PreviewBlue = Color(0xFF68B7E8)\nprivate val PreviewMint = Color(0xFF77D6BD)\nprivate val PreviewText = Color(0xFFF2F5F8)\nprivate val PreviewMuted = Color(0xFF8E9BAB)\nprivate val PreviewMuted2 = Color(0xFF687687)\nprivate val PreviewBlack = Color(0xFF05090E)\n\nprivate val previewTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm:ss")\n\nfun previewParentTab(tab: AppTab): AppTab = when (tab) {\n    AppTab.AI_SIGNALS,\n    AppTab.AI_SIGNAL_DETAIL,\n    AppTab.STRATEGY,\n    AppTab.SANDBOX,\n    AppTab.BACKTEST,\n    AppTab.REGIME,\n    AppTab.AUTONOMOUS,\n    AppTab.SELF_LEARNING,\n    AppTab.SELF_LEARNING_MAIN,\n    AppTab.LEARNING_INSPECTOR,\n    AppTab.PERFORMANCE,\n    AppTab.PRO,\n    AppTab.SMART_EXIT,\n    AppTab.PORTFOLIO_ROTATION,\n    AppTab.AUTO_TUNER,\n    AppTab.RELEASE_SAFETY,\n    AppTab.RESEARCH_SETTINGS -> AppTab.AI\n\n    AppTab.ORDERS,\n    AppTab.POSITIONS,\n    AppTab.HISTORY,\n    AppTab.TAX,\n    AppTab.CHART,\n    AppTab.CHART_MAIN,\n    AppTab.TRADE_OVERLAY,\n    AppTab.REPLAY,\n    AppTab.TRADE_JOURNAL -> AppTab.PORTFOLIO\n\n    AppTab.BASIC_SETTINGS,\n    AppTab.ADVANCED_SETTINGS,\n    AppTab.SYSTEM_TEST,\n    AppTab.HEALTH,\n    AppTab.NOTIFICATIONS,\n    AppTab.NOTIFICATION_LOGS,\n    AppTab.REMOTE_ALERTS,\n    AppTab.BACKUP,\n    AppTab.KRAKEN_HEALTH,\n    AppTab.CLOUDSHARE_SETTINGS,\n    AppTab.RECOVERY_TOOLS,\n    AppTab.RISK,\n    AppTab.SYMBOLS,\n    AppTab.BOT,\n    AppTab.STATUS -> AppTab.SETTINGS\n\n    else -> AppTab.DASHBOARD\n}\n\nprivate fun isPrimaryPreviewTab(tab: AppTab): Boolean = tab in setOf(\n    AppTab.DASHBOARD, AppTab.PORTFOLIO, AppTab.AI, AppTab.NEWS, AppTab.SETTINGS\n)\n\nprivate fun previewTopTitle(tab: AppTab, detailSymbol: String?): String = when (tab) {\n    AppTab.DASHBOARD -> "Dashboard"\n    AppTab.PORTFOLIO -> "Portfolio"\n    AppTab.AI -> "AI & Research"\n    AppTab.NEWS -> "News & Intelligence"\n    AppTab.SETTINGS -> "Settings"\n    AppTab.POSITIONS -> "Active Positions"\n    AppTab.ORDERS -> "Orders"\n    AppTab.HISTORY -> "History"\n    AppTab.AI_SIGNAL_DETAIL -> "${previewPair(detailSymbol.orEmpty())} – AI Signal"\n    AppTab.AI_SIGNALS -> "AI Signals"\n    AppTab.SYSTEM_TEST -> "System Test (v4 Systems)"\n    AppTab.BASIC_SETTINGS -> "Connection & Trading"\n    AppTab.ADVANCED_SETTINGS -> "Automation & Risk"\n    AppTab.BACKUP -> "Settings"\n    AppTab.RESEARCH_SETTINGS -> "AI & Research"\n    AppTab.CLOUDSHARE_SETTINGS -> "CloudShare"\n    AppTab.RECOVERY_TOOLS -> "Recovery"\n    else -> tab.label\n}\n\n@Composable\nfun PreviewAppTopBar(\n    currentTab: AppTab,\n    detailSymbol: String? = null,\n    onBack: () -> Unit,\n    onAction: () -> Unit\n) {\n    val showMenu = currentTab == AppTab.DASHBOARD || currentTab == AppTab.PORTFOLIO\n    val actionIcon: ImageVector? = when (currentTab) {\n        AppTab.DASHBOARD -> Icons.Rounded.Info\n        AppTab.PORTFOLIO, AppTab.POSITIONS, AppTab.ORDERS -> Icons.Rounded.Refresh\n        AppTab.SYSTEM_TEST -> Icons.Rounded.Security\n        else -> null\n    }\n    Surface(color = PreviewTop, modifier = Modifier.fillMaxWidth()) {\n        Row(\n            modifier = Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 12.dp),\n            verticalAlignment = Alignment.CenterVertically\n        ) {\n            IconButton(onClick = { if (!showMenu) onBack() }) {\n                Icon(\n                    imageVector = if (showMenu) Icons.Rounded.Menu else Icons.Rounded.ArrowBack,\n                    contentDescription = if (showMenu) "Menu" else "Back",\n                    tint = PreviewText,\n                    modifier = Modifier.size(22.dp)\n                )\n            }\n            Text(\n                previewTopTitle(currentTab, detailSymbol),\n                color = PreviewText,\n                fontSize = 18.sp,\n                fontWeight = FontWeight.SemiBold,\n                modifier = Modifier.weight(1f)\n            )\n            if (actionIcon != null) {\n                IconButton(onClick = onAction) {\n                    Icon(actionIcon, contentDescription = "Action", tint = PreviewText, modifier = Modifier.size(21.dp))\n                }\n            } else {\n                Spacer(Modifier.width(48.dp))\n            }\n        }\n        Divider(color = PreviewDivider.copy(alpha = 0.55f), thickness = 0.7.dp)\n    }\n}\n\n@Composable\nfun PreviewBottomNavigation(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {\n    val parent = if (isPrimaryPreviewTab(currentTab)) currentTab else previewParentTab(currentTab)\n    val items = listOf(\n        Triple(AppTab.DASHBOARD, Icons.Rounded.Home, "Dashboard"),\n        Triple(AppTab.PORTFOLIO, Icons.Rounded.AccountBalanceWallet, "Portfolio"),\n        Triple(AppTab.AI, Icons.Rounded.Analytics, "AI"),\n        Triple(AppTab.NEWS, Icons.Rounded.Newspaper, "News"),\n        Triple(AppTab.SETTINGS, Icons.Rounded.Settings, "Settings")\n    )\n    Surface(color = PreviewTop, modifier = Modifier.fillMaxWidth()) {\n        Column {\n            Divider(color = PreviewDivider, thickness = 0.7.dp)\n            Row(\n                modifier = Modifier.fillMaxWidth().height(72.dp),\n                horizontalArrangement = Arrangement.SpaceEvenly,\n                verticalAlignment = Alignment.CenterVertically\n            ) {\n                items.forEach { (tab, icon, label) ->\n                    val selected = parent == tab\n                    Column(\n                        modifier = Modifier.weight(1f).fillMaxHeight().clickable { onTabSelected(tab) }.padding(top = 8.dp, bottom = 6.dp),\n                        horizontalAlignment = Alignment.CenterHorizontally,\n                        verticalArrangement = Arrangement.Center\n                    ) {\n                        Icon(icon, contentDescription = label, tint = if (selected) PreviewPurpleSoft else PreviewMuted, modifier = Modifier.size(22.dp))\n                        Spacer(Modifier.height(4.dp))\n                        Text(label, color = if (selected) PreviewPurpleSoft else PreviewMuted, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)\n                    }\n                }\n            }\n        }\n    }\n}\n\n@Composable\nprivate fun PreviewCardBox(\n    modifier: Modifier = Modifier,\n    onClick: (() -> Unit)? = null,\n    content: @Composable () -> Unit\n) {\n    val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier\n    Surface(\n        modifier = modifier.fillMaxWidth().then(clickModifier),\n        color = PreviewCard,\n        shape = RoundedCornerShape(8.dp),\n        border = androidx.compose.foundation.BorderStroke(0.7.dp, PreviewDivider.copy(alpha = 0.72f))\n    ) {\n        Box(Modifier.padding(14.dp)) { content() }\n    }\n}\n\n@Composable\nprivate fun PreviewSectionHeader(title: String, trailing: String? = null) {\n    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n        Text(title, color = PreviewText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))\n        if (!trailing.isNullOrBlank()) Text(trailing, color = PreviewText, fontSize = 13.sp)\n    }\n}\n\nprivate fun euro(value: BigDecimal): String = "€" + value.setScale(2, RoundingMode.HALF_UP).toPlainString()\nprivate fun pct(value: BigDecimal): String = value.setScale(2, RoundingMode.HALF_UP).toPlainString() + "%"\nprivate fun safeBig(value: String): BigDecimal = value.toBigDecimalOrNull() ?: BigDecimal.ZERO\nprivate fun tradeNotional(trade: TradeEntity): BigDecimal = safeBig(trade.quantity).multiply(safeBig(trade.priceEur))\n\nfun previewPair(symbol: String): String {\n    val clean = symbol.uppercase().replace("/", "").replace("-", "")\n    val quotes = listOf("USDT", "USDC", "EUR", "USD", "BTC", "ETH")\n    val quote = quotes.firstOrNull { clean.endsWith(it) } ?: return clean\n    val base = clean.removeSuffix(quote)\n    return if (base.isBlank()) clean else "$base/$quote"\n}\n\nprivate fun previewBase(symbol: String): String = previewPair(symbol).substringBefore(\'/\')\n\nprivate fun friendlyAsset(base: String): String = when (base.uppercase()) {\n    "BTC", "XBT" -> "Bitcoin"\n    "ETH" -> "Ethereum"\n    "KAS" -> "Kaspa"\n    "HBAR" -> "Hedera"\n    "SOL" -> "Solana"\n    "XRP" -> "XRP"\n    "ADA" -> "Cardano"\n    "DOGE" -> "Dogecoin"\n    "DOT" -> "Polkadot"\n    else -> base.uppercase()\n}\n\n@Composable\nprivate fun AssetIcon(base: String, size: Int = 28) {\n    val normalized = base.uppercase().replace("XBT", "BTC")\n    val background = when (normalized) {\n        "BTC" -> PreviewOrange\n        "ETH" -> Color(0xFF66768D)\n        "KAS" -> Color(0xFF75D3CB)\n        "HBAR" -> PreviewBlack\n        "SOL" -> Color(0xFF6547D8)\n        "XRP" -> Color(0xFF303946)\n        else -> Color(0xFF344358)\n    }\n    val label = when (normalized) {\n        "BTC" -> "₿"\n        "ETH" -> "◆"\n        "HBAR" -> "H"\n        else -> normalized.take(1)\n    }\n    Surface(shape = CircleShape, color = background, modifier = Modifier.size(size.dp)) {\n        Box(contentAlignment = Alignment.Center) {\n            Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size * 0.46f).sp)\n        }\n    }\n}\n\nprivate fun realized24h(trades: List<TradeEntity>): BigDecimal {\n    val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L\n    return trades.asSequence().filter { it.timestampEpochMs >= cutoff }.map { safeBig(it.realizedPnlEur) }.fold(BigDecimal.ZERO, BigDecimal::add)\n}\n\nprivate fun turnover24h(trades: List<TradeEntity>): BigDecimal {\n    val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L\n    return trades.asSequence().filter { it.timestampEpochMs >= cutoff }.map(::tradeNotional).fold(BigDecimal.ZERO, BigDecimal::add)\n}\n\nprivate fun portfolioTrend(total: BigDecimal, trades: List<TradeEntity>): List<Float> {\n    val rows = trades.sortedBy { it.timestampEpochMs }.takeLast(24)\n    if (rows.isEmpty()) return listOf(0.5f, 0.5f)\n    val net = rows.map { safeBig(it.realizedPnlEur) }\n    var running = total.subtract(net.fold(BigDecimal.ZERO) { a, b -> a.add(b) })\n    val values = mutableListOf(running)\n    net.forEach { running = running.add(it); values += running }\n    val min = values.minOrNull() ?: BigDecimal.ZERO\n    val max = values.maxOrNull() ?: BigDecimal.ONE\n    val range = max.subtract(min).takeIf { it > BigDecimal.ZERO } ?: BigDecimal.ONE\n    return values.map { it.subtract(min).divide(range, 8, RoundingMode.HALF_UP).toFloat().coerceIn(0f, 1f) }\n}\n\n@Composable\nprivate fun PreviewAreaSparkline(points: List<Float>, modifier: Modifier = Modifier) {\n    Canvas(modifier = modifier) {\n        if (points.size < 2) return@Canvas\n        val xStep = size.width / (points.size - 1).coerceAtLeast(1)\n        fun y(v: Float) = size.height - (size.height * (0.13f + v * 0.74f))\n        val path = Path().apply {\n            moveTo(0f, y(points.first()))\n            points.drop(1).forEachIndexed { index, value -> lineTo((index + 1) * xStep, y(value)) }\n        }\n        val fill = Path().apply {\n            moveTo(0f, size.height)\n            lineTo(0f, y(points.first()))\n            points.drop(1).forEachIndexed { index, value -> lineTo((index + 1) * xStep, y(value)) }\n            lineTo(size.width, size.height)\n            close()\n        }\n        drawPath(fill, brush = Brush.verticalGradient(listOf(PreviewGreen.copy(alpha = 0.22f), PreviewGreen.copy(alpha = 0.01f))))\n        drawPath(path, color = PreviewGreen, style = Stroke(width = 2.4f, cap = StrokeCap.Round))\n        drawCircle(PreviewGreen, radius = 3.2f, center = Offset(size.width, y(points.last())))\n    }\n}\n\n@Composable\nfun PreviewDashboardScreen(\n    settings: BotSettings,\n    status: String,\n    portfolio: PortfolioSnapshot?,\n    lifecycle: LifecycleSnapshot?,\n    decisions: List<AiDecision>,\n    trades: List<TradeEntity>,\n    onStart: () -> Unit,\n    onStop: () -> Unit,\n    onScan: () -> Unit,\n    onExecute: () -> Unit,\n    onOpenNews: () -> Unit\n) {\n    val total = portfolio?.totalValueEur ?: BigDecimal.ZERO\n    val available = portfolio?.freeEur ?: BigDecimal.ZERO\n    val invested = total.subtract(available).max(BigDecimal.ZERO)\n    val pnl24 = realized24h(trades)\n    val pct24 = if (total.subtract(pnl24) > BigDecimal.ZERO) pnl24.multiply(BigDecimal("100")).divide(total.subtract(pnl24), 4, RoundingMode.HALF_UP) else BigDecimal.ZERO\n    val positions = lifecycle?.positions.orEmpty().filter { it.quantity > BigDecimal.ZERO }.take(4)\n    val trend = portfolioTrend(total, trades)\n\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item {\n            PreviewCardBox {\n                Column {\n                    Text("Portfolio Value", color = PreviewMuted, fontSize = 11.sp)\n                    Spacer(Modifier.height(3.dp))\n                    Text(euro(total), color = PreviewGreen, fontSize = 24.sp, fontWeight = FontWeight.Bold)\n                    Spacer(Modifier.height(8.dp))\n                    Text("24H P/L", color = PreviewMuted, fontSize = 10.sp)\n                    Text(\n                        (if (pnl24 >= BigDecimal.ZERO) "+" else "") + euro(pnl24) + " (" + (if (pct24 >= BigDecimal.ZERO) "+" else "") + pct(pct24) + ")",\n                        color = if (pnl24 >= BigDecimal.ZERO) PreviewGreen else PreviewRed,\n                        fontSize = 11.sp,\n                        fontWeight = FontWeight.SemiBold\n                    )\n                    PreviewAreaSparkline(trend, Modifier.fillMaxWidth().height(78.dp).padding(top = 4.dp))\n                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {\n                        DashboardStat("Invested", euro(invested))\n                        DashboardStat("Available", euro(available))\n                        DashboardStat("24H Volume", euro(turnover24h(trades)))\n                    }\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("Active Positions", positions.size.toString())\n                    Spacer(Modifier.height(7.dp))\n                    if (positions.isEmpty()) {\n                        Text("No active positions", color = PreviewMuted, fontSize = 12.sp)\n                    } else {\n                        positions.forEachIndexed { index, p ->\n                            DashboardPositionRow(p)\n                            if (index != positions.lastIndex) Divider(color = PreviewDivider.copy(alpha = 0.65f), modifier = Modifier.padding(vertical = 7.dp))\n                        }\n                    }\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("Bot Controls")\n                    Spacer(Modifier.height(6.dp))\n                    Text(status, color = PreviewMuted, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)\n                    Spacer(Modifier.height(10.dp))\n                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {\n                        PreviewPrimaryButton("Scan", onScan, Modifier.weight(1f))\n                        PreviewOutlineButton("Execute", onExecute, Modifier.weight(1f))\n                    }\n                    Spacer(Modifier.height(8.dp))\n                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {\n                        PreviewOutlineButton("Start", onStart, Modifier.weight(1f))\n                        PreviewOutlineButton("Stop", onStop, Modifier.weight(1f))\n                        PreviewOutlineButton("News", onOpenNews, Modifier.weight(1f))\n                    }\n                    val latest = decisions.maxByOrNull { it.finalScore }\n                    if (latest != null) {\n                        Spacer(Modifier.height(9.dp))\n                        Divider(color = PreviewDivider)\n                        Spacer(Modifier.height(8.dp))\n                        Text("Latest AI: ${previewPair(latest.symbol)} ${latest.finalAction.name.replace(\'_\', \' \')} • ${latest.confidencePercent}%", color = previewActionColor(latest.finalAction), fontSize = 11.sp)\n                    }\n                }\n            }\n        }\n    }\n}\n\n@Composable\nprivate fun DashboardStat(label: String, value: String) {\n    Column {\n        Text(label, color = PreviewMuted, fontSize = 9.sp)\n        Text(value, color = PreviewText, fontSize = 11.sp, fontWeight = FontWeight.Medium)\n    }\n}\n\n@Composable\nprivate fun DashboardPositionRow(position: com.ksp.cryptobot.core.PositionInfo) {\n    val base = previewBase(position.symbol)\n    val value = position.currentPrice.multiply(position.quantity)\n    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n        AssetIcon(base, 26)\n        Spacer(Modifier.width(9.dp))\n        Column(Modifier.weight(1f)) {\n            Text(previewPair(position.symbol), color = PreviewText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)\n            Text(friendlyAsset(base), color = PreviewMuted, fontSize = 9.sp)\n        }\n        Column(horizontalAlignment = Alignment.End) {\n            Text(euro(value), color = PreviewText, fontSize = 11.sp, fontWeight = FontWeight.Medium)\n            Text((if (position.unrealizedPnlPercent >= BigDecimal.ZERO) "+" else "") + pct(position.unrealizedPnlPercent), color = if (position.unrealizedPnlPercent >= BigDecimal.ZERO) PreviewGreen else PreviewRed, fontSize = 10.sp)\n        }\n    }\n}\n\n@Composable\nprivate fun PreviewPrimaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {\n    Button(\n        onClick = onClick,\n        modifier = modifier.height(36.dp),\n        shape = RoundedCornerShape(6.dp),\n        colors = ButtonDefaults.buttonColors(containerColor = PreviewPurple, contentColor = Color.White),\n        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)\n    ) { Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }\n}\n\n@Composable\nprivate fun PreviewOutlineButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {\n    OutlinedButton(\n        onClick = onClick,\n        modifier = modifier.height(36.dp),\n        shape = RoundedCornerShape(6.dp),\n        border = androidx.compose.foundation.BorderStroke(1.dp, PreviewPurple),\n        colors = ButtonDefaults.outlinedButtonColors(contentColor = PreviewPurpleSoft),\n        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp)\n    ) { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium) }\n}\n\n@Composable\nfun PreviewPortfolioScreen(\n    settings: BotSettings,\n    snapshot: PortfolioSnapshot?,\n    lifecycleSnapshot: LifecycleSnapshot?,\n    trades: List<TradeEntity>,\n    onRefresh: () -> Unit\n) {\n    var tab by remember { mutableIntStateOf(0) }\n    val tabs = listOf("Positions", "Orders", "History", "Allocations")\n    val assets = snapshot?.assets.orEmpty().filter { it.total > BigDecimal.ZERO || it.eurValue > BigDecimal.ZERO }\n    val total = snapshot?.totalValueEur ?: BigDecimal.ZERO\n    val pnl24 = realized24h(trades)\n    val pct24 = if (total.subtract(pnl24) > BigDecimal.ZERO) pnl24.multiply(BigDecimal("100")).divide(total.subtract(pnl24), 4, RoundingMode.HALF_UP) else BigDecimal.ZERO\n\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 0.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item {\n            PreviewSegmentTabs(labels = tabs, selected = tab, onSelected = { tab = it })\n        }\n        when (tab) {\n            0, 3 -> {\n                item {\n                    PreviewCardBox {\n                        Column {\n                            Text("Total Value", color = PreviewMuted, fontSize = 10.sp)\n                            Text(euro(total), color = PreviewGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold)\n                            Text("24H P/L", color = PreviewMuted, fontSize = 9.sp)\n                            Text((if (pnl24 >= BigDecimal.ZERO) "+" else "") + euro(pnl24) + " (" + (if (pct24 >= BigDecimal.ZERO) "+" else "") + pct(pct24) + ")", color = if (pnl24 >= BigDecimal.ZERO) PreviewGreen else PreviewRed, fontSize = 10.sp)\n                            Spacer(Modifier.height(10.dp))\n                            AssetAllocationDonut(assets = assets, total = total, modifier = Modifier.fillMaxWidth().height(160.dp))\n                            Spacer(Modifier.height(5.dp))\n                            assets.take(8).forEach { asset -> AllocationRow(asset.asset, asset.eurValue, total) }\n                        }\n                    }\n                }\n            }\n            1 -> {\n                val orders = lifecycleSnapshot?.openOrders.orEmpty()\n                if (orders.isEmpty()) item { PreviewEmptyCard("No open orders") }\n                items(orders) { order ->\n                    PreviewCardBox {\n                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                            AssetIcon(previewBase(order.symbol), 28)\n                            Spacer(Modifier.width(10.dp))\n                            Column(Modifier.weight(1f)) {\n                                Text("${order.side.name} ${previewPair(order.symbol)}", color = PreviewText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)\n                                Text("${order.orderType.name} • ${order.status}", color = PreviewMuted, fontSize = 10.sp)\n                            }\n                            Text(order.remainingQuantity.stripTrailingZeros().toPlainString(), color = PreviewText, fontSize = 11.sp)\n                        }\n                    }\n                }\n            }\n            2 -> {\n                if (trades.isEmpty()) item { PreviewEmptyCard("No trade history") }\n                items(trades.take(80)) { trade -> PreviewTradeRow(trade) }\n            }\n        }\n        item {\n            Spacer(Modifier.height(2.dp))\n            PreviewOutlineButton("Refresh Portfolio", onRefresh, Modifier.fillMaxWidth())\n        }\n    }\n}\n\n@Composable\nprivate fun PreviewEmptyCard(message: String) {\n    PreviewCardBox { Text(message, color = PreviewMuted, fontSize = 12.sp) }\n}\n\n@Composable\nprivate fun PreviewTradeRow(trade: TradeEntity) {\n    val pnl = safeBig(trade.realizedPnlEur)\n    PreviewCardBox {\n        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n            AssetIcon(previewBase(trade.symbol), 28)\n            Spacer(Modifier.width(10.dp))\n            Column(Modifier.weight(1f)) {\n                Text("${trade.side} ${previewPair(trade.symbol)}", color = PreviewText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)\n                Text("${trade.quantity} @ ${trade.priceEur}", color = PreviewMuted, fontSize = 10.sp)\n            }\n            Column(horizontalAlignment = Alignment.End) {\n                Text(if (trade.paper) "PAPER" else "LIVE", color = PreviewPurpleSoft, fontSize = 9.sp)\n                Text((if (pnl > BigDecimal.ZERO) "+" else "") + euro(pnl), color = if (pnl >= BigDecimal.ZERO) PreviewGreen else PreviewRed, fontSize = 10.sp)\n            }\n        }\n    }\n}\n\n@Composable\nprivate fun AssetAllocationDonut(assets: List<com.ksp.cryptobot.core.BalanceInfo>, total: BigDecimal, modifier: Modifier = Modifier) {\n    val palette = listOf(PreviewPurple, PreviewBlue, PreviewMint, PreviewOrange, Color(0xFFA592DF), Color(0xFF4F6B87), Color(0xFF66C57A))\n    Box(modifier, contentAlignment = Alignment.Center) {\n        Canvas(Modifier.size(118.dp)) {\n            var start = -90f\n            val stroke = Stroke(width = 23f, cap = StrokeCap.Butt)\n            if (assets.isEmpty() || total <= BigDecimal.ZERO) {\n                drawArc(PreviewDivider, startAngle = -90f, sweepAngle = 360f, useCenter = false, style = stroke)\n            } else {\n                assets.take(7).forEachIndexed { index, asset ->\n                    val share = asset.eurValue.divide(total, 8, RoundingMode.HALF_UP).toFloat().coerceAtLeast(0f)\n                    val sweep = share * 360f\n                    if (sweep > 0.1f) drawArc(palette[index % palette.size], startAngle = start, sweepAngle = sweep, useCenter = false, style = stroke)\n                    start += sweep\n                }\n            }\n        }\n        Column(horizontalAlignment = Alignment.CenterHorizontally) {\n            Text("Asset", color = PreviewText, fontSize = 11.sp)\n            Text("Allocation", color = PreviewText, fontSize = 11.sp)\n        }\n    }\n}\n\n@Composable\nprivate fun AllocationRow(assetName: String, value: BigDecimal, total: BigDecimal) {\n    val share = if (total > BigDecimal.ZERO) value.multiply(BigDecimal("100")).divide(total, 2, RoundingMode.HALF_UP) else BigDecimal.ZERO\n    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {\n        Box(Modifier.size(7.dp).background(previewAssetColor(assetName), RoundedCornerShape(1.dp)))\n        Spacer(Modifier.width(8.dp))\n        Text(assetName.uppercase().replace("XBT", "BTC"), color = PreviewText, fontSize = 11.sp, modifier = Modifier.weight(1f))\n        Text(pct(share), color = PreviewText, fontSize = 10.sp, modifier = Modifier.width(52.dp))\n        Text(euro(value), color = PreviewText, fontSize = 10.sp)\n    }\n}\n\nprivate fun previewAssetColor(asset: String): Color = when (asset.uppercase().replace("XBT", "BTC")) {\n    "BTC" -> PreviewOrange\n    "ETH" -> PreviewBlue\n    "KAS" -> PreviewMint\n    "HBAR" -> PreviewPurple\n    else -> Color(0xFF7E72BD)\n}\n\n@Composable\nprivate fun PreviewSegmentTabs(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {\n    Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {\n        labels.forEachIndexed { index, label ->\n            Column(\n                Modifier.weight(1f).fillMaxHeight().clickable { onSelected(index) },\n                horizontalAlignment = Alignment.CenterHorizontally,\n                verticalArrangement = Arrangement.Center\n            ) {\n                Text(label, color = if (selected == index) PreviewPurpleSoft else PreviewMuted, fontSize = 10.sp, fontWeight = if (selected == index) FontWeight.SemiBold else FontWeight.Normal)\n                Spacer(Modifier.height(8.dp))\n                Box(Modifier.fillMaxWidth(0.8f).height(2.dp).background(if (selected == index) PreviewPurple else Color.Transparent))\n            }\n        }\n    }\n}\n\n@Composable\nfun PreviewAiHubScreen(\n    decisions: List<AiDecision>,\n    settings: BotSettings,\n    performanceLabSnapshot: com.ksp.cryptobot.core.PerformanceLabSnapshot?,\n    trades: List<TradeEntity>,\n    onOpen: (AppTab) -> Unit,\n    onSelectSignal: (AiDecision) -> Unit,\n    onScan: () -> Unit\n) {\n    var segment by remember { mutableIntStateOf(0) }\n    val segments = listOf("AI Signals", "Research", "Backtest")\n    val scored = decisions.sortedByDescending { it.finalScore }\n    val average = if (scored.isEmpty()) 50 else scored.map { it.finalScore }.average().toInt().coerceIn(0, 100)\n    val buys = scored.count { it.finalAction == SignalAction.BUY || it.finalAction == SignalAction.SMALL_BUY }\n    val sells = scored.count { it.finalAction == SignalAction.SELL }\n    val bias = when {\n        buys > sells && average >= 55 -> "BULLISH"\n        sells > buys && average <= 45 -> "BEARISH"\n        else -> "NEUTRAL"\n    }\n    val biasColor = when (bias) { "BULLISH" -> PreviewGreen; "BEARISH" -> PreviewRed; else -> PreviewMuted }\n    val cutoff30d = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L\n    val sellTrades = trades.filter { it.side.equals("SELL", true) && it.timestampEpochMs >= cutoff30d }\n    val wins = sellTrades.count { safeBig(it.realizedPnlEur) > BigDecimal.ZERO }\n    val losses = sellTrades.filter { safeBig(it.realizedPnlEur) < BigDecimal.ZERO }\n    val winRate = if (sellTrades.isEmpty()) BigDecimal.ZERO else BigDecimal(wins * 100).divide(BigDecimal(sellTrades.size), 1, RoundingMode.HALF_UP)\n    val grossWin = sellTrades.filter { safeBig(it.realizedPnlEur) > BigDecimal.ZERO }.fold(BigDecimal.ZERO) { a, t -> a.add(safeBig(t.realizedPnlEur)) }\n    val grossLoss = losses.fold(BigDecimal.ZERO) { a, t -> a.add(safeBig(t.realizedPnlEur).abs()) }\n    val pf = if (grossLoss > BigDecimal.ZERO) grossWin.divide(grossLoss, 2, RoundingMode.HALF_UP) else if (grossWin > BigDecimal.ZERO) BigDecimal("99") else BigDecimal.ZERO\n\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item { PreviewSegmentTabs(segments, segment) { segment = it } }\n        when (segment) {\n            1 -> {\n                item {\n                    PreviewCardBox(onClick = { onOpen(AppTab.RESEARCH_SETTINGS) }) {\n                        Column {\n                            PreviewSectionHeader("Research Intelligence")\n                            Spacer(Modifier.height(6.dp))\n                            Text("Professional research, handoff truth, robustness validation and external context.", color = PreviewMuted, fontSize = 11.sp)\n                            Spacer(Modifier.height(10.dp))\n                            PreviewOutlineButton("Open Research", { onOpen(AppTab.RESEARCH_SETTINGS) }, Modifier.fillMaxWidth())\n                        }\n                    }\n                }\n            }\n            2 -> {\n                item {\n                    PreviewCardBox(onClick = { onOpen(AppTab.BACKTEST) }) {\n                        Column {\n                            PreviewSectionHeader("Backtest Lab")\n                            Spacer(Modifier.height(6.dp))\n                            Text("Kraken OHLC backtests and forward gates before live promotion.", color = PreviewMuted, fontSize = 11.sp)\n                            Spacer(Modifier.height(10.dp))\n                            PreviewOutlineButton("Open Backtest", { onOpen(AppTab.BACKTEST) }, Modifier.fillMaxWidth())\n                        }\n                    }\n                }\n            }\n            else -> {\n                item {\n                    PreviewCardBox {\n                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                            Column(Modifier.weight(1f)) {\n                                Text("Market Bias", color = PreviewMuted, fontSize = 10.sp)\n                                Spacer(Modifier.height(6.dp))\n                                Text(bias, color = biasColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)\n                                Spacer(Modifier.height(13.dp))\n                                Text("Confidence", color = PreviewMuted, fontSize = 10.sp)\n                            }\n                            PreviewConfidenceGauge(average, biasColor, Modifier.size(92.dp))\n                        }\n                    }\n                }\n                item {\n                    PreviewCardBox {\n                        Column {\n                            PreviewSectionHeader("Top AI Signals")\n                            Spacer(Modifier.height(6.dp))\n                            if (scored.isEmpty()) {\n                                Text("No AI scan loaded yet", color = PreviewMuted, fontSize = 11.sp)\n                            } else {\n                                scored.take(4).forEachIndexed { index, decision ->\n                                    AiSignalRow(decision) { onSelectSignal(decision) }\n                                    if (index < scored.take(4).lastIndex) Divider(color = PreviewDivider.copy(alpha = 0.65f), modifier = Modifier.padding(vertical = 5.dp))\n                                }\n                            }\n                            Spacer(Modifier.height(7.dp))\n                            Row(Modifier.fillMaxWidth().clickable { onOpen(AppTab.AI_SIGNALS) }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {\n                                Text("View All AI Signals", color = PreviewText, fontSize = 11.sp, modifier = Modifier.weight(1f))\n                                Icon(Icons.Rounded.ChevronRight, null, tint = PreviewMuted, modifier = Modifier.size(18.dp))\n                            }\n                        }\n                    }\n                }\n                item {\n                    PreviewCardBox {\n                        Column {\n                            PreviewSectionHeader("AI Performance (30D)")\n                            Spacer(Modifier.height(10.dp))\n                            Row(Modifier.fillMaxWidth()) {\n                                Column(Modifier.weight(1f)) {\n                                    Text("Win Rate", color = PreviewMuted, fontSize = 10.sp)\n                                    Text(pct(winRate), color = PreviewGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)\n                                }\n                                Column(Modifier.weight(1f)) {\n                                    Text("Profit Factor", color = PreviewMuted, fontSize = 10.sp)\n                                    Text(pf.stripTrailingZeros().toPlainString(), color = PreviewGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)\n                                }\n                            }\n                            performanceLabSnapshot?.summaryLine?.takeIf { it.isNotBlank() }?.let {\n                                Spacer(Modifier.height(7.dp)); Text(it, color = PreviewMuted, fontSize = 9.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)\n                            }\n                        }\n                    }\n                }\n                item { PreviewOutlineButton("Scan AI Signals", onScan, Modifier.fillMaxWidth()) }\n            }\n        }\n    }\n}\n\n@Composable\nprivate fun AiSignalRow(decision: AiDecision, onClick: () -> Unit) {\n    val action = decision.finalAction.name.replace(\'_\', \' \')\n    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {\n        AssetIcon(previewBase(decision.symbol), 24)\n        Spacer(Modifier.width(8.dp))\n        Text(previewPair(decision.symbol), color = PreviewText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(70.dp))\n        Text(action, color = previewActionColor(decision.finalAction), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(58.dp))\n        Text(previewSignalDescriptor(decision), color = PreviewMuted, fontSize = 9.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)\n        Text("${decision.confidencePercent}%", color = PreviewText, fontSize = 10.sp)\n    }\n}\n\nprivate fun previewSignalDescriptor(decision: AiDecision): String = when (decision.finalAction) {\n    SignalAction.BUY -> "Strong Uptrend"\n    SignalAction.SMALL_BUY -> "Momentum Building"\n    SignalAction.WATCH -> "Watch"\n    SignalAction.WAIT -> "Neutral"\n    SignalAction.AVOID -> "Weak Momentum"\n    SignalAction.STRONG_AVOID -> "Risk Elevated"\n    SignalAction.SELL -> "Exit Signal"\n}\n\nprivate fun previewActionColor(action: SignalAction): Color = when (action) {\n    SignalAction.BUY, SignalAction.SMALL_BUY -> PreviewGreen\n    SignalAction.SELL, SignalAction.AVOID, SignalAction.STRONG_AVOID -> PreviewRed\n    SignalAction.WATCH -> PreviewOrange\n    else -> PreviewMuted\n}\n\n@Composable\nprivate fun PreviewConfidenceGauge(value: Int, color: Color, modifier: Modifier = Modifier) {\n    Box(modifier, contentAlignment = Alignment.Center) {\n        Canvas(Modifier.fillMaxSize()) {\n            val stroke = Stroke(width = 9f, cap = StrokeCap.Round)\n            drawArc(PreviewDivider, startAngle = 150f, sweepAngle = 240f, useCenter = false, style = stroke)\n            drawArc(color, startAngle = 150f, sweepAngle = 240f * value.coerceIn(0, 100) / 100f, useCenter = false, style = stroke)\n        }\n        Column(horizontalAlignment = Alignment.CenterHorizontally) {\n            Text("$value%", color = PreviewText, fontSize = 14.sp, fontWeight = FontWeight.Bold)\n            Text("Confidence", color = PreviewMuted, fontSize = 8.sp)\n        }\n    }\n}\n\n@Composable\nfun PreviewAiSignalsListScreen(\n    decisions: List<AiDecision>,\n    settings: BotSettings,\n    activePositionSymbols: List<String>,\n    onScan: () -> Unit,\n    onSelectSignal: (AiDecision) -> Unit\n) {\n    val active = activePositionSymbols.map { it.uppercase().replace("/", "").replace("-", "") }.toSet()\n    val rows = decisions.sortedWith(compareByDescending<AiDecision> { active.contains(it.symbol.uppercase().replace("/", "").replace("-", "")) }.thenByDescending { it.finalScore })\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item {\n            PreviewCardBox {\n                Column {\n                    Text("Real-time AI decisions", color = PreviewText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)\n                    Text("${rows.size} signal(s) • Strategy ${settings.strategyMode.name.replace(\'_\', \' \')}", color = PreviewMuted, fontSize = 10.sp)\n                    Spacer(Modifier.height(9.dp))\n                    PreviewOutlineButton("Scan AI Signals", onScan, Modifier.fillMaxWidth())\n                }\n            }\n        }\n        if (rows.isEmpty()) item { PreviewEmptyCard("No AI signals loaded") }\n        items(rows) { decision ->\n            PreviewCardBox(onClick = { onSelectSignal(decision) }) {\n                Column {\n                    AiSignalRow(decision) { onSelectSignal(decision) }\n                    Spacer(Modifier.height(5.dp))\n                    Text(decision.explanation, color = PreviewMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)\n                }\n            }\n        }\n    }\n}\n\n@Composable\nfun PreviewAiSignalDetailScreen(decision: AiDecision?, candles: List<Candle>) {\n    if (decision == null) {\n        Box(Modifier.fillMaxSize().background(PreviewBackground), contentAlignment = Alignment.Center) { Text("No signal selected", color = PreviewMuted) }\n        return\n    }\n    val recent20 = candles.takeLast(20)\n    val recent60 = candles.takeLast(60)\n    val support1 = recent20.minOfOrNull { it.low }\n    val support2 = recent60.minOfOrNull { it.low }\n    val resistance1 = recent20.maxOfOrNull { it.high }\n    val resistance2 = recent60.maxOfOrNull { it.high }\n    val actionColor = previewActionColor(decision.finalAction)\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item {\n            PreviewCardBox {\n                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                    Column(Modifier.weight(1f)) {\n                        Text(decision.finalAction.name.replace(\'_\', \' \'), color = actionColor, fontSize = 22.sp, fontWeight = FontWeight.Bold)\n                        Spacer(Modifier.height(6.dp))\n                        Text(previewSignalDescriptor(decision), color = PreviewText, fontSize = 11.sp)\n                    }\n                    PreviewConfidenceGauge(decision.confidencePercent, actionColor, Modifier.size(94.dp))\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("Analysis")\n                    Spacer(Modifier.height(9.dp))\n                    Text(decision.explanation, color = PreviewText, fontSize = 11.sp, lineHeight = 16.sp)\n                    Spacer(Modifier.height(7.dp))\n                    Text("Technical ${decision.technicalScore} • News ${decision.newsScore} • Memory ${decision.memoryScore}", color = PreviewMuted, fontSize = 9.sp)\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("Key Levels")\n                    Spacer(Modifier.height(8.dp))\n                    KeyLevelRow("Support 1", support1)\n                    KeyLevelRow("Support 2", support2)\n                    KeyLevelRow("Resistance 1", resistance1)\n                    KeyLevelRow("Resistance 2", resistance2)\n                    if (candles.isEmpty()) {\n                        Spacer(Modifier.height(6.dp)); Text("Load chart data to calculate live support/resistance levels.", color = PreviewMuted, fontSize = 9.sp)\n                    }\n                }\n            }\n        }\n    }\n}\n\n@Composable\nprivate fun KeyLevelRow(label: String, price: BigDecimal?) {\n    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {\n        Text(label, color = PreviewText, fontSize = 10.sp, modifier = Modifier.weight(1f))\n        Text(price?.let(::euro) ?: "—", color = PreviewText, fontSize = 10.sp)\n    }\n}\n\n@Composable\nfun PreviewNewsScreen(\n    settings: BotSettings,\n    newsHistory: List<NewsArticleEntity>,\n    activeSymbols: List<String>,\n    decisions: List<AiDecision>,\n    onToggleNews: (Boolean) -> Unit,\n    onRefreshHistory: (String) -> Unit,\n    onScanNews: (String) -> Unit\n) {\n    val newsScores = decisions.map { it.newsScore }\n    val sentiment = if (newsScores.isEmpty()) 50 else (50 + newsScores.average().toInt()).coerceIn(0, 100)\n    val label = when { sentiment >= 60 -> "BULLISH"; sentiment <= 40 -> "BEARISH"; else -> "NEUTRAL" }\n    val sentimentColor = when (label) { "BULLISH" -> PreviewGreen; "BEARISH" -> PreviewRed; else -> PreviewMuted }\n    val stories = newsHistory.sortedByDescending { it.publishedAtEpochMs }.take(8)\n    val providers = NewsProviderHealthRegistry.snapshot()\n    val targetSymbol = (activeSymbols + settings.symbols()).firstOrNull().orEmpty()\n\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item {\n            PreviewCardBox {\n                Column {\n                    Text("Overall News Sentiment", color = PreviewMuted, fontSize = 10.sp)\n                    Spacer(Modifier.height(4.dp))\n                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                        Text(label, color = sentimentColor, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))\n                        Text("$sentiment/100", color = PreviewText, fontSize = 15.sp)\n                    }\n                    Spacer(Modifier.height(7.dp))\n                    LinearProgressIndicator(\n                        progress = sentiment / 100f,\n                        modifier = Modifier.fillMaxWidth().height(5.dp),\n                        color = sentimentColor,\n                        trackColor = PreviewDivider\n                    )\n                    Spacer(Modifier.height(6.dp))\n                    Text("Updated from the latest stored decision/news inputs", color = PreviewMuted2, fontSize = 8.sp, modifier = Modifier.fillMaxWidth())\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("Top Stories")\n                    Spacer(Modifier.height(7.dp))\n                    if (stories.isEmpty()) {\n                        Text("No cached stories yet", color = PreviewMuted, fontSize = 11.sp)\n                    } else {\n                        stories.take(5).forEachIndexed { index, story ->\n                            NewsStoryRow(story)\n                            if (index < minOf(4, stories.lastIndex)) Divider(color = PreviewDivider.copy(alpha = 0.65f), modifier = Modifier.padding(vertical = 6.dp))\n                        }\n                    }\n                    Spacer(Modifier.height(4.dp))\n                    Row(Modifier.fillMaxWidth().clickable { onRefreshHistory("") }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {\n                        Text("View All News", color = PreviewText, fontSize = 11.sp, modifier = Modifier.weight(1f))\n                        Icon(Icons.Rounded.ChevronRight, null, tint = PreviewMuted, modifier = Modifier.size(18.dp))\n                    }\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                        Text("News Intelligence", color = PreviewText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))\n                        Switch(\n                            checked = settings.useNewsAi,\n                            onCheckedChange = onToggleNews,\n                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = PreviewGreen, uncheckedThumbColor = PreviewMuted, uncheckedTrackColor = PreviewDivider)\n                        )\n                    }\n                    if (providers.isNotEmpty()) {\n                        Spacer(Modifier.height(4.dp))\n                        providers.take(8).forEach { provider ->\n                            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {\n                                Text(provider.provider, color = PreviewMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))\n                                val healthy = provider.status == "HEALTHY" || provider.status == "READY" || provider.status == "EMPTY"\n                                Text(provider.status, color = if (healthy) PreviewGreen else PreviewRed, fontSize = 9.sp)\n                            }\n                        }\n                    }\n                    Spacer(Modifier.height(8.dp))\n                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {\n                        PreviewOutlineButton("Refresh", { onRefreshHistory("") }, Modifier.weight(1f))\n                        PreviewPrimaryButton("Scan News", { onScanNews(targetSymbol) }, Modifier.weight(1f))\n                    }\n                }\n            }\n        }\n    }\n}\n\n@Composable\nprivate fun NewsStoryRow(story: NewsArticleEntity) {\n    val base = previewBase(story.symbol)\n    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n        AssetIcon(base.ifBlank { "N" }, 27)\n        Spacer(Modifier.width(9.dp))\n        Column(Modifier.weight(1f)) {\n            Text(story.title, color = PreviewText, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)\n            val age = previewAge(story.publishedAtEpochMs)\n            Text(age, color = PreviewMuted2, fontSize = 8.sp)\n        }\n        Text(story.provider.ifBlank { story.source }.take(10), color = PreviewGreen, fontSize = 8.sp, maxLines = 1)\n    }\n}\n\nprivate fun previewAge(epochMs: Long): String {\n    if (epochMs <= 0L) return ""\n    val mins = ((System.currentTimeMillis() - epochMs).coerceAtLeast(0L) / 60000L)\n    return when {\n        mins < 60 -> "${mins}m ago"\n        mins < 1440 -> "${mins / 60}h ago"\n        else -> "${mins / 1440}d ago"\n    }\n}\n\n@Composable\nfun PreviewSettingsScreen(\n    settings: BotSettings,\n    portfolio: PortfolioSnapshot?,\n    onPersist: (BotSettings) -> Unit,\n    onOpen: (AppTab) -> Unit\n) {\n    var tab by remember { mutableIntStateOf(0) }\n    val labels = listOf("Connection & Trading", "Automation & Risk")\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item { PreviewSettingsSegment(labels, tab) { tab = it } }\n        if (tab == 0) {\n            item {\n                PreviewCardBox {\n                    Column {\n                        PreviewSectionHeader("Exchange Connection")\n                        Spacer(Modifier.height(8.dp))\n                        SettingsValueRow("Exchange", settings.exchangeProvider.name.replace(\'_\', \' \').lowercase().replaceFirstChar { it.uppercase() })\n                        SettingsValueRow("Status", previewExchangeStatus(settings, portfolio), valueColor = if ((settings.exchangeProvider == ExchangeProvider.KRAKEN && portfolio != null) || settings.exchangeProvider == ExchangeProvider.PAPER) PreviewGreen else PreviewMuted)\n                        SettingsNavRow("API Management") { onOpen(AppTab.BASIC_SETTINGS) }\n                    }\n                }\n            }\n            item {\n                PreviewCardBox {\n                    Column {\n                        PreviewSectionHeader("Trading Mode")\n                        Spacer(Modifier.height(8.dp))\n                        SettingsValueRow("Live Trading", if (settings.mode == BotMode.LIVE_AUTO) "ENABLED" else "DISABLED", if (settings.mode == BotMode.LIVE_AUTO) PreviewGreen else PreviewRed)\n                        SettingsValueRow("Paper Trading", if (settings.mode == BotMode.PAPER) "ENABLED" else "DISABLED", if (settings.mode == BotMode.PAPER) PreviewGreen else PreviewRed)\n                        SettingsNavRow("Change Trading Mode") { onOpen(AppTab.BASIC_SETTINGS) }\n                    }\n                }\n            }\n            item {\n                PreviewCardBox {\n                    Column {\n                        PreviewSectionHeader("Account")\n                        Spacer(Modifier.height(8.dp))\n                        SettingsValueRow("Account Balance", euro(portfolio?.totalValueEur ?: BigDecimal.ZERO))\n                        SettingsValueRow("Currency", "EUR")\n                        SettingsValueRow("Server Time", previewTimeFormatter.format(java.time.ZonedDateTime.now()))\n                    }\n                }\n            }\n            item {\n                PreviewCardBox {\n                    Column {\n                        PreviewSectionHeader("Data & System")\n                        Spacer(Modifier.height(4.dp))\n                        SettingsNavRow("Backup & Recovery") { onOpen(AppTab.BACKUP) }\n                        SettingsNavRow("CloudShare") { onOpen(AppTab.CLOUDSHARE_SETTINGS) }\n                        SettingsNavRow("System Test") { onOpen(AppTab.SYSTEM_TEST) }\n                        SettingsNavRow("Notifications") { onOpen(AppTab.NOTIFICATIONS) }\n                    }\n                }\n            }\n        } else {\n            item {\n                PreviewCardBox {\n                    Column {\n                        PreviewSectionHeader("Automation")\n                        Spacer(Modifier.height(5.dp))\n                        SettingsToggleRow("Enable Auto Trading", settings.ultimateAutomationEnabled) { onPersist(settings.copy(ultimateAutomationEnabled = it)) }\n                        SettingsToggleRow("AI Auto Trading", settings.autoTradeMultipleSymbolsPerScan) { onPersist(settings.copy(autoTradeMultipleSymbolsPerScan = it)) }\n                        SettingsToggleRow("Auto Exit Manager", settings.autoExitManagerEnabled) { onPersist(settings.copy(autoExitManagerEnabled = it)) }\n                        SettingsToggleRow("Auto Stop Loss", settings.autoStopLossEnabled) { onPersist(settings.copy(autoStopLossEnabled = it)) }\n                        SettingsToggleRow("Auto Take Profit", settings.autoTakeProfitEnabled) { onPersist(settings.copy(autoTakeProfitEnabled = it)) }\n                        SettingsToggleRow("Trailing Stop", settings.enableTrailingStop) { onPersist(settings.copy(enableTrailingStop = it)) }\n                    }\n                }\n            }\n            item {\n                PreviewCardBox {\n                    Column {\n                        PreviewSectionHeader("Risk Management")\n                        Spacer(Modifier.height(7.dp))\n                        SettingsValueRow("Max Position (EUR)", euro(settings.maxPositionEur))\n                        SettingsValueRow("Max Daily Loss (EUR)", euro(settings.maxDailyLossEur))\n                        SettingsValueRow("Max Trades Per Day", settings.maxTradesPerDay.toString())\n                        SettingsValueRow("Max Trades Per Hour", settings.maxTradesPerHour.toString())\n                        SettingsValueRow("Max Active Positions", settings.maxSimultaneousLivePositions.toString())\n                        SettingsNavRow("Advanced Risk Controls") { onOpen(AppTab.ADVANCED_SETTINGS) }\n                    }\n                }\n            }\n        }\n    }\n}\n\nprivate fun previewExchangeStatus(settings: BotSettings, portfolio: PortfolioSnapshot?): String = when (settings.exchangeProvider) {\n    ExchangeProvider.KRAKEN -> if (portfolio != null) "Connected" else "Not verified"\n    ExchangeProvider.PAPER -> "Paper"\n    ExchangeProvider.BINANCE_READ_ONLY -> "Read Only"\n    ExchangeProvider.MANUAL -> "Manual"\n    else -> "Configured"\n}\n\n@Composable\nprivate fun PreviewSettingsSegment(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) {\n    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {\n        labels.forEachIndexed { index, label ->\n            Surface(\n                modifier = Modifier.weight(1f).height(36.dp).clickable { onSelected(index) },\n                color = if (selected == index) PreviewCardAlt else Color.Transparent,\n                shape = RoundedCornerShape(5.dp),\n                border = androidx.compose.foundation.BorderStroke(1.dp, if (selected == index) PreviewPurple else PreviewDivider)\n            ) {\n                Box(contentAlignment = Alignment.Center) {\n                    Text(label, color = if (selected == index) PreviewPurpleSoft else PreviewMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium)\n                }\n            }\n        }\n    }\n}\n\n@Composable\nprivate fun SettingsValueRow(label: String, value: String, valueColor: Color = PreviewText) {\n    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {\n        Text(label, color = PreviewText, fontSize = 10.sp, modifier = Modifier.weight(1f))\n        Text(value, color = valueColor, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)\n    }\n}\n\n@Composable\nprivate fun SettingsNavRow(label: String, onClick: () -> Unit) {\n    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {\n        Text(label, color = PreviewText, fontSize = 10.sp, modifier = Modifier.weight(1f))\n        Icon(Icons.Rounded.ChevronRight, null, tint = PreviewMuted, modifier = Modifier.size(17.dp))\n    }\n}\n\n@Composable\nprivate fun SettingsToggleRow(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {\n    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {\n        Text(label, color = PreviewText, fontSize = 10.sp, modifier = Modifier.weight(1f))\n        Switch(\n            checked = checked,\n            onCheckedChange = onChecked,\n            modifier = Modifier.size(width = 42.dp, height = 26.dp),\n            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = PreviewGreen, uncheckedThumbColor = PreviewMuted, uncheckedTrackColor = PreviewDivider)\n        )\n    }\n}\n\n@Composable\nfun PreviewSystemTestScreen(settings: BotSettings, lines: List<String>, onRun: () -> Unit) {\n    val pass = lines.count { it.startsWith("PASS") }\n    val fail = lines.count { it.startsWith("FAIL") }\n    val warn = lines.count { it.startsWith("WARN") }\n    val total = max(1, pass + fail + warn)\n    val score = ((pass * 100f) / total).coerceIn(0f, 100f)\n    val healthy = fail == 0 && lines.isNotEmpty()\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item {\n            PreviewCardBox {\n                Column {\n                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                        Icon(if (healthy) Icons.Rounded.Security else Icons.Rounded.WarningAmber, null, tint = if (healthy) PreviewGreen else PreviewOrange, modifier = Modifier.size(35.dp))\n                        Spacer(Modifier.width(10.dp))\n                        Text(if (healthy) "ALL SYSTEMS OPERATIONAL" else if (lines.isEmpty()) "SYSTEM TEST NOT RUN" else "SYSTEM CHECK REQUIRED", color = if (healthy) PreviewGreen else PreviewOrange, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))\n                    }\n                    Spacer(Modifier.height(14.dp))\n                    Row(Modifier.fillMaxWidth()) {\n                        Text("Last Full Test", color = PreviewMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))\n                        Text(if (lines.isEmpty()) "—" else previewTimeFormatter.format(java.time.ZonedDateTime.now()), color = PreviewText, fontSize = 9.sp)\n                    }\n                    Spacer(Modifier.height(9.dp))\n                    Row(Modifier.fillMaxWidth()) {\n                        Text("Overall Health", color = PreviewMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))\n                        Text("${score.toInt()}%", color = if (healthy) PreviewGreen else PreviewOrange, fontSize = 16.sp, fontWeight = FontWeight.Bold)\n                    }\n                    LinearProgressIndicator(progress = score / 100f, modifier = Modifier.fillMaxWidth().height(5.dp), color = if (healthy) PreviewGreen else PreviewOrange, trackColor = PreviewDivider)\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("Systems")\n                    Spacer(Modifier.height(5.dp))\n                    if (lines.isEmpty()) {\n                        SystemLine("Settings & Persistence", "PENDING")\n                        SystemLine("News & Data Providers", "PENDING")\n                        SystemLine("AI & Research Engine", "PENDING")\n                        SystemLine("M3 Governance", "PENDING")\n                        SystemLine("M4 Execution Guard", "PENDING")\n                        SystemLine("Lifecycle & Risk", "PENDING")\n                        SystemLine("Learning & Journal", "PENDING")\n                        SystemLine("CloudShare & Recovery", "PENDING")\n                    } else {\n                        lines.take(20).forEach { line ->\n                            val parts = line.split("|").map { it.trim() }\n                            SystemLine(parts.getOrNull(1) ?: line.take(40), parts.firstOrNull() ?: "INFO")\n                        }\n                    }\n                }\n            }\n        }\n        item { PreviewPrimaryButton(if (lines.isEmpty()) "Run Full System Test" else "Run Test Again", onRun, Modifier.fillMaxWidth()) }\n        item { Text("Mode ${settings.mode.name.replace(\'_\', \' \')} • Provider ${settings.exchangeProvider.name.replace(\'_\', \' \')}", color = PreviewMuted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 4.dp)) }\n    }\n}\n\n@Composable\nprivate fun SystemLine(label: String, status: String) {\n    val normalized = status.uppercase()\n    val color = when (normalized) { "PASS", "OK" -> PreviewGreen; "FAIL" -> PreviewRed; "WARN" -> PreviewOrange; else -> PreviewMuted }\n    val icon = when (normalized) { "PASS", "OK" -> Icons.Rounded.CheckCircle; "FAIL" -> Icons.Rounded.ErrorOutline; "WARN" -> Icons.Rounded.WarningAmber; else -> Icons.Rounded.Sync }\n    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {\n        Icon(icon, null, tint = color, modifier = Modifier.size(12.dp))\n        Spacer(Modifier.width(7.dp))\n        Text(label, color = PreviewText, fontSize = 9.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)\n        Text(normalized, color = color, fontSize = 9.sp)\n    }\n}\n\n@Composable\nfun PreviewPositionsScreen(settings: BotSettings, snapshot: LifecycleSnapshot?, onRefresh: () -> Unit) {\n    val positions = snapshot?.positions.orEmpty().filter { it.quantity > BigDecimal.ZERO }\n    val totalValue = positions.fold(BigDecimal.ZERO) { acc, p -> acc.add(p.currentPrice.multiply(p.quantity)) }\n    val pnl = positions.fold(BigDecimal.ZERO) { acc, p -> acc.add(p.unrealizedPnlEur) }\n    val pct = if (totalValue.subtract(pnl) > BigDecimal.ZERO) pnl.multiply(BigDecimal("100")).divide(totalValue.subtract(pnl), 4, RoundingMode.HALF_UP) else BigDecimal.ZERO\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item {\n            Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 3.dp)) {\n                Column(Modifier.weight(1f)) {\n                    Text("Total Value", color = PreviewMuted, fontSize = 9.sp)\n                    Text(euro(totalValue), color = PreviewGreen, fontSize = 17.sp, fontWeight = FontWeight.Bold)\n                }\n                Column(horizontalAlignment = Alignment.End) {\n                    Text("Open P/L", color = PreviewMuted, fontSize = 9.sp)\n                    Text((if (pnl >= BigDecimal.ZERO) "+" else "") + euro(pnl) + " (" + (if (pct >= BigDecimal.ZERO) "+" else "") + pct(pct) + ")", color = if (pnl >= BigDecimal.ZERO) PreviewGreen else PreviewRed, fontSize = 9.sp)\n                }\n            }\n        }\n        if (positions.isEmpty()) item { PreviewEmptyCard("No active positions") }\n        items(positions) { position ->\n            PreviewCardBox {\n                Column {\n                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {\n                        AssetIcon(previewBase(position.symbol), 28)\n                        Spacer(Modifier.width(9.dp))\n                        Text(previewPair(position.symbol), color = PreviewText, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.weight(1f))\n                        Icon(Icons.Rounded.ChevronRight, null, tint = PreviewMuted, modifier = Modifier.size(18.dp))\n                    }\n                    Spacer(Modifier.height(9.dp))\n                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {\n                        TinyValue("Amount", "${position.quantity.stripTrailingZeros().toPlainString()} ${previewBase(position.symbol)}")\n                        TinyValue("Avg. Price", euro(position.entryPrice))\n                        TinyValue("Current", euro(position.currentPrice), Alignment.End)\n                    }\n                    Spacer(Modifier.height(6.dp))\n                    Text("P/L", color = PreviewMuted, fontSize = 8.sp)\n                    Text((if (position.unrealizedPnlEur >= BigDecimal.ZERO) "+" else "") + euro(position.unrealizedPnlEur) + " (" + (if (position.unrealizedPnlPercent >= BigDecimal.ZERO) "+" else "") + pct(position.unrealizedPnlPercent) + ")", color = if (position.unrealizedPnlEur >= BigDecimal.ZERO) PreviewGreen else PreviewRed, fontSize = 10.sp)\n                }\n            }\n        }\n        item { PreviewOutlineButton("Refresh Positions", onRefresh, Modifier.fillMaxWidth()) }\n        item { Text("Exit manager ${if (settings.autoExitManagerEnabled) "ON" else "OFF"} • Stop loss ${if (settings.autoStopLossEnabled) "ON" else "OFF"}", color = PreviewMuted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 4.dp)) }\n    }\n}\n\n@Composable\nprivate fun TinyValue(label: String, value: String, alignment: Alignment.Horizontal = Alignment.Start) {\n    Column(horizontalAlignment = alignment) {\n        Text(label, color = PreviewMuted, fontSize = 8.sp)\n        Text(value, color = PreviewText, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)\n    }\n}\n\n@Composable\nfun PreviewBackupRecoveryScreen(\n    settings: BotSettings,\n    backupDirectoryPath: String,\n    onBackupDirectoryPathChanged: (String) -> Unit,\n    onExportFullBackup: (String, (String) -> Unit) -> Unit,\n    onRestoreFullBackup: (String, Boolean, (String) -> Unit) -> Unit,\n    onApplySafeDefaults: () -> Unit\n) {\n    val context = androidx.compose.ui.platform.LocalContext.current\n    val cloudStore = remember { CloudShareSettingsStore(context) }\n    var status by remember { mutableStateOf("Ready") }\n    var selectedRestore by remember { mutableStateOf("") }\n    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->\n        uri?.let { selected ->\n            onBackupDirectoryPathChanged(selected.toString())\n            status = "Backup destination selected"\n        }\n    }\n    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->\n        selectedRestore = uri?.toString().orEmpty()\n        if (selectedRestore.isNotBlank()) status = "Backup selected for restore"\n    }\n\n    LazyColumn(\n        modifier = Modifier.fillMaxSize().background(PreviewBackground).padding(horizontal = 12.dp),\n        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        item { PreviewSettingsSegment(listOf("Backup & Recovery", "System"), 0) { if (it == 1) status = "Open System Test from Settings" } }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("CloudShare Backup")\n                    Spacer(Modifier.height(8.dp))\n                    SettingsValueRow("Backup Folder", backupDirectoryPath.ifBlank { "Default app backup folder" })\n                    SettingsValueRow("CloudShare Status", if (cloudStore.enabled) "Enabled" else "Disabled", if (cloudStore.enabled) PreviewGreen else PreviewMuted)\n                    Spacer(Modifier.height(7.dp))\n                    PreviewOutlineButton("Select Backup Folder", { folderPicker.launch(null) }, Modifier.fillMaxWidth())\n                    Spacer(Modifier.height(7.dp))\n                    PreviewOutlineButton("Run Backup Now", {\n                        onExportFullBackup(backupDirectoryPath) { result -> status = result }\n                    }, Modifier.fillMaxWidth())\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    PreviewSectionHeader("Recovery")\n                    Spacer(Modifier.height(8.dp))\n                    SettingsValueRow("Selected Backup", if (selectedRestore.isBlank()) "None" else "Ready")\n                    SettingsValueRow("Restore Mode", "Manual")\n                    Spacer(Modifier.height(7.dp))\n                    PreviewOutlineButton("Select Backup File", { filePicker.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, Modifier.fillMaxWidth())\n                    Spacer(Modifier.height(7.dp))\n                    PreviewOutlineButton("Run Restore Now", {\n                        if (selectedRestore.isBlank()) status = "Select a backup file first"\n                        else onRestoreFullBackup(selectedRestore, false) { result -> status = result }\n                    }, Modifier.fillMaxWidth())\n                }\n            }\n        }\n        item {\n            PreviewCardBox {\n                Column {\n                    Text(status, color = if (status.contains("error", true) || status.contains("fail", true)) PreviewRed else PreviewGreen, fontSize = 10.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)\n                    Spacer(Modifier.height(8.dp))\n                    PreviewOutlineButton("Apply Safe Defaults", onApplySafeDefaults, Modifier.fillMaxWidth())\n                    Text("Mode=${settings.mode.name.replace(\'_\', \' \')} • Local data remains authoritative when CloudShare is disabled.", color = PreviewMuted, fontSize = 8.sp, modifier = Modifier.padding(top = 7.dp))\n                }\n            }\n        }\n    }\n}\n'
+
+
+PREVIEW_TEST_SOURCE = r'''package com.ksp.cryptobot
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class PreviewUiContractTest {
+    @Test fun symbolPairFormattingMatchesPreviewLabels() {
+        assertEquals("BTC/EUR", previewPair("BTCEUR"))
+        assertEquals("KAS/EUR", previewPair("KAS/EUR"))
     }
+
+    @Test fun detailRoutesKeepCorrectBottomNavigationParent() {
+        assertEquals(AppTab.AI, previewParentTab(AppTab.AI_SIGNAL_DETAIL))
+        assertEquals(AppTab.PORTFOLIO, previewParentTab(AppTab.POSITIONS))
+        assertEquals(AppTab.SETTINGS, previewParentTab(AppTab.SYSTEM_TEST))
+    }
+}
+'''
+
+
+def patch_gradle(repo: Path) -> None:
+    path = repo / "app/build.gradle.kts"
+    require(path)
+    text = path.read_text(encoding="utf-8")
+    dependency = '    implementation("androidx.compose.material:material-icons-extended")\n'
+    if 'material-icons-extended' not in text:
+        marker = '    implementation("androidx.compose.material3:material3")\n'
+        if marker not in text:
+            fail("Compose Material3 dependency anchor missing")
+        text = text.replace(marker, marker + dependency, 1)
+    path.write_text(text, encoding="utf-8")
+
+
+def patch_shared_preview_style(text: str) -> str:
+    # Make legacy/deep screens inherit the approved preview component language.
+    if "import androidx.compose.material3.Switch\n" not in text:
+        text = text.replace("import androidx.compose.material3.Surface\n", "import androidx.compose.material3.Surface\nimport androidx.compose.material3.Switch\nimport androidx.compose.material3.SwitchDefaults\n", 1)
+
+    hero_pattern = r'''@Composable\nprivate fun HeroCard\(\n    title: String,\n    subtitle: String,\n    primaryButton: String,\n    secondaryButton: String,\n    onPrimary: \(\) -> Unit,\n    onSecondary: \(\) -> Unit\n\) \{.*?\n\}\n\n@Composable\nprivate fun GlassCard'''
+    hero_replacement = '''@Composable
+private fun HeroCard(
+    title: String,
+    subtitle: String,
+    primaryButton: String,
+    secondaryButton: String,
+    onPrimary: () -> Unit,
+    onSecondary: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Panel),
+        border = BorderStroke(1.dp, Stroke)
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+            Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onPrimary,
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Electric),
+                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                ) { Text(primaryButton, style = MaterialTheme.typography.labelMedium) }
+                OutlinedButton(
+                    onClick = onSecondary,
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(1.dp, Electric.copy(alpha = 0.65f)),
+                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                ) { Text(secondaryButton, color = Electric, style = MaterialTheme.typography.labelMedium) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassCard'''
+    text, count = re.subn(hero_pattern, hero_replacement, text, count=1, flags=re.S)
+    if count == 0 and "shape = RoundedCornerShape(8.dp),\n        colors = CardDefaults.cardColors(containerColor = Panel)" not in text:
+        fail("shared HeroCard style anchor changed")
+
+    glass_pattern = r'''@Composable\nprivate fun GlassCard\(content: @Composable ColumnScope\.\(\) -> Unit\) \{.*?\n\}\n\n@Composable\nprivate fun MetricCard'''
+    glass_replacement = '''@Composable
+private fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Panel),
+        border = BorderStroke(1.dp, Stroke)
+    ) {
+        Column(modifier = Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(7.dp), content = content)
+    }
+}
+
+@Composable
+private fun MetricCard'''
+    text, count = re.subn(glass_pattern, glass_replacement, text, count=1, flags=re.S)
+    if count == 0 and "Column(modifier = Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(7.dp), content = content)" not in text:
+        fail("shared GlassCard style anchor changed")
+
+    metric_pattern = r'''@Composable\nprivate fun MetricCard\(title: String, value: String, caption: String, accent: Color\) \{.*?\n\}\n\n@Composable\nprivate fun DecisionCard'''
+    metric_replacement = '''@Composable
+private fun MetricCard(title: String, value: String, caption: String, accent: Color) {
+    Card(
+        modifier = Modifier.width(146.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Panel),
+        border = BorderStroke(1.dp, Stroke)
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(value, color = accent, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(caption, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun DecisionCard'''
+    text, count = re.subn(metric_pattern, metric_replacement, text, count=1, flags=re.S)
+    if count == 0 and "modifier = Modifier.width(146.dp)" not in text:
+        fail("shared MetricCard style anchor changed")
+
+    section_pattern = r'''@Composable\nprivate fun SectionTitle\(title: String, subtitle: String\) \{.*?\n\}\n\n@Composable\nprivate fun ToggleRow'''
+    section_replacement = '''@Composable
+private fun SectionTitle(title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = TextPrimary)
+        if (subtitle.isNotBlank()) Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun ToggleRow'''
+    text, count = re.subn(section_pattern, section_replacement, text, count=1, flags=re.S)
+    if count == 0 and "if (subtitle.isNotBlank()) Text(subtitle" not in text:
+        fail("shared SectionTitle style anchor changed")
+
+    toggle_pattern = r'''@Composable\nprivate fun ToggleRow\(label: String, checked: Boolean, onCheckedChange: \(Boolean\) -> Unit\) \{.*?\n\}\n\n@Composable\nprivate fun ToggleInfo'''
+    toggle_replacement = '''@Composable
+private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Canvas(Modifier.size(22.dp)) {
-            drawLine(TextPrimary, Offset(2f, size.height * .30f), Offset(size.width - 2f, size.height * .30f), 2.2f, StrokeCap.Round)
-            drawLine(TextPrimary, Offset(2f, size.height * .50f), Offset(size.width * .72f, size.height * .50f), 2.2f, StrokeCap.Round)
-            drawLine(TextPrimary, Offset(2f, size.height * .70f), Offset(size.width * .88f, size.height * .70f), 2.2f, StrokeCap.Round)
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-            if (currentTab == AppTab.DASHBOARD) {
-                Text(status, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        StatusDot(levelColor(level))
-        Spacer(Modifier.width(8.dp))
-        Text(
-            if (mode == BotMode.PAPER) "PAPER" else if (mode == BotMode.LIVE_AUTO) "LIVE" else "CONFIRM",
-            color = modeColor(mode),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = TextPrimary)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.size(width = 42.dp, height = 24.dp),
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Mint,
+                uncheckedThumbColor = Muted,
+                uncheckedTrackColor = PanelAlt,
+                uncheckedBorderColor = Stroke
+            )
         )
     }
 }
 
 @Composable
-private fun PremiumNavIcon(tab: AppTab, selected: Boolean) {
-    val c = if (selected) Electric else Muted
-    Canvas(Modifier.size(22.dp)) {
-        val w = size.width
-        val h = size.height
-        when (tab) {
-            AppTab.DASHBOARD -> {
-                val p = Path().apply {
-                    moveTo(w * .15f, h * .48f); lineTo(w * .50f, h * .20f); lineTo(w * .85f, h * .48f)
-                    moveTo(w * .25f, h * .43f); lineTo(w * .25f, h * .82f); lineTo(w * .75f, h * .82f); lineTo(w * .75f, h * .43f)
-                }
-                drawPath(p, c, style = DrawStroke(width = 2.2f, cap = StrokeCap.Round))
-            }
-            AppTab.PORTFOLIO -> {
-                drawRoundRect(c, topLeft = Offset(w*.16f,h*.28f), size = androidx.compose.ui.geometry.Size(w*.68f,h*.52f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f,4f), style = DrawStroke(2.2f))
-                drawLine(c, Offset(w*.35f,h*.28f), Offset(w*.35f,h*.18f), 2.2f)
-                drawLine(c, Offset(w*.35f,h*.18f), Offset(w*.66f,h*.18f), 2.2f)
-                drawLine(c, Offset(w*.66f,h*.18f), Offset(w*.66f,h*.28f), 2.2f)
-            }
-            AppTab.AI -> {
-                drawCircle(c, radius = w*.26f, center = Offset(w*.5f,h*.5f), style = DrawStroke(2.2f))
-                drawCircle(c, radius = 2.4f, center = Offset(w*.42f,h*.46f))
-                drawCircle(c, radius = 2.4f, center = Offset(w*.60f,h*.46f))
-                drawLine(c, Offset(w*.40f,h*.62f), Offset(w*.60f,h*.62f), 2.0f, StrokeCap.Round)
-                drawLine(c, Offset(w*.50f,h*.08f), Offset(w*.50f,h*.22f), 2f)
-            }
-            AppTab.NEWS -> {
-                drawRoundRect(c, topLeft = Offset(w*.18f,h*.15f), size = androidx.compose.ui.geometry.Size(w*.64f,h*.70f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(3f,3f), style = DrawStroke(2.2f))
-                drawLine(c, Offset(w*.28f,h*.33f), Offset(w*.70f,h*.33f), 2f)
-                drawLine(c, Offset(w*.28f,h*.49f), Offset(w*.70f,h*.49f), 2f)
-                drawLine(c, Offset(w*.28f,h*.65f), Offset(w*.58f,h*.65f), 2f)
-            }
-            AppTab.SETTINGS -> {
-                drawCircle(c, radius = w*.22f, center = Offset(w*.5f,h*.5f), style = DrawStroke(2.2f))
-                drawCircle(c, radius = w*.07f, center = Offset(w*.5f,h*.5f), style = DrawStroke(2f))
-            }
-            else -> drawCircle(c, radius = w*.23f, center = Offset(w*.5f,h*.5f), style = DrawStroke(2.2f))
-        }
-    }
-}"""
+private fun ToggleInfo'''
+    text, count = re.subn(toggle_pattern, toggle_replacement, text, count=1, flags=re.S)
+    if count == 0 and "checkedTrackColor = Mint" not in text:
+        fail("shared ToggleRow style anchor changed")
 
-TABS = r"""@Composable
-private fun AppTabs(currentTab: AppTab, onTabSelected: (AppTab) -> Unit) {
-    val root = when (currentTab) {
-        AppTab.PORTFOLIO, AppTab.POSITIONS, AppTab.ORDERS, AppTab.HISTORY, AppTab.TAX -> AppTab.PORTFOLIO
-        AppTab.AI, AppTab.AI_SIGNALS, AppTab.STRATEGY, AppTab.BACKTEST, AppTab.REGIME,
-        AppTab.PERFORMANCE, AppTab.SANDBOX, AppTab.PORTFOLIO_ROTATION, AppTab.AUTO_TUNER,
-        AppTab.SELF_LEARNING, AppTab.SELF_LEARNING_MAIN, AppTab.LEARNING_INSPECTOR,
-        AppTab.SMART_EXIT, AppTab.RESEARCH_SETTINGS -> AppTab.AI
-        AppTab.NEWS -> AppTab.NEWS
-        AppTab.SETTINGS, AppTab.BASIC_SETTINGS, AppTab.ADVANCED_SETTINGS, AppTab.BACKUP,
-        AppTab.CLOUDSHARE_SETTINGS, AppTab.RECOVERY_TOOLS, AppTab.SYSTEM_TEST, AppTab.HEALTH,
-        AppTab.REMOTE_ALERTS, AppTab.NOTIFICATIONS, AppTab.NOTIFICATION_LOGS,
-        AppTab.KRAKEN_HEALTH, AppTab.RISK, AppTab.STATUS, AppTab.BOT, AppTab.SYMBOLS -> AppTab.SETTINGS
-        else -> AppTab.DASHBOARD
+    info_pattern = r'''@Composable\nprivate fun ToggleInfo\(label: String, enabled: Boolean\) \{.*?\n\}\n\n@Composable\nprivate fun TaxRow'''
+    info_replacement = '''@Composable
+private fun ToggleInfo(label: String, enabled: Boolean) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f), color = TextPrimary, style = MaterialTheme.typography.bodySmall)
+        Text(if (enabled) "ENABLED" else "DISABLED", color = if (enabled) Mint else Muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
     }
-    Surface(color = Color(0xFF08111D), border = BorderStroke(1.dp, Stroke), shadowElevation = 10.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            listOf(AppTab.DASHBOARD, AppTab.PORTFOLIO, AppTab.AI, AppTab.NEWS, AppTab.SETTINGS).forEach { tab ->
-                val selected = root == tab
-                Column(
-                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onTabSelected(tab) }.padding(vertical = 5.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    PremiumNavIcon(tab, selected)
-                    Text(
-                        when (tab) {
-                            AppTab.DASHBOARD -> "Dashboard"
-                            AppTab.PORTFOLIO -> "Portfolio"
-                            AppTab.AI -> "AI"
-                            AppTab.NEWS -> "News"
-                            else -> "Settings"
-                        },
-                        color = if (selected) Electric else Muted,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                    )
-                }
-            }
-        }
-    }
-}"""
+}
 
-DASH = r"""@Composable
-private fun DashboardScreen(
-    settings: BotSettings,
-    status: String,
-    decisions: List<AiDecision>,
-    activePositionSymbols: List<String>,
-    portfolioSnapshot: PortfolioSnapshot?,
-    lifecycleSnapshot: LifecycleSnapshot?,
-    trades: List<TradeEntity>,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    onScan: () -> Unit,
-    onExecute: () -> Unit,
-    onOpenNews: () -> Unit
-) {
-    val total = portfolioSnapshot?.totalValueEur ?: BigDecimal.ZERO
-    val free = portfolioSnapshot?.freeEur ?: BigDecimal.ZERO
-    val invested = total.subtract(free).max(BigDecimal.ZERO)
-    val realized24h = trades.filter { it.timestampEpochMs >= System.currentTimeMillis() - 86_400_000L }
-        .mapNotNull { it.realizedPnlEur.toBigDecimalOrNull() }
-        .fold(BigDecimal.ZERO) { a, b -> a + b }
-    val positions = lifecycleSnapshot?.positions.orEmpty()
-    val chartValues = remember(total, trades) { portfolioTrendValues(total, trades) }
-    val dashboardDecisions = decisions.sortedByDescending { it.finalScore }.take(4)
+@Composable
+private fun TaxRow'''
+    text, count = re.subn(info_pattern, info_replacement, text, count=1, flags=re.S)
+    if count == 0 and 'Text(if (enabled) "ENABLED" else "DISABLED"' not in text:
+        fail("shared ToggleInfo style anchor changed")
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+    warning_pattern = r'''@Composable\nprivate fun WarningCard\(text: String\) \{.*?\n\}\n\n@Composable\nprivate fun StatusPill'''
+    warning_replacement = '''@Composable
+private fun WarningCard(text: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF20191D)),
+        border = BorderStroke(1.dp, Danger.copy(alpha = 0.40f))
     ) {
-        item {
-            GlassCard {
-                Text("Portfolio Value", color = Muted, style = MaterialTheme.typography.labelMedium)
-                Text("€${total.setScale(2, RoundingMode.HALF_UP)}", color = Mint, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-                Text(
-                    "24H P/L   ${if (realized24h >= BigDecimal.ZERO) "+" else ""}€${realized24h.setScale(2, RoundingMode.HALF_UP)}",
-                    color = if (realized24h >= BigDecimal.ZERO) Mint else Danger,
-                    fontWeight = FontWeight.Bold
-                )
-                PremiumPortfolioAreaChart(chartValues)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    PremiumMiniStat("Invested", "€${invested.setScale(2, RoundingMode.DOWN)}")
-                    PremiumMiniStat("Available", "€${free.setScale(2, RoundingMode.DOWN)}")
-                    PremiumMiniStat("Positions", positions.size.toString())
-                }
-            }
-        }
-        item {
-            GlassCard {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Active Positions", fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-                    Text(positions.size.toString(), color = Muted)
-                }
-                if (positions.isEmpty()) Text("No active positions", color = Muted)
-                positions.take(5).forEach { PremiumPositionSummary(it) }
-            }
-        }
-        if (dashboardDecisions.isNotEmpty()) {
-            item {
-                GlassCard {
-                    Text("Top AI Signals", fontWeight = FontWeight.ExtraBold)
-                    dashboardDecisions.forEach { PremiumSignalRow(it) }
-                }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onScan, modifier = Modifier.weight(1f)) { Text("Scan") }
-                Button(onClick = onStart, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Color(0xFF06130F))) { Text("Start Bot") }
-                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
-            }
-        }
-    }
-}
-
-private fun portfolioTrendValues(total: BigDecimal, trades: List<TradeEntity>): List<BigDecimal> {
-    val realized = trades
-        .filter { it.side.uppercase().contains("SELL") }
-        .sortedBy { it.timestampEpochMs }
-        .map { it.realizedPnlEur.toBigDecimalOrNull() ?: BigDecimal.ZERO }
-        .takeLast(18)
-    if (realized.isEmpty()) return List(8) { total.max(BigDecimal.ONE) }
-    val sum = realized.fold(BigDecimal.ZERO) { a, b -> a + b }
-    var running = total.subtract(sum)
-    val out = mutableListOf(running)
-    realized.forEach { running = running.add(it); out += running }
-    return out
-}
-
-@Composable
-private fun PremiumPortfolioAreaChart(values: List<BigDecimal>) {
-    val safe = values.ifEmpty { listOf(BigDecimal.ONE, BigDecimal.ONE) }
-    Canvas(Modifier.fillMaxWidth().height(105.dp)) {
-        val min = safe.minOrNull() ?: BigDecimal.ZERO
-        val max = safe.maxOrNull() ?: BigDecimal.ONE
-        val range = max.subtract(min).takeIf { it > BigDecimal.ZERO } ?: BigDecimal.ONE
-        val line = Path()
-        safe.forEachIndexed { i, v ->
-            val x = if (safe.size <= 1) 0f else size.width * i / safe.lastIndex.toFloat()
-            val ratio = v.subtract(min).divide(range, 8, RoundingMode.HALF_UP).toFloat()
-            val y = size.height * (.82f - ratio * .66f)
-            if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)
-        }
-        val area = Path().apply {
-            addPath(line); lineTo(size.width, size.height); lineTo(0f, size.height); close()
-        }
-        drawPath(area, brush = Brush.verticalGradient(listOf(Mint.copy(alpha=.28f), Mint.copy(alpha=.02f))))
-        drawPath(line, color = Mint, style = DrawStroke(width = 3.2f, cap = StrokeCap.Round))
+        Text(text, modifier = Modifier.padding(11.dp), color = Color(0xFFF1C6CB), style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
-private fun PremiumMiniStat(label: String, value: String) {
-    Column {
-        Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
-        Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+private fun StatusPill'''
+    text, count = re.subn(warning_pattern, warning_replacement, text, count=1, flags=re.S)
+    if count == 0 and "Color(0xFF20191D)" not in text:
+        fail("shared WarningCard style anchor changed")
+
+    pill_pattern = r'''@Composable\nprivate fun StatusPill\(text: String, color: Color\) \{.*?\n\}\n\n@Composable\nprivate fun StatusDot'''
+    pill_replacement = '''@Composable
+private fun StatusPill(text: String, color: Color) {
+    Surface(shape = RoundedCornerShape(5.dp), color = Color.Transparent) {
+        Text(text, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp), color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
     }
 }
 
 @Composable
-private fun PremiumPositionSummary(p: com.ksp.cryptobot.core.PositionInfo) {
-    val pnlColor = if (p.unrealizedPnlEur >= BigDecimal.ZERO) Mint else Danger
-    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Surface(shape = CircleShape, color = pnlColor.copy(alpha=.13f), border = BorderStroke(1.dp, pnlColor.copy(alpha=.30f))) {
-            Text(p.baseAsset.take(1), modifier = Modifier.padding(horizontal=9.dp, vertical=5.dp), color=pnlColor, fontWeight=FontWeight.Bold)
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(p.symbol.replace("EUR", "/EUR"), fontWeight = FontWeight.Bold)
-            Text(p.baseAsset, color = Muted, style = MaterialTheme.typography.labelSmall)
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text("€${p.currentPrice.multiply(p.quantity).setScale(2, RoundingMode.HALF_UP)}", fontWeight = FontWeight.Bold)
-            Text("${if (p.unrealizedPnlPercent >= BigDecimal.ZERO) "+" else ""}${p.unrealizedPnlPercent.setScale(2, RoundingMode.HALF_UP)}%", color = pnlColor, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}"""
+private fun StatusDot'''
+    text, count = re.subn(pill_pattern, pill_replacement, text, count=1, flags=re.S)
+    if count == 0 and "shape = RoundedCornerShape(5.dp), color = Color.Transparent" not in text:
+        fail("shared StatusPill style anchor changed")
 
-PORTFOLIO = r"""@Composable
-private fun PortfolioScreen(
-    settings: BotSettings,
-    snapshot: PortfolioSnapshot?,
-    lifecycleSnapshot: LifecycleSnapshot?,
-    onRefresh: () -> Unit,
-    onOpen: (AppTab) -> Unit
-) {
-    val assets = snapshot?.assets.orEmpty().filter { it.eurValue > BigDecimal.ZERO }
-    val total = snapshot?.totalValueEur ?: BigDecimal.ZERO
-    val positions = lifecycleSnapshot?.positions.orEmpty()
-    val colors = listOf(Electric, Color(0xFF63B3FF), Color(0xFFFFA726), Mint, Color(0xFF8C9AAF))
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 2.dp, bottom = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+    metricbox_pattern = r'''@Composable\nprivate fun MetricBox\(label: String, value: String, modifier: Modifier = Modifier\) \{.*?\n\}\n\nprivate fun sampleDecisions'''
+    metricbox_replacement = '''@Composable
+private fun MetricBox(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = PanelAlt),
+        border = BorderStroke(1.dp, Stroke),
+        shape = RoundedCornerShape(7.dp)
     ) {
-        item {
-            PremiumSegmentTabs(
-                labels = listOf("Positions","Orders","History","Allocations"),
-                selected = 0,
-                onSelect = { i ->
-                    when (i) {
-                        1 -> onOpen(AppTab.ORDERS)
-                        2 -> onOpen(AppTab.HISTORY)
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(value, color = TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+private fun sampleDecisions'''
+    text, count = re.subn(metricbox_pattern, metricbox_replacement, text, count=1, flags=re.S)
+    if count == 0 and "shape = RoundedCornerShape(7.dp)" not in text:
+        fail("shared MetricBox style anchor changed")
+
+    return text
+
+
+def patch_main_activity(repo: Path) -> None:
+    path = repo / "app/src/main/java/com/ksp/cryptobot/MainActivity.kt"
+    require(path)
+    text = path.read_text(encoding="utf-8")
+
+    if "AppTab.AI_SIGNAL_DETAIL -> PreviewAiSignalDetailScreen" in text and "PreviewBottomNavigation(currentTab = currentTab" in text:
+        text = patch_shared_preview_style(text)
+        path.write_text(text, encoding="utf-8")
+        return
+
+    if "import androidx.compose.foundation.layout.weight" not in text:
+        text = text.replace("import androidx.compose.foundation.layout.width\n", "import androidx.compose.foundation.layout.width\nimport androidx.compose.foundation.layout.weight\n", 1)
+
+    palette = {
+        'private val SpaceBlack = Color(0xFF081326)': 'private val SpaceBlack = Color(0xFF0C1522)',
+        'private val Panel = Color(0xFF0F1B33)': 'private val Panel = Color(0xFF141D2A)',
+        'private val PanelAlt = Color(0xFF142544)': 'private val PanelAlt = Color(0xFF111A27)',
+        'private val Stroke = Color(0xFF2A4471)': 'private val Stroke = Color(0xFF243143)',
+        'private val Electric = Color(0xFF47B8FF)': 'private val Electric = Color(0xFF8B5CF6)',
+        'private val Mint = Color(0xFF55F0DE)': 'private val Mint = Color(0xFF62DE67)',
+        'private val Amber = Color(0xFFFFC857)': 'private val Amber = Color(0xFFFFA31A)',
+        'private val Danger = Color(0xFFFF5E8A)': 'private val Danger = Color(0xFFFF5D69)',
+        'private val Muted = Color(0xFFA5B4D0)': 'private val Muted = Color(0xFF8E9BAB)',
+        'private val TextPrimary = Color(0xFFEAF3FF)': 'private val TextPrimary = Color(0xFFF2F5F8)',
+    }
+    for old, new in palette.items():
+        if old in text:
+            text = text.replace(old, new, 1)
+
+    if "shapes = androidx.compose.material3.Shapes(" not in text:
+        theme_anchor = """            onPrimary = Color.White,
+            onSecondary = Color(0xFF06130F)
+        ),
+        content = content
+"""
+        theme_repl = """            onPrimary = Color.White,
+            onSecondary = Color(0xFF06130F)
+        ),
+        shapes = androidx.compose.material3.Shapes(
+            small = RoundedCornerShape(5.dp),
+            medium = RoundedCornerShape(8.dp),
+            large = RoundedCornerShape(10.dp)
+        ),
+        content = content
+"""
+        text = replace_once(text, theme_anchor, theme_repl, "global preview shapes")
+
+    if "window.statusBarColor = android.graphics.Color.rgb(10, 19, 32)" not in text:
+        text = replace_once(
+            text,
+            "        super.onCreate(savedInstanceState)\n",
+            "        super.onCreate(savedInstanceState)\n        window.statusBarColor = android.graphics.Color.rgb(10, 19, 32)\n        window.navigationBarColor = android.graphics.Color.rgb(10, 19, 32)\n",
+            "system bar palette"
+        )
+
+    text = text.replace("private enum class AppTab", "enum class AppTab", 1)
+    if 'AI_SIGNAL_DETAIL("AI Signal")' not in text:
+        text = replace_once(text, '    AI_SIGNALS("AI Signals"),\n', '    AI_SIGNALS("AI Signals"),\n    AI_SIGNAL_DETAIL("AI Signal"),\n', "AI detail route")
+
+    if "var selectedAiDecision by remember" not in text:
+        text = replace_once(
+            text,
+            '    var decisions by remember { mutableStateOf<List<AiDecision>>(emptyList()) }\n',
+            '    var decisions by remember { mutableStateOf<List<AiDecision>>(emptyList()) }\n    var selectedAiDecision by remember { mutableStateOf<AiDecision?>(null) }\n',
+            "selected AI signal state"
+        )
+
+    text = text.replace(
+        "        if (currentTab == AppTab.PORTFOLIO) {\n",
+        "        if (currentTab == AppTab.PORTFOLIO || currentTab == AppTab.SETTINGS) {\n",
+        1
+    )
+
+    old_shell = """        Column(modifier = Modifier.fillMaxSize()) {
+            HeaderBar(status = status, mode = settings.mode, level = statusLevel)
+            AppTabs(currentTab = currentTab, onTabSelected = { currentTab = it })
+
+            when (currentTab) {
+"""
+    new_shell = """        Column(modifier = Modifier.fillMaxSize()) {
+            PreviewAppTopBar(
+                currentTab = currentTab,
+                detailSymbol = selectedAiDecision?.symbol,
+                onBack = { currentTab = previewParentTab(currentTab) },
+                onAction = {
+                    when (currentTab) {
+                        AppTab.PORTFOLIO -> {
+                            onLoadPortfolio(settings) { portfolioSnapshot = it }
+                            onLoadLifecycle(settings) { lifecycleSnapshot = it }
+                        }
+                        AppTab.POSITIONS -> onLoadLifecycle(settings) { lifecycleSnapshot = it }
+                        AppTab.ORDERS -> onLoadOrders(settings) { liveOrders = it }
+                        AppTab.SYSTEM_TEST -> onRunSystemTest(settings) { systemTestLines = it }
                         else -> Unit
                     }
                 }
             )
-        }
-        item {
-            GlassCard {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Total Value", color = Muted, style = MaterialTheme.typography.labelMedium)
-                        Text("€${total.setScale(2,RoundingMode.HALF_UP)}", color = Mint, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                    }
-                    OutlinedButton(onClick = onRefresh) { Text("Refresh") }
-                }
-                AllocationDonut(assets.map { it.eurValue }, colors)
-                assets.take(6).forEachIndexed { idx, a ->
-                    val pct = if (total > BigDecimal.ZERO) a.eurValue.multiply(BigDecimal("100")).divide(total, 1, RoundingMode.HALF_UP) else BigDecimal.ZERO
-                    Row(Modifier.fillMaxWidth().padding(vertical=3.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(colors[idx % colors.size]))
-                        Spacer(Modifier.width(8.dp))
-                        Text(a.asset, modifier = Modifier.weight(1f), fontWeight=FontWeight.Bold)
-                        Text("${pct}%", color = Muted, modifier=Modifier.width(58.dp))
-                        Text("€${a.eurValue.setScale(2,RoundingMode.HALF_UP)}", fontWeight=FontWeight.Bold)
-                    }
-                }
-            }
-        }
-        item {
-            GlassCard {
-                Text("Active Positions", fontWeight=FontWeight.ExtraBold)
-                if (positions.isEmpty()) Text("No active positions", color=Muted)
-                positions.forEach { PremiumPositionSummary(it) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AllocationDonut(values: List<BigDecimal>, colors: List<Color>) {
-    val total = values.fold(BigDecimal.ZERO) { a,b -> a+b }
-    Box(Modifier.fillMaxWidth().height(176.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(142.dp)) {
-            if (total <= BigDecimal.ZERO) {
-                drawArc(Stroke, -90f, 360f, false, style = DrawStroke(width=24f, cap=StrokeCap.Butt))
-            } else {
-                var start = -90f
-                values.take(6).forEachIndexed { i, v ->
-                    val sweep = v.divide(total, 8, RoundingMode.HALF_UP).multiply(BigDecimal("360")).toFloat()
-                    drawArc(colors[i % colors.size], start, sweep, false, style = DrawStroke(width=24f, cap=StrokeCap.Butt))
-                    start += sweep
-                }
-            }
-        }
-        Column(horizontalAlignment=Alignment.CenterHorizontally) {
-            Text("Asset", color=Muted, style=MaterialTheme.typography.labelSmall)
-            Text("Allocation", fontWeight=FontWeight.ExtraBold)
-        }
-    }
-}"""
-
-AI = r"""@Composable
-private fun AiHubScreen(
-    decisions: List<AiDecision>,
-    settings: BotSettings,
-    performanceLabSnapshot: PerformanceLabSnapshot?,
-    onOpen: (AppTab) -> Unit,
-    onRefreshPerformance: () -> Unit
-) {
-    val avg = if (decisions.isEmpty()) 50 else decisions.map { it.finalScore }.average().toInt()
-    val buys = decisions.count { it.finalAction == SignalAction.BUY || it.finalAction == SignalAction.SMALL_BUY }
-    val sells = decisions.count { it.finalAction == SignalAction.SELL }
-    val bias = when {
-        buys > sells && avg >= 55 -> "BULLISH"
-        sells > buys && avg <= 45 -> "BEARISH"
-        else -> "NEUTRAL"
-    }
-    val biasColor = when (bias) { "BULLISH" -> Mint; "BEARISH" -> Danger; else -> Amber }
-    val candidates = performanceLabSnapshot?.candidates.orEmpty()
-    val win = if (candidates.isEmpty()) 0 else candidates.map { if (it.liveTrades > 0) it.liveWinRatePercent else it.paperWinRatePercent }.average().toInt()
-    val pf = candidates.maxOfOrNull { if (it.liveTrades > 0) it.liveProfitFactor else it.paperProfitFactor } ?: BigDecimal.ZERO
-
-    LazyColumn(
-        modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
-        contentPadding=PaddingValues(top=2.dp,bottom=18.dp),
-        verticalArrangement=Arrangement.spacedBy(10.dp)
-    ) {
-        item {
-            PremiumSegmentTabs(listOf("AI Signals","Research","Backtest"), 0) { i ->
-                when(i){ 0->onOpen(AppTab.AI_SIGNALS); 1->onOpen(AppTab.RESEARCH_SETTINGS); 2->onOpen(AppTab.BACKTEST) }
-            }
-        }
-        item {
-            GlassCard {
-                Text("Market Bias", color=Muted, style=MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(bias, color=biasColor, style=MaterialTheme.typography.headlineSmall, fontWeight=FontWeight.ExtraBold)
-                        Text("Confidence", color=Muted, style=MaterialTheme.typography.labelSmall)
-                    }
-                    ConfidenceGauge(avg.coerceIn(0,100), biasColor)
-                }
-            }
-        }
-        item {
-            GlassCard {
-                Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
-                    Text("Top AI Signals", fontWeight=FontWeight.ExtraBold, modifier=Modifier.weight(1f))
-                    TextButton(onClick={onOpen(AppTab.AI_SIGNALS)}) { Text("View All") }
-                }
-                decisions.sortedByDescending { it.finalScore }.take(5).forEach { PremiumSignalRow(it) }
-                if (decisions.isEmpty()) Text("Run an AI scan to populate live signals.", color=Muted)
-            }
-        }
-        item {
-            GlassCard {
-                Text("AI Performance (30D)", fontWeight=FontWeight.ExtraBold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween) {
-                    Column { Text("Win Rate", color=Muted, style=MaterialTheme.typography.labelSmall); Text("${win}%", color=Mint, style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.ExtraBold) }
-                    Column(horizontalAlignment=Alignment.End) { Text("Profit Factor", color=Muted, style=MaterialTheme.typography.labelSmall); Text(pf.setScale(2,RoundingMode.HALF_UP).toPlainString(), color=Mint, style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.ExtraBold) }
-                }
-                Spacer(Modifier.height(6.dp))
-                OutlinedButton(onClick=onRefreshPerformance, modifier=Modifier.fillMaxWidth()) { Text("Refresh Performance") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConfidenceGauge(value: Int, color: Color) {
-    Box(Modifier.size(88.dp), contentAlignment=Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            drawArc(Stroke, 145f, 250f, false, style=DrawStroke(width=9f, cap=StrokeCap.Round))
-            drawArc(color, 145f, 250f*(value.coerceIn(0,100)/100f), false, style=DrawStroke(width=9f, cap=StrokeCap.Round))
-        }
-        Text("$value%", fontWeight=FontWeight.ExtraBold)
-    }
-}
-
-@Composable
-private fun PremiumSignalRow(d: AiDecision) {
-    val c = actionColor(d.finalAction)
-    Row(Modifier.fillMaxWidth().padding(vertical=6.dp), verticalAlignment=Alignment.CenterVertically) {
-        Surface(shape=CircleShape, color=c.copy(alpha=.12f)) { Text(d.symbol.take(1), modifier=Modifier.padding(horizontal=8.dp,vertical=4.dp),color=c,fontWeight=FontWeight.Bold) }
-        Spacer(Modifier.width(9.dp))
-        Text(d.symbol.replace("EUR","/EUR"), modifier=Modifier.weight(1f), fontWeight=FontWeight.Bold)
-        Text(d.finalAction.name.replace('_',' '), color=c, style=MaterialTheme.typography.labelMedium, fontWeight=FontWeight.Bold)
-        Spacer(Modifier.width(10.dp))
-        Text("${d.confidencePercent}%", color=Muted, style=MaterialTheme.typography.labelMedium)
-    }
-}"""
-
-NEWS = r"""@Composable
-private fun NewsScreen(
-    settings: BotSettings,
-    newsHistory: List<NewsArticleEntity>,
-    activeSymbols: List<String>,
-    decisions: List<AiDecision>,
-    onToggleNews: (Boolean) -> Unit,
-    onRefreshHistory: (String) -> Unit,
-    onScanNews: (String) -> Unit
-) {
-    var selectedSymbol by remember(settings.symbolsCsv, activeSymbols) {
-        mutableStateOf((activeSymbols + settings.symbols()).firstOrNull()?.uppercase()?.replace("/","")?.replace("-","") ?: "")
-    }
-    val symbols = (settings.symbols() + activeSymbols + newsHistory.map { it.symbol }).map { it.uppercase().replace("/","").replace("-","") }.filter { it.isNotBlank() }.distinct()
-    val visible = if (selectedSymbol.isBlank()) newsHistory else newsHistory.filter { it.symbol.equals(selectedSymbol,true) }
-    val avgNews = if (decisions.isEmpty()) 0 else decisions.map { it.newsScore }.average().toInt()
-    val sentiment = when { avgNews >= 8 -> "BULLISH"; avgNews <= -8 -> "BEARISH"; else -> "NEUTRAL" }
-    val sentimentColor = when(sentiment) { "BULLISH"->Mint; "BEARISH"->Danger; else->Amber }
-    val sentimentScore = (50 + avgNews).coerceIn(0,100)
-
-    LazyColumn(
-        modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
-        contentPadding=PaddingValues(top=2.dp,bottom=18.dp),
-        verticalArrangement=Arrangement.spacedBy(10.dp)
-    ) {
-        item {
-            GlassCard {
-                Text("Overall News Sentiment", color=Muted, style=MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
-                    Text(sentiment, color=sentimentColor, style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.ExtraBold, modifier=Modifier.weight(1f))
-                    Text("$sentimentScore/100", fontWeight=FontWeight.Bold)
-                }
-                LinearProgressIndicator(progress=sentimentScore/100f, modifier=Modifier.fillMaxWidth().height(5.dp), color=sentimentColor, trackColor=Stroke)
-            }
-        }
-        item {
-            GlassCard {
-                Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
-                    Text("Top Stories", fontWeight=FontWeight.ExtraBold, modifier=Modifier.weight(1f))
-                    Switch(checked=settings.useNewsAi, onCheckedChange=onToggleNews)
-                }
-                visible.take(6).forEach { article ->
-                    Row(Modifier.fillMaxWidth().padding(vertical=7.dp), verticalAlignment=Alignment.CenterVertically) {
-                        Surface(shape=CircleShape,color=Electric.copy(alpha=.13f)) {
-                            Text(article.symbol.take(1).ifBlank { "N" }, modifier=Modifier.padding(horizontal=9.dp,vertical=5.dp), color=Electric, fontWeight=FontWeight.Bold)
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(article.title, fontWeight=FontWeight.Bold, maxLines=2, overflow=TextOverflow.Ellipsis)
-                            Text(article.source.ifBlank { article.provider }, color=Muted, style=MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-                if (visible.isEmpty()) Text("No cached stories yet.", color=Muted)
-            }
-        }
-        item {
-            LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                item { FilterChip(selected=selectedSymbol.isBlank(), onClick={selectedSymbol=""; onRefreshHistory("")}, label={Text("ALL")}) }
-                items(symbols) { s -> FilterChip(selected=selectedSymbol.equals(s,true), onClick={selectedSymbol=s;onRefreshHistory(s)}, label={Text(s)}) }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                Button(onClick={onScanNews(selectedSymbol)}, modifier=Modifier.weight(1f), colors=ButtonDefaults.buttonColors(containerColor=Electric)) { Text("Scan News") }
-                OutlinedButton(onClick={onRefreshHistory(selectedSymbol)}, modifier=Modifier.weight(1f)) { Text("Refresh") }
-            }
-        }
-    }
-}"""
-
-SETTINGS = r"""@Composable
-private fun SettingsHubScreen(
-    settings: BotSettings,
-    systemTestLines: List<String>,
-    portfolioSnapshot: PortfolioSnapshot?,
-    onOpen: (AppTab) -> Unit,
-    onModeChange: (BotMode) -> Unit,
-    onLiveAckChange: (Boolean) -> Unit,
-    onRunSystemTest: () -> Unit,
-    onApplySafeDefaults: () -> Unit
-) {
-    var section by remember { mutableStateOf(0) }
-    LazyColumn(
-        modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
-        contentPadding=PaddingValues(top=2.dp,bottom=18.dp),
-        verticalArrangement=Arrangement.spacedBy(10.dp)
-    ) {
-        item { PremiumSegmentTabs(listOf("Connection & Trading","Automation & Risk"), section) { section=it } }
-        if (section == 0) {
-            item {
-                GlassCard {
-                    Text("Exchange Connection", fontWeight=FontWeight.ExtraBold)
-                    PremiumSettingsRow("Exchange", settings.exchangeProvider.name.replace('_',' '), settings.exchangeProvider == ExchangeProvider.KRAKEN)
-                    PremiumSettingsRow("Status", if (settings.exchangeProvider == ExchangeProvider.KRAKEN) "Connected / configured" else settings.exchangeProvider.name, true)
-                    PremiumSettingsAction("API Management") { onOpen(AppTab.BASIC_SETTINGS) }
-                }
-            }
-            item {
-                GlassCard {
-                    Text("Trading Mode", fontWeight=FontWeight.ExtraBold)
-                    PremiumSettingsSwitch("Live Trading", settings.mode == BotMode.LIVE_AUTO) { enabled -> onModeChange(if(enabled) BotMode.LIVE_AUTO else BotMode.LIVE_CONFIRM) }
-                    PremiumSettingsSwitch("Paper Trading", settings.mode == BotMode.PAPER) { enabled -> if(enabled) onModeChange(BotMode.PAPER) }
-                    PremiumSettingsSwitch("Live Acknowledgement", settings.liveTradingAcknowledged, onLiveAckChange)
-                }
-            }
-            item {
-                GlassCard {
-                    Text("Account", fontWeight=FontWeight.ExtraBold)
-                    PremiumSettingsRow("Account Balance", "€${(portfolioSnapshot?.totalValueEur ?: BigDecimal.ZERO).setScale(2,RoundingMode.HALF_UP)}", false)
-                    PremiumSettingsRow("Available EUR", "€${(portfolioSnapshot?.freeEur ?: BigDecimal.ZERO).setScale(2,RoundingMode.HALF_UP)}", false)
-                    PremiumSettingsRow("Currency", "EUR", false)
-                }
-            }
-        } else {
-            item {
-                GlassCard {
-                    Text("Automation", fontWeight=FontWeight.ExtraBold)
-                    PremiumSettingsSwitch("Enable Auto Trading", settings.ultimateAutomationEnabled) { onOpen(AppTab.ADVANCED_SETTINGS) }
-                    PremiumSettingsSwitch("AI Auto Trading", settings.autoSelectStrategy) { onOpen(AppTab.ADVANCED_SETTINGS) }
-                    PremiumSettingsSwitch("Auto Exit Manager", settings.autoExitManagerEnabled) { onOpen(AppTab.ADVANCED_SETTINGS) }
-                    PremiumSettingsSwitch("Auto Stop Loss", settings.autoStopLossEnabled) { onOpen(AppTab.ADVANCED_SETTINGS) }
-                    PremiumSettingsSwitch("Auto Take Profit", settings.autoTakeProfitEnabled) { onOpen(AppTab.ADVANCED_SETTINGS) }
-                    PremiumSettingsSwitch("Trailing Stop", settings.enableTrailingStop) { onOpen(AppTab.ADVANCED_SETTINGS) }
-                }
-            }
-            item {
-                GlassCard {
-                    Text("Risk Management", fontWeight=FontWeight.ExtraBold)
-                    PremiumSettingsRow("Max Position (EUR)", "€${settings.maxPositionEur}", false)
-                    PremiumSettingsRow("Max Daily Loss (EUR)", "€${settings.maxDailyLossEur}", false)
-                    PremiumSettingsRow("Max Trades Per Day", settings.maxTradesPerDay.toString(), false)
-                    PremiumSettingsAction("Open Automation & Risk") { onOpen(AppTab.ADVANCED_SETTINGS) }
-                }
-            }
-        }
-        item {
-            GlassCard {
-                Text("Data & System", fontWeight=FontWeight.ExtraBold)
-                PremiumSettingsAction("Backup & Recovery") { onOpen(AppTab.BACKUP) }
-                PremiumSettingsAction("CloudShare") { onOpen(AppTab.CLOUDSHARE_SETTINGS) }
-                PremiumSettingsAction("System Test") { onOpen(AppTab.SYSTEM_TEST) }
-                PremiumSettingsAction("Notifications") { onOpen(AppTab.REMOTE_ALERTS) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PremiumSegmentTabs(labels: List<String>, selected: Int, onSelect: (Int)->Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical=2.dp), horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-        labels.forEachIndexed { i,label ->
-            val active = i==selected
-            Surface(
-                modifier=Modifier.weight(1f).clickable{onSelect(i)},
-                shape=RoundedCornerShape(8.dp),
-                color=if(active) Electric.copy(alpha=.12f) else Color.Transparent,
-                border=BorderStroke(1.dp, if(active) Electric else Stroke)
-            ) {
-                Text(label, modifier=Modifier.padding(vertical=9.dp,horizontal=6.dp), color=if(active) Electric else Muted, fontWeight=if(active) FontWeight.Bold else FontWeight.Medium, style=MaterialTheme.typography.labelMedium, maxLines=1, overflow=TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PremiumSettingsRow(label:String, value:String, positive:Boolean) {
-    Row(Modifier.fillMaxWidth().padding(vertical=9.dp), verticalAlignment=Alignment.CenterVertically) {
-        Text(label, modifier=Modifier.weight(1f), color=TextPrimary)
-        Text(value, color=if(positive) Mint else TextPrimary, style=MaterialTheme.typography.bodySmall, fontWeight=FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun PremiumSettingsAction(label:String,onClick:()->Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick=onClick).padding(vertical=10.dp), verticalAlignment=Alignment.CenterVertically) {
-        Text(label, modifier=Modifier.weight(1f))
-        Text("›", color=Muted, style=MaterialTheme.typography.titleLarge)
-    }
-}
-
-@Composable
-private fun PremiumSettingsSwitch(label:String,checked:Boolean,onChange:(Boolean)->Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical=5.dp), verticalAlignment=Alignment.CenterVertically) {
-        Text(label, modifier=Modifier.weight(1f))
-        Switch(checked=checked,onCheckedChange=onChange)
-    }
-}"""
-
-SYSTEM = r"""@Composable
-private fun SystemTestScreen(
-    settings: BotSettings,
-    lines: List<String>,
-    onRun: () -> Unit
-) {
-    val pass = lines.count { it.startsWith("PASS") }
-    val fail = lines.count { it.startsWith("FAIL") }
-    val warn = lines.count { it.startsWith("WARN") }
-    val total = (pass+fail+warn).coerceAtLeast(1)
-    val pct = (pass*100/total).coerceIn(0,100)
-    val operational = fail==0 && lines.isNotEmpty()
-    LazyColumn(
-        modifier=Modifier.fillMaxSize().padding(horizontal=16.dp),
-        contentPadding=PaddingValues(top=2.dp,bottom=18.dp),
-        verticalArrangement=Arrangement.spacedBy(10.dp)
-    ) {
-        item {
-            GlassCard {
-                Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
-                    Canvas(Modifier.size(44.dp)) {
-                        val p=Path().apply{
-                            moveTo(size.width*.5f,size.height*.08f); lineTo(size.width*.84f,size.height*.20f); lineTo(size.width*.78f,size.height*.64f); lineTo(size.width*.5f,size.height*.90f); lineTo(size.width*.22f,size.height*.64f); lineTo(size.width*.16f,size.height*.20f); close()
-                        }
-                        drawPath(p, color=if(operational) Mint else Amber, style=DrawStroke(width=3f))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(if(operational) "ALL SYSTEMS OPERATIONAL" else "SYSTEM VERIFICATION", color=if(operational) Mint else Amber, fontWeight=FontWeight.ExtraBold)
-                        Text("Overall Health", color=Muted, style=MaterialTheme.typography.labelSmall)
-                    }
-                    Text("$pct%", color=if(operational) Mint else Amber, fontWeight=FontWeight.ExtraBold)
-                }
-                LinearProgressIndicator(progress=pct/100f, modifier=Modifier.fillMaxWidth().height(5.dp), color=if(operational) Mint else Amber, trackColor=Stroke)
-                OutlinedButton(onClick=onRun, modifier=Modifier.fillMaxWidth()) { Text("Run Full System Test") }
-            }
-        }
-        item {
-            GlassCard {
-                Text("Systems", fontWeight=FontWeight.ExtraBold)
-                if(lines.isEmpty()) Text("No system test has been run yet.", color=Muted)
-                lines.take(30).forEach { row ->
-                    val parts=row.split("|").map{it.trim()}
-                    val st=parts.getOrNull(0)?:"INFO"
-                    val name=parts.getOrNull(1)?:"Check"
-                    val ok=st=="PASS"
-                    Row(Modifier.fillMaxWidth().padding(vertical=6.dp), verticalAlignment=Alignment.CenterVertically) {
-                        StatusDot(if(ok) Mint else if(st=="FAIL") Danger else Amber)
-                        Spacer(Modifier.width(9.dp))
-                        Text(name, modifier=Modifier.weight(1f), fontWeight=FontWeight.Medium)
-                        Text(if(ok) "OK" else st, color=if(ok) Mint else if(st=="FAIL") Danger else Amber, style=MaterialTheme.typography.labelMedium, fontWeight=FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}"""
-
-GLASS = r"""@Composable
-private fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier=Modifier.fillMaxWidth(),
-        shape=RoundedCornerShape(12.dp),
-        colors=CardDefaults.cardColors(containerColor=Panel),
-        border=BorderStroke(1.dp, Stroke)
-    ) {
-        Column(modifier=Modifier.padding(14.dp), verticalArrangement=Arrangement.spacedBy(8.dp), content=content)
-    }
-}"""
-
-TOGGLE = r"""@Composable
-private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(modifier=Modifier.fillMaxWidth().padding(vertical=3.dp), verticalAlignment=Alignment.CenterVertically) {
-        Text(label, modifier=Modifier.weight(1f))
-        Switch(checked=checked, onCheckedChange=onCheckedChange)
-    }
-}"""
-
-def patch_main(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
-    text = patch_imports(text)
-
-    old_colors = """private val SpaceBlack = Color(0xFF081326)
-private val Panel = Color(0xFF0F1B33)
-private val PanelAlt = Color(0xFF142544)
-private val Stroke = Color(0xFF2A4471)
-private val Electric = Color(0xFF47B8FF)
-private val Mint = Color(0xFF55F0DE)
-private val Amber = Color(0xFFFFC857)
-private val Danger = Color(0xFFFF5E8A)
-private val Muted = Color(0xFFA5B4D0)
-private val TextPrimary = Color(0xFFEAF3FF)
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                when (currentTab) {
 """
-    new_colors = """private val SpaceBlack = Color(0xFF07111D)
-private val Panel = Color(0xFF0D1827)
-private val PanelAlt = Color(0xFF111D2D)
-private val Stroke = Color(0xFF1B2A3B)
-private val Electric = Color(0xFF8B5CF6)
-private val Mint = Color(0xFF4ADE80)
-private val Amber = Color(0xFFF5B942)
-private val Danger = Color(0xFFF87171)
-private val Muted = Color(0xFF8D9AAA)
-private val TextPrimary = Color(0xFFF4F7FB)
-"""
-    if old_colors in text:
-        text = text.replace(old_colors, new_colors, 1)
+    text = replace_once(text, old_shell, new_shell, "preview app shell start")
 
-    text = replace_once(
-        text,
-        """            HeaderBar(status = status, mode = settings.mode, level = statusLevel)
-            AppTabs(currentTab = currentTab, onTabSelected = { currentTab = it })
-
-            when (currentTab) {""",
-        """            HeaderBar(currentTab = currentTab, status = status, mode = settings.mode, level = statusLevel)
-            Box(modifier = Modifier.weight(1f)) {
-                when (currentTab) {""",
-        "root shell start"
-    )
-    text = replace_once(
-        text,
-        """                )
-            }
+    shell_end = """            }
         }
     }
 }
 
 @Composable
-private fun HeaderBar""",
-        """                )
-                }
+private fun HeaderBar"""
+    shell_end_repl = """                }
             }
-            AppTabs(currentTab = currentTab, onTabSelected = { currentTab = it })
+            PreviewBottomNavigation(currentTab = currentTab, onTabSelected = { currentTab = it })
         }
     }
 }
 
 @Composable
-private fun HeaderBar""",
-        "root shell end"
-    )
+private fun HeaderBar"""
+    text = replace_once(text, shell_end, shell_end_repl, "preview app shell end")
 
-    text = replace_once(
-        text,
-        """                    activePositionSymbols = activeChartSymbols,
-                    onStart =""",
-        """                    activePositionSymbols = activeChartSymbols,
-                    portfolioSnapshot = portfolioSnapshot,
-                    lifecycleSnapshot = lifecycleSnapshot,
+    dashboard_pattern = r'''                AppTab\.DASHBOARD -> DashboardScreen\(.*?\n                AppTab\.STATUS ->'''
+    dashboard_repl = '''                AppTab.DASHBOARD -> PreviewDashboardScreen(
+                    settings = settings,
+                    status = status,
+                    portfolio = portfolioSnapshot,
+                    lifecycle = lifecycleSnapshot,
+                    decisions = decisions,
                     trades = tradeJournal,
-                    onStart =""",
-        "dashboard args"
-    )
-    text = replace_once(
-        text,
-        """                        }
+                    onStart = { statusStore.write("Start button pressed from dashboard."); onStart(); status = "Foreground live scanner started" },
+                    onStop = { statusStore.write("Stop button pressed from dashboard.", "WARN"); onStop(); status = "Bot stopped" },
+                    onScan = {
+                        status = "Scanning market + AI inputs..."
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), false) { result -> decisions = result; status = "Scan complete" }
+                    },
+                    onExecute = {
+                        status = "Running guarded execution pass..."
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), settings.mode == BotMode.PAPER || settings.mode == BotMode.LIVE_AUTO) { result -> decisions = result; status = "Execution pass complete" }
+                    },
+                    onOpenNews = { currentTab = AppTab.NEWS }
+                )
+                AppTab.STATUS ->'''
+    text = replace_regex_once(text, dashboard_pattern, dashboard_repl, "preview dashboard route")
+
+    ai_pattern = r'''                AppTab\.AI -> AiHubScreen\(.*?\n                AppTab\.AI_SIGNALS -> AiSignalsScreen\(.*?\n                AppTab\.CHART ->'''
+    ai_repl = '''                AppTab.AI -> PreviewAiHubScreen(
+                    decisions = decisions,
+                    settings = settings,
+                    performanceLabSnapshot = performanceLabSnapshot,
+                    trades = tradeJournal,
+                    onOpen = { currentTab = it },
+                    onSelectSignal = { decision ->
+                        selectedAiDecision = decision
+                        chartSymbol = decision.symbol.uppercase().replace("/", "").replace("-", "")
+                        onLoadChartCandles(settings, chartSymbol, Timeframe.M15, 180) { chartCandles = it }
+                        currentTab = AppTab.AI_SIGNAL_DETAIL
+                    },
+                    onScan = {
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), false) { result -> decisions = result; status = "AI Signals scan complete" }
                     }
                 )
-                AppTab.NEWS -> NewsScreen(""",
-        """                        }
+                AppTab.AI_SIGNALS -> PreviewAiSignalsListScreen(
+                    decisions = decisions,
+                    settings = settings,
+                    activePositionSymbols = activeChartSymbols,
+                    onScan = {
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), false) { result -> decisions = result; status = "AI Signals scan complete" }
+                    },
+                    onSelectSignal = { decision ->
+                        selectedAiDecision = decision
+                        chartSymbol = decision.symbol.uppercase().replace("/", "").replace("-", "")
+                        onLoadChartCandles(settings, chartSymbol, Timeframe.M15, 180) { chartCandles = it }
+                        currentTab = AppTab.AI_SIGNAL_DETAIL
+                    }
+                )
+                AppTab.AI_SIGNAL_DETAIL -> PreviewAiSignalDetailScreen(selectedAiDecision, chartCandles)
+                AppTab.CHART ->'''
+    text = replace_regex_once(text, ai_pattern, ai_repl, "preview AI routes")
+
+    positions_pattern = r'''                AppTab\.POSITIONS -> PositionsScreen\(.*?\n                AppTab\.AUTONOMOUS ->'''
+    positions_repl = '''                AppTab.POSITIONS -> PreviewPositionsScreen(
+                    settings = settings,
+                    snapshot = lifecycleSnapshot,
+                    onRefresh = {
+                        onLoadLifecycle(settings) { result -> lifecycleSnapshot = result; status = "Lifecycle loaded: ${result.positions.size} position(s)" }
+                    }
+                )
+                AppTab.AUTONOMOUS ->'''
+    text = replace_regex_once(text, positions_pattern, positions_repl, "preview positions route")
+
+    portfolio_pattern = r'''                AppTab\.PORTFOLIO -> PortfolioScreen\(.*?\n                AppTab\.NEWS -> NewsScreen\('''
+    portfolio_repl = '''                AppTab.PORTFOLIO -> PreviewPortfolioScreen(
+                    settings = settings,
+                    snapshot = portfolioSnapshot,
+                    lifecycleSnapshot = lifecycleSnapshot,
+                    trades = tradeJournal,
+                    onRefresh = {
+                        onLoadPortfolio(settings) { result -> portfolioSnapshot = result; status = "Portfolio loaded: €${result.totalValueEur}" }
+                        onLoadLifecycle(settings) { lifecycleSnapshot = it }
+                        onLoadTradeJournal(200) { tradeJournal = it }
+                    }
+                )
+                AppTab.NEWS -> PreviewNewsScreen('''
+    text = replace_regex_once(text, portfolio_pattern, portfolio_repl, "preview portfolio route")
+
+    news_insert = '''                    activeSymbols = activeChartSymbols,
+'''
+    if 'AppTab.NEWS -> PreviewNewsScreen(' in text:
+        region_start = text.index('                AppTab.NEWS -> PreviewNewsScreen(')
+        region_end = text.index('                AppTab.TAX ->', region_start)
+        region = text[region_start:region_end]
+        if '                    decisions = decisions,\n' not in region:
+            if news_insert not in region:
+                fail("News activeSymbols anchor missing after portfolio replacement")
+            region = region.replace(news_insert, news_insert + '                    decisions = decisions,\n', 1)
+            text = text[:region_start] + region + text[region_end:]
+
+    settings_pattern = r'''                AppTab\.SETTINGS -> SettingsHubScreen\(.*?\n                AppTab\.SYSTEM_TEST -> SystemTestScreen\('''
+    settings_repl = '''                AppTab.SETTINGS -> PreviewSettingsScreen(
+                    settings = settings,
+                    portfolio = portfolioSnapshot,
+                    onPersist = { updated ->
+                        persistSettings(updated)
+                        maxPosition = updated.maxPositionEur.toPlainString()
+                        maxLoss = updated.maxDailyLossEur.toPlainString()
+                        maxTrades = updated.maxTradesPerDay.toString()
+                        maxSpread = updated.maxSpreadPercent.toPlainString()
                     },
                     onOpen = { currentTab = it }
                 )
-                AppTab.NEWS -> NewsScreen(""",
-        "portfolio route"
-    )
-    text = replace_once(
-        text,
-        """                    activeSymbols = activeChartSymbols,
-                    onToggleNews =""",
-        """                    activeSymbols = activeChartSymbols,
-                    decisions = decisions,
-                    onToggleNews =""",
-        "news args"
-    )
-    text = replace_once(
-        text,
-        """                    systemTestLines = systemTestLines,
-                    onOpen =""",
-        """                    systemTestLines = systemTestLines,
-                    portfolioSnapshot = portfolioSnapshot,
-                    onOpen =""",
-        "settings args"
-    )
+                AppTab.SYSTEM_TEST -> PreviewSystemTestScreen('''
+    text = replace_regex_once(text, settings_pattern, settings_repl, "preview settings/system route")
 
-    text = replace_composable(text, "HeaderBar", HEADER)
-    text = replace_composable(text, "AppTabs", TABS)
-    text = replace_composable(text, "DashboardScreen", DASH)
-    text = replace_composable(text, "PortfolioScreen", PORTFOLIO)
-    text = replace_composable(text, "AiHubScreen", AI)
-    text = replace_composable(text, "NewsScreen", NEWS)
-    text = replace_composable(text, "SettingsHubScreen", SETTINGS)
-    text = replace_composable(text, "SystemTestScreen", SYSTEM)
-    text = replace_composable(text, "GlassCard", GLASS)
-    text = replace_composable(text, "ToggleRow", TOGGLE)
+    backup_marker = '                AppTab.BACKUP -> BackupRestoreScreen(\n'
+    if backup_marker in text:
+        text = text.replace(backup_marker, '                AppTab.BACKUP -> PreviewBackupRecoveryScreen(\n', 1)
+    elif 'AppTab.BACKUP -> PreviewBackupRecoveryScreen(' not in text:
+        fail("Backup route anchor missing")
 
-    text = text.replace("RoundedCornerShape(22.dp)", "RoundedCornerShape(12.dp)")
-    text = text.replace("RoundedCornerShape(26.dp)", "RoundedCornerShape(12.dp)")
-    text = text.replace("Color(0xFF14345F)", "Color(0xFF151E31)")
-    text = text.replace("Color(0x664DA3FF)", "Color(0x668B5CF6)")
+    text = patch_shared_preview_style(text)
+
+    old_gradient = """                Brush.verticalGradient(
+                    listOf(Color(0xFF09111F), SpaceBlack, Color(0xFF090B12))
+                )
+"""
+    if old_gradient in text:
+        text = text.replace(old_gradient, '                Brush.verticalGradient(listOf(Color(0xFF0C1522), Color(0xFF0C1522)))\n', 1)
+
     path.write_text(text, encoding="utf-8")
 
-def validate(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+
+def validate(repo: Path) -> None:
+    main = (repo / "app/src/main/java/com/ksp/cryptobot/MainActivity.kt").read_text(encoding="utf-8")
+    ui = (repo / "app/src/main/java/com/ksp/cryptobot/PreviewReplicaUi.kt").read_text(encoding="utf-8")
+    gradle = (repo / "app/build.gradle.kts").read_text(encoding="utf-8")
     checks = {
-        "purple premium accent": "0xFF8B5CF6" in text,
-        "five-root bottom nav": "listOf(AppTab.DASHBOARD, AppTab.PORTFOLIO, AppTab.AI, AppTab.NEWS, AppTab.SETTINGS)" in text,
-        "dashboard area graph": "PremiumPortfolioAreaChart" in text,
-        "portfolio donut": "AllocationDonut" in text,
-        "AI confidence gauge": "ConfidenceGauge" in text,
-        "news sentiment card": "Overall News Sentiment" in text,
-        "segmented settings": 'Connection & Trading","Automation & Risk' in text,
-        "system operational card": "ALL SYSTEMS OPERATIONAL" in text,
-        "switch settings": "Switch(checked=checked" in text,
+        "preview UI source installed": "fun PreviewDashboardScreen" in ui and "fun PreviewSettingsScreen" in ui,
+        "fixed bottom navigation": "PreviewBottomNavigation(currentTab = currentTab" in main,
+        "compact top bar": "PreviewAppTopBar(" in main,
+        "dashboard uses real state": "portfolio = portfolioSnapshot" in main and "trades = tradeJournal" in main,
+        "portfolio donut implemented": "AssetAllocationDonut" in ui,
+        "portfolio area graph implemented": "PreviewAreaSparkline" in ui,
+        "AI confidence gauge implemented": "PreviewConfidenceGauge" in ui,
+        "AI detail route wired": "AppTab.AI_SIGNAL_DETAIL -> PreviewAiSignalDetailScreen" in main,
+        "news visual route wired": "AppTab.NEWS -> PreviewNewsScreen" in main and "decisions = decisions" in main,
+        "single settings visual route": "AppTab.SETTINGS -> PreviewSettingsScreen" in main,
+        "system test visual route": "AppTab.SYSTEM_TEST -> PreviewSystemTestScreen" in main,
+        "positions visual route": "AppTab.POSITIONS -> PreviewPositionsScreen" in main,
+        "backup visual route": "AppTab.BACKUP -> PreviewBackupRecoveryScreen" in main,
+        "material icons dependency": "material-icons-extended" in gradle,
+        "approved purple accent": "0xFF8B5CF6" in main and "0xFF8B5CF6" in ui,
+        "approved green accent": "0xFF62DE67" in main and "0xFF62DE67" in ui,
+        "deep cards use preview radius": "private fun GlassCard" in main and "Column(modifier = Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(7.dp), content = content)" in main,
+        "legacy toggles use preview switches": "checkedTrackColor = Mint" in main and "SwitchDefaults.colors" in main,
+        "legacy hero uses preview card language": "private fun HeroCard" in main and "contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)" in main,
     }
-    for k, v in checks.items():
-        print(("PASS" if v else "FAIL") + " | " + k)
-    bad = [k for k,v in checks.items() if not v]
-    if bad:
-        fail("visual contract failed: " + ", ".join(bad))
+    for name, ok in checks.items():
+        print(("PASS" if ok else "FAIL") + " | " + name)
+    failed = [name for name, ok in checks.items() if not ok]
+    if failed:
+        fail("visual integration validation failed: " + ", ".join(failed))
+
 
 def main() -> None:
     repo = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path.cwd().resolve()
-    main_file = repo / "app/src/main/java/com/ksp/cryptobot/MainActivity.kt"
-    if not main_file.exists():
-        fail(f"missing {main_file}")
-    patch_main(main_file)
-    validate(main_file)
-    print("[CTS exact preview UI] Applied successfully.")
+    require(repo / "app/src/main/java/com/ksp/cryptobot/MainActivity.kt")
+    patch_gradle(repo)
+    write(repo / "app/src/main/java/com/ksp/cryptobot/PreviewReplicaUi.kt", PREVIEW_SOURCE)
+    write(repo / "app/src/test/java/com/ksp/cryptobot/PreviewUiContractTest.kt", PREVIEW_TEST_SOURCE)
+    patch_main_activity(repo)
+    validate(repo)
+    print("[CTS preview-exact redesign] Applied successfully.")
+
 
 if __name__ == "__main__":
     main()

@@ -1,36 +1,12 @@
-# Crypto TradeStation v4 — Exact Preview UI
+# Crypto TradeStation v4.0.2 — Exact Preview UI Hotfix 1
 
-The previously approved preview is the visual source of truth for this release.
+Upload/replace only these two files in `Demon-blood/Trading-Station`:
 
-Upload/replace these GitHub files:
+1. `.github/workflows/android-v4-build.yml`
+2. `.cts-v4-migration/apply_exact_preview_ui.py`
 
-- `.github/workflows/android-v4-build.yml`
-- `.cts-v4-migration/apply_diagnostics_integration_fix.py`
-- `.cts-v4-migration/apply_full_integration_cleanup.py`
-- `.cts-v4-migration/apply_exact_preview_ui.py`
+Commit them to `main`. Do not rerun the old failed attempt; the new commit will start a fresh
+canonical build.
 
-The canonical Action now applies diagnostics, Milestone 6, the full integration cleanup, then the exact-preview UI before Kotlin compilation/tests/build/signing verification.
-
-Implemented visual contract:
-- five-root bottom navigation: Dashboard / Portfolio / AI / News / Settings
-- compact top bar
-- dark navy/black premium palette
-- purple navigation/action accents
-- green positive/bullish/profit states
-- red loss/exit/error states
-- compact 12dp cards
-- Dashboard line + shaded area graph
-- Portfolio allocation donut
-- AI confidence gauge and compact signal rows
-- News sentiment and story cards
-- segmented Settings with Connection & Trading / Automation & Risk
-- switch-style settings controls
-- preview-style System Test health screen
-
-Dynamic balances, P/L, positions, AI scores and news are sourced from the real app state; the mock preview numbers are not hardcoded.
-
-Validation performed in this pack:
-- Python migration syntax compilation
-- workflow visual-contract assertions
-
-A full Android/Kotlin build, unit tests, APK identity and signer checks still require the real GitHub Action run before the APK can be called verified.
+This hotfix keeps the exact-preview redesign while preserving News provider health/cooldown
+wiring and aligns the canonical release identity to v4.0.2 / versionCode 107.
