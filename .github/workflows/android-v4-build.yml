@@ -97,6 +97,105 @@ jobs:
           set -euo pipefail
           python3 .cts-v4-migration/apply_milestone6.py "$GITHUB_WORKSPACE" | tee migration.log
 
+      - name: Apply full integration and UX cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .cts-v4-migration/apply_full_integration_cleanup.py "$GITHUB_WORKSPACE" | tee integration-cleanup.log
+
+      - name: Apply approved exact-preview UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .cts-v4-migration/apply_exact_preview_ui.py "$GITHUB_WORKSPACE" | tee exact-preview-ui.log
+
+      - name: Validate approved visual contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee exact-preview-ui-contract.log
+          from pathlib import Path
+          main = Path('app/src/main/java/com/ksp/cryptobot/MainActivity.kt').read_text(encoding='utf-8')
+          checks = {
+              'purple premium accent': '0xFF8B5CF6' in main,
+              'five root bottom nav': 'listOf(AppTab.DASHBOARD, AppTab.PORTFOLIO, AppTab.AI, AppTab.NEWS, AppTab.SETTINGS)' in main,
+              'portfolio area graph': 'PremiumPortfolioAreaChart' in main,
+              'allocation donut': 'AllocationDonut' in main,
+              'AI confidence gauge': 'ConfidenceGauge' in main,
+              'news sentiment card': 'Overall News Sentiment' in main,
+              'segmented Settings': 'Connection & Trading","Automation & Risk' in main,
+              'system operational card': 'ALL SYSTEMS OPERATIONAL' in main,
+          }
+          for name, ok in checks.items():
+              print(('PASS' if ok else 'FAIL') + ' | ' + name)
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Exact-preview visual contract failed: ' + ', '.join(failed))
+          PY
+
+      - name: Validate integration contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee integration-contracts.log
+          from pathlib import Path
+          import re
+
+          main = Path('app/src/main/java/com/ksp/cryptobot/MainActivity.kt').read_text(encoding='utf-8')
+          lifecycle = Path('app/src/main/java/com/ksp/cryptobot/lifecycle/TradeLifecycleManager.kt').read_text(encoding='utf-8')
+          controller = Path('app/src/main/java/com/ksp/cryptobot/core/BotController.kt').read_text(encoding='utf-8')
+          models = Path('app/src/main/java/com/ksp/cryptobot/core/Models.kt').read_text(encoding='utf-8')
+          store = Path('app/src/main/java/com/ksp/cryptobot/settings/AppSettingsStore.kt').read_text(encoding='utf-8')
+
+          checks = {
+              'single top-level settings/navigation architecture': 'V4_SYSTEMS' not in main and 'Settings Truth' not in main,
+              'research owned by AI': 'AppTab.RESEARCH_SETTINGS -> V4ResearchPanel()' in main,
+              'CloudShare owned by Settings/Backup': 'AppTab.CLOUDSHARE_SETTINGS -> CloudShareScreen()' in main,
+              'recovery owned by Settings/Backup': 'AppTab.RECOVERY_TOOLS -> V4RecoveryPanel()' in main,
+              'AVOID is not SELL': 'explicitSignalSell = isExplicitLifecycleSell(decision)' in lifecycle and 'SignalAction.AVOID ||' not in lifecycle,
+              'soft signal churn protection': 'Soft SELL deferred to prevent churn' in lifecycle,
+              'same-scan buy/sell context': 'enteredSymbolsThisScan' in controller and 'exitedSymbolsThisScan' in controller,
+              'confirmed-fill lifecycle accounting': 'Lifecycle SELL accepted without confirmed fill' in lifecycle,
+              'reopened position entry reset': 'latestBuyIsNewLifecycle' in lifecycle and 'reopenedByLatestBuy' in lifecycle,
+              'provider health belongs to News': 'NewsProviderHealthRegistry.snapshot()' in main,
+              'verified settings save/reload': 'lastSaveVerification()' in store and 'return exactMatch' in store,
+          }
+          for name, ok in checks.items():
+              print(('PASS' if ok else 'FAIL') + ' | ' + name)
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Integration contract failure: ' + ', '.join(failed))
+
+          # Audit every BotSettings field for round-trip persistence. All misses are
+          # printed. Safety/execution critical misses fail the build.
+          bot_match = re.search(r'data class BotSettings\((.*?)\n\)', models, re.S)
+          if not bot_match:
+              raise SystemExit('Could not parse BotSettings constructor for persistence audit')
+          model_block = bot_match.group(1)
+          fields = re.findall(r'(?m)^\s*val\s+([A-Za-z][A-Za-z0-9_]*)\s*:', model_block)
+          load_block = store.split('fun load(): BotSettings', 1)[1].split('fun save(', 1)[0]
+          if 'fun save(settings: BotSettings): Boolean' in store:
+              save_block = store.split('fun save(settings: BotSettings): Boolean', 1)[1].split('fun lastSaveVerification', 1)[0]
+          else:
+              save_block = store.split('fun save(settings: BotSettings)', 1)[1].split('fun lastSaveVerification', 1)[0]
+          missing_load = [f for f in fields if re.search(r'\b' + re.escape(f) + r'\s*=', load_block) is None]
+          missing_save = [f for f in fields if ('settings.' + f) not in save_block]
+          print(f'SETTINGS_AUDIT | fields={len(fields)} missingLoad={len(missing_load)} missingSave={len(missing_save)}')
+          if missing_load:
+              print('WARN | BotSettings missing from load: ' + ', '.join(missing_load))
+          if missing_save:
+              print('WARN | BotSettings missing from save: ' + ', '.join(missing_save))
+          critical = {
+              'mode','exchangeProvider','liveTradingAcknowledged','maxPositionEur','maxDailyLossEur',
+              'maxTradesPerDay','maxTradesPerHour','maxSimultaneousLivePositions','cooldownAfterBuyMinutes',
+              'cooldownAfterSellMinutes','forceSellOnBearishSignal','liveLifecycleManagerEnabled','autoExitManagerEnabled',
+              'autoStopLossEnabled','autoTakeProfitEnabled','useNewsAi','trueSelfLearningEnabled','enableAutoSafeMode'
+          }
+          critical_missing = sorted((set(missing_load) | set(missing_save)) & critical)
+          if critical_missing:
+              raise SystemExit('Critical settings are not round-trip persisted: ' + ', '.join(critical_missing))
+          PY
+
       - name: Validate diagnostics patch markers
         shell: bash
         run: |
@@ -113,8 +212,6 @@ jobs:
               'M4 entry-only safe-mode guard in effective app': 'productionSafeModeBlocks' in Path('app/src/main/java/com/ksp/cryptobot/execution/ExecutionGuard.kt').read_text(encoding='utf-8'),
               'news provider health registry': Path('app/src/main/java/com/ksp/cryptobot/news/NewsProviderHealth.kt').exists(),
               'completed learning outcomes': 'completedOutcomeTradesForLearning' in Path('app/src/main/java/com/ksp/cryptobot/learning/TrueSelfLearningEngine.kt').read_text(encoding='utf-8'),
-              'settings truth UI in migration overlay': 'Settings Truth' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/ui/V4ControlCenterScreen.kt').read_text(encoding='utf-8'),
-              'settings truth UI in effective app': 'Settings Truth' in Path('app/src/main/java/com/ksp/cryptobot/ui/V4ControlCenterScreen.kt').read_text(encoding='utf-8'),
               'end-to-end verifier in migration overlay': 'End-to-end wiring evidence' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/release/V4SystemVerifier.kt').read_text(encoding='utf-8'),
               'end-to-end verifier in effective app': 'End-to-end wiring evidence' in Path('app/src/main/java/com/ksp/cryptobot/release/V4SystemVerifier.kt').read_text(encoding='utf-8'),
           }
@@ -326,7 +423,7 @@ jobs:
         run: |
           set +e
           mkdir -p ci-failure
-          cp migration.log diagnostics-fix.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
+          cp migration.log diagnostics-fix.log integration-cleanup.log integration-contracts.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
           git diff --stat > ci-failure/git-diff-stat.txt 2>&1 || true
           git diff --name-only > ci-failure/git-diff-files.txt 2>&1 || true
           java -version > ci-failure/java-version.txt 2>&1 || true

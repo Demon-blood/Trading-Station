@@ -818,7 +818,7 @@ class ExecutionGuard(private val dao: AppDao) {
         "MainActivity news stack truth"
     )
     old_persist = '''    fun persistSettings(newSettings: BotSettings) {\n        settings = newSettings\n        store.save(newSettings)\n        status = "Settings saved"\n    }\n'''
-    new_persist = '''    fun persistSettings(newSettings: BotSettings) {\n        val verified = store.save(newSettings)\n        val effective = store.load()\n        settings = effective\n        status = if (verified && effective == newSettings) "Settings saved and verified" else "Settings save verification failed — check v4 Effective Settings Truth"\n        statusStore.write(status, if (verified && effective == newSettings) "INFO" else "ERROR")\n    }\n'''
+    new_persist = '''    fun persistSettings(newSettings: BotSettings) {\n        val verified = store.save(newSettings)\n        val effective = store.load()\n        settings = effective\n        status = if (verified && effective == newSettings) "Settings saved and verified" else "Settings save verification failed — run System Test"\n        statusStore.write(status, if (verified && effective == newSettings) "INFO" else "ERROR")\n    }\n'''
     main = replace_once(main, old_persist, new_persist, "MainActivity settings save/reload truth")
     main_path.write_text(main, encoding="utf-8")
 
@@ -867,80 +867,7 @@ class ExecutionGuard(private val dao: AppDao) {
     learning = replace_once(learning, refresh_old, refresh_new, "completed-outcome refresh")
     learning_path.write_text(learning, encoding="utf-8")
 
-    # 7) Add a complete read-only effective-settings inspector to the v4 control
-    # center. This exposes every persisted BotSettings field without leaking secure
-    # API secrets (secrets are kept in SecureSettingsStore, not BotSettings).
-    control_path = repo / ".cts-v4-migration/app/src/main/java/com/ksp/cryptobot/ui/V4ControlCenterScreen.kt"
-    require(control_path)
-    control = control_path.read_text(encoding="utf-8")
-    if "import com.ksp.cryptobot.settings.AppSettingsStore" not in control:
-        control = replace_once(
-            control,
-            "import com.ksp.cryptobot.research.ResearchSettingsStore\n",
-            "import com.ksp.cryptobot.research.ResearchSettingsStore\nimport com.ksp.cryptobot.settings.AppSettingsStore\n",
-            "V4Control settings-store import"
-        )
-    control = replace_once(
-        control,
-        'private enum class V4Panel(val label: String) { OVERVIEW("Overview"), CLOUDSHARE("CloudShare"), RESEARCH("Research"), RECOVERY("Recovery") }',
-        'private enum class V4Panel(val label: String) { OVERVIEW("Overview"), SETTINGS("Settings Truth"), CLOUDSHARE("CloudShare"), RESEARCH("Research"), RECOVERY("Recovery") }',
-        "V4Control Settings Truth tab"
-    )
-    control = replace_once(
-        control,
-        "        when (panel) {\n            V4Panel.OVERVIEW -> V4OverviewPanel()\n            V4Panel.CLOUDSHARE -> CloudShareScreen()\n",
-        "        when (panel) {\n            V4Panel.OVERVIEW -> V4OverviewPanel()\n            V4Panel.SETTINGS -> V4SettingsTruthPanel()\n            V4Panel.CLOUDSHARE -> CloudShareScreen()\n",
-        "V4Control Settings Truth routing"
-    )
-    if "private fun V4SettingsTruthPanel()" not in control:
-        panel_source = r'''
-@Composable
-private fun V4SettingsTruthPanel() {
-    val context = LocalContext.current
-    val store = remember { AppSettingsStore(context.applicationContext) }
-    var effective by remember { mutableStateOf(store.load()) }
-    var saveTruth by remember { mutableStateOf(store.lastSaveVerification()) }
-    val fields = remember(effective) {
-        effective.toString()
-            .removePrefix("BotSettings(")
-            .removeSuffix(")")
-            .split(Regex(", (?=[A-Za-z][A-Za-z0-9]*=)"))
-            .filter { it.isNotBlank() }
-    }
-
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text("Effective Settings Truth", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Read-only persisted BotSettings after save/reload. This panel intentionally does not show API keys or other encrypted secrets.")
-        ElevatedCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Last save verification", fontWeight = FontWeight.Bold)
-                Text("commit=${saveTruth.committed} • exact reload=${saveTruth.exactMatch} • epochMs=${saveTruth.timestampEpochMs} • mode=${saveTruth.effectiveMode}")
-            }
-        }
-        Button(onClick = {
-            effective = store.load()
-            saveTruth = store.lastSaveVerification()
-        }) { Text("Reload persisted settings") }
-        Text("All effective BotSettings fields (${fields.size})", fontWeight = FontWeight.Bold)
-        fields.forEach { field ->
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Text(field, Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-            }
-        }
-    }
-}
-
-'''
-        control = replace_once(
-            control,
-            "@Composable\nprivate fun V4OverviewPanel() {",
-            panel_source + "@Composable\nprivate fun V4OverviewPanel() {",
-            "V4Control Settings Truth panel"
-        )
-    control_path.write_text(control, encoding="utf-8")
+    # 7) Settings truth stays in the existing System Test verifier; do not add a duplicate settings UI.
 
     # 8) Authoritative v4 verifier overlay: complete persisted settings truth,
     # provider health, and stage-by-stage runtime evidence.
@@ -958,7 +885,6 @@ private fun V4SettingsTruthPanel() {
         Path("governance/RiskBudgetAndSafeMode.kt"),
         Path("governance/ProductionIntelligenceEngine.kt"),
         Path("execution/ExecutionGuard.kt"),
-        Path("ui/V4ControlCenterScreen.kt"),
         Path("release/V4SystemVerifier.kt"),
     ):
         source = overlay_root / relative
@@ -976,7 +902,7 @@ private fun V4SettingsTruthPanel() {
     write_text(repo / "app/src/test/java/com/ksp/cryptobot/learning/CompletedLearningOutcomeTest.kt", LEARNING_OUTCOME_TEST)
 
     print("[CTS diagnostics fix] Applied successfully.")
-    print("Patched authoritative migration overlay and synchronized effective app sources: governance/execution/UI/verifier")
+    print("Patched authoritative migration overlay and synchronized effective app sources: governance/execution/verifier")
     print("Patched base: news health/cooldown, CryptoPanic wiring/UI, settings save/reload truth, completed-outcome learning")
     print("Added regression tests: safe-mode unlatching, entry-only M3/M4 governance, news cooldown, completed-outcome sampling")
     print("Next: GitHub Actions will validate, compile, test, assemble and verify the canonical APK.")

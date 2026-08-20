@@ -1,0 +1,11 @@
+{
+  "name": "CryptoTradeStation_v4_ExactPreviewUI_v4_20260821",
+  "date": "2026-08-21",
+  "visual_source_of_truth": "approved preview composite",
+  "github_files": [
+    ".github/workflows/android-v4-build.yml",
+    ".cts-v4-migration/apply_diagnostics_integration_fix.py",
+    ".cts-v4-migration/apply_full_integration_cleanup.py",
+    ".cts-v4-migration/apply_exact_preview_ui.py"
+  ]
+}

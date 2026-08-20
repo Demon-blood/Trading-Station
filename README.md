@@ -1,63 +1,36 @@
-# Crypto TradeStation Android App
+# Crypto TradeStation v4 — Exact Preview UI
 
-Android-only Kraken/PAPER crypto bot with adaptive multi-strategy self-learning, EUR-first Belgian cash routing, learned hold profiles, and historical spike/profit-cycle timing.
+The previously approved preview is the visual source of truth for this release.
 
-## v1.7.9 highlight
+Upload/replace these GitHub files:
 
-The lifecycle manager now analyzes historical spike behavior for held symbols such as BTC. It compares the current move against prior spike size, duration, momentum, and pullback behavior. It can defer normal take-profit/trailing exits when the move still looks early and healthy, or lock profit when the run looks exhausted.
+- `.github/workflows/android-v4-build.yml`
+- `.cts-v4-migration/apply_diagnostics_integration_fix.py`
+- `.cts-v4-migration/apply_full_integration_cleanup.py`
+- `.cts-v4-migration/apply_exact_preview_ui.py`
 
-It still cannot know the exact top and does not guarantee maximum profit. It is a bounded profit-capture improvement, not a prediction guarantee.
+The canonical Action now applies diagnostics, Milestone 6, the full integration cleanup, then the exact-preview UI before Kotlin compilation/tests/build/signing verification.
 
-# Crypto TradeStation v1.7.7 EUR Cash
+Implemented visual contract:
+- five-root bottom navigation: Dashboard / Portfolio / AI / News / Settings
+- compact top bar
+- dark navy/black premium palette
+- purple navigation/action accents
+- green positive/bullish/profit states
+- red loss/exit/error states
+- compact 12dp cards
+- Dashboard line + shaded area graph
+- Portfolio allocation donut
+- AI confidence gauge and compact signal rows
+- News sentiment and story cards
+- segmented Settings with Connection & Trading / Automation & Risk
+- switch-style settings controls
+- preview-style System Test health screen
 
-Android-only crypto trading bot focused on Kraken live/paper trading, automatic symbol discovery, adaptive multi-strategy learning, and EUR-first cash routing for Belgian users.
+Dynamic balances, P/L, positions, AI scores and news are sourced from the real app state; the mock preview numbers are not hardcoded.
 
-## Important default
+Validation performed in this pack:
+- Python migration syntax compilation
+- workflow visual-contract assertions
 
-For Belgian Kraken accounts, EUR is treated as the main quote/cash asset:
-
-```text
-Allowed Quote Assets: EUR
-Auto Symbol Universe: ALL
-```
-
-The app can still scan all Kraken markets, but BUY trades are routed only through allowed quote balances. This prevents the bot from selecting USD/USDT/BTC quote pairs when your available cash is EUR.
-# Crypto TradeStation — v1.7.1 Adaptive Multi-Strategy Learning
-
-Android-only crypto trading bot focused on Kraken live trading, paper trading with live Kraken public market data, auto symbol discovery, rotation safety, editable advanced settings, and now a bounded persistent self-learning engine.
-
-## v1.7.1 highlights
-
-- Persistent learned symbol profiles.
-- Persistent learned strategy profiles.
-- Learning feature snapshots for every scanned decision.
-- Score adjustment based on real/paper trade outcomes.
-- Position-size multiplier hints based on learned profitability.
-- Sample-size protection before strong adjustments are applied.
-- Self-learning audit trail.
-- New Self Learning tab.
-- Advanced Settings controls for self-learning limits.
-
-The self-learning engine does not bypass exchange, legal, API, balance, quote, reserve, cooldown, spread, market-order or risk guards. It only adjusts score/sizing hints inside bounded limits.
-
-## Build
-
-Use GitHub Actions or run:
-
-```bash
-gradle --no-daemon clean :app:assembleDebug
-```
-
-## Safe testing order
-
-1. Build/install the APK.
-2. Select `PAPER` provider.
-3. Confirm Paper mode uses Kraken public data in Live Status.
-4. Run paper mode until enough completed trades exist.
-5. Open Self Learning tab and confirm profiles appear.
-6. Only then test small live Kraken trades.
-
-
-## v1.7.3 GitHub Actions SDK fix
-
-This build removes android-actions/setup-android@v3 from the workflows and uses the preinstalled Android SDK/sdmanager directly. It installs only platform-tools, Android 35 platform, and build-tools 35.0.0, avoiding the failing Android Emulator package download.
+A full Android/Kotlin build, unit tests, APK identity and signer checks still require the real GitHub Action run before the APK can be called verified.
