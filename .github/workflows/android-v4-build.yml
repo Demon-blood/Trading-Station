@@ -82,17 +82,20 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      # The diagnostics patch must run BEFORE Milestone 6. It updates both the
+      # base source and migration-owned v4 overlays. Milestone 6 then copies the
+      # patched overlays into app/, making those files the effective build source.
+      - name: Apply diagnostics source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .cts-v4-migration/apply_diagnostics_integration_fix.py "$GITHUB_WORKSPACE" | tee diagnostics-fix.log
+
       - name: Apply cumulative v4 migration
         shell: bash
         run: |
           set -euo pipefail
           python3 .cts-v4-migration/apply_milestone6.py "$GITHUB_WORKSPACE" | tee migration.log
-
-      - name: Apply diagnostics and integration fix
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 .cts-v4-migration/apply_diagnostics_integration_fix.py "$GITHUB_WORKSPACE" | tee diagnostics-fix.log
 
       - name: Validate diagnostics patch markers
         shell: bash
@@ -102,13 +105,18 @@ jobs:
           from pathlib import Path
 
           checks = {
-              'safe mode causative-error filter': 'causativeErrorTypes' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/governance/RiskBudgetAndSafeMode.kt').read_text(encoding='utf-8'),
-              'M3 entry-only governors': 'entryOnlyGovernorsBlock' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/governance/ProductionIntelligenceEngine.kt').read_text(encoding='utf-8'),
-              'M4 entry-only safe-mode guard': 'productionSafeModeBlocks' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/execution/ExecutionGuard.kt').read_text(encoding='utf-8'),
+              'safe mode patch in migration overlay': 'causativeErrorTypes' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/governance/RiskBudgetAndSafeMode.kt').read_text(encoding='utf-8'),
+              'safe mode patch in effective app': 'causativeErrorTypes' in Path('app/src/main/java/com/ksp/cryptobot/governance/RiskBudgetAndSafeMode.kt').read_text(encoding='utf-8'),
+              'M3 entry-only governors in migration overlay': 'entryOnlyGovernorsBlock' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/governance/ProductionIntelligenceEngine.kt').read_text(encoding='utf-8'),
+              'M3 entry-only governors in effective app': 'entryOnlyGovernorsBlock' in Path('app/src/main/java/com/ksp/cryptobot/governance/ProductionIntelligenceEngine.kt').read_text(encoding='utf-8'),
+              'M4 entry-only safe-mode guard in migration overlay': 'productionSafeModeBlocks' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/execution/ExecutionGuard.kt').read_text(encoding='utf-8'),
+              'M4 entry-only safe-mode guard in effective app': 'productionSafeModeBlocks' in Path('app/src/main/java/com/ksp/cryptobot/execution/ExecutionGuard.kt').read_text(encoding='utf-8'),
               'news provider health registry': Path('app/src/main/java/com/ksp/cryptobot/news/NewsProviderHealth.kt').exists(),
               'completed learning outcomes': 'completedOutcomeTradesForLearning' in Path('app/src/main/java/com/ksp/cryptobot/learning/TrueSelfLearningEngine.kt').read_text(encoding='utf-8'),
-              'settings truth UI': 'Settings Truth' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/ui/V4ControlCenterScreen.kt').read_text(encoding='utf-8'),
-              'end-to-end verifier': 'End-to-end wiring evidence' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/release/V4SystemVerifier.kt').read_text(encoding='utf-8'),
+              'settings truth UI in migration overlay': 'Settings Truth' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/ui/V4ControlCenterScreen.kt').read_text(encoding='utf-8'),
+              'settings truth UI in effective app': 'Settings Truth' in Path('app/src/main/java/com/ksp/cryptobot/ui/V4ControlCenterScreen.kt').read_text(encoding='utf-8'),
+              'end-to-end verifier in migration overlay': 'End-to-end wiring evidence' in Path('.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/release/V4SystemVerifier.kt').read_text(encoding='utf-8'),
+              'end-to-end verifier in effective app': 'End-to-end wiring evidence' in Path('app/src/main/java/com/ksp/cryptobot/release/V4SystemVerifier.kt').read_text(encoding='utf-8'),
           }
           for name, ok in checks.items():
               print(('PASS' if ok else 'FAIL') + ' | ' + name)

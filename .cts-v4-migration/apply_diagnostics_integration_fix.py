@@ -4,12 +4,15 @@
 Target baseline:
   Demon-blood/Trading-Station main @ 9081c5aa5ed73be8f9f3a72f7e7981901af9233b
 
-Executed by the canonical Android v4 GitHub Actions workflow AFTER apply_milestone6.py.
-It patches the effective checked-out base sources and cumulative v4 migration overlay
-before Kotlin compilation/tests/APK assembly, so migration-owned files cannot erase the fix.
+Executed by the canonical Android v4 GitHub Actions workflow BEFORE apply_milestone6.py.
+It patches the checked-out base sources and the cumulative v4 migration overlay. Milestone 6
+then materializes those patched authoritative overlays into app/ before Kotlin compilation/tests.
+The patcher also synchronizes migration-owned files into app/ as a defensive fallback so a
+misordered/manual invocation cannot leave tests compiling against stale effective sources.
 """
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -945,7 +948,27 @@ private fun V4SettingsTruthPanel() {
     require(verifier_path)
     write_text(verifier_path, V4_VERIFIER_SOURCE)
 
-    # 9) Regression tests. These compile after apply_milestone6.py adds governance.
+    # 9) Materialize every migration-owned file touched above into the effective
+    # app tree as well. The canonical workflow still runs this patch BEFORE M6,
+    # and M6 will copy the same authoritative files again. This defensive sync
+    # also makes the patcher safe if someone invokes it after M6.
+    overlay_root = repo / ".cts-v4-migration/app/src/main/java/com/ksp/cryptobot"
+    effective_root = repo / "app/src/main/java/com/ksp/cryptobot"
+    for relative in (
+        Path("governance/RiskBudgetAndSafeMode.kt"),
+        Path("governance/ProductionIntelligenceEngine.kt"),
+        Path("execution/ExecutionGuard.kt"),
+        Path("ui/V4ControlCenterScreen.kt"),
+        Path("release/V4SystemVerifier.kt"),
+    ):
+        source = overlay_root / relative
+        target = effective_root / relative
+        require(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    # 10) Regression tests. In the canonical workflow these compile after M6
+    # has materialized the same patched governance/execution sources into app/.
     write_text(repo / "app/src/test/java/com/ksp/cryptobot/governance/SafeModeControllerTest.kt", SAFE_MODE_TEST)
     write_text(repo / "app/src/test/java/com/ksp/cryptobot/governance/ProductionEntryGovernorsTest.kt", GOVERNANCE_ENTRY_TEST)
     write_text(repo / "app/src/test/java/com/ksp/cryptobot/execution/ExecutionGuardSafeModeTest.kt", EXECUTION_GUARD_TEST)
@@ -953,7 +976,7 @@ private fun V4SettingsTruthPanel() {
     write_text(repo / "app/src/test/java/com/ksp/cryptobot/learning/CompletedLearningOutcomeTest.kt", LEARNING_OUTCOME_TEST)
 
     print("[CTS diagnostics fix] Applied successfully.")
-    print("Patched authoritative migration overlay: governance safe mode + v4 verifier")
+    print("Patched authoritative migration overlay and synchronized effective app sources: governance/execution/UI/verifier")
     print("Patched base: news health/cooldown, CryptoPanic wiring/UI, settings save/reload truth, completed-outcome learning")
     print("Added regression tests: safe-mode unlatching, entry-only M3/M4 governance, news cooldown, completed-outcome sampling")
     print("Next: GitHub Actions will validate, compile, test, assemble and verify the canonical APK.")
