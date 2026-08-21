@@ -1,44 +1,114 @@
-# Crypto TradeStation v4.0.5 — GDELT Rate-Limit Fix
+# Crypto TradeStation v4.0.6 — Guided CloudShare Setup Wizard
 
 This is the complete current update pack.
 
-## Root cause
+## CloudShare setup is now guided in-app
 
-Crypto TradeStation evaluates news for each symbol. The previous GDELT client had
-no request throttle and no cache, so one successful GDELT call could be followed by
-another symbol's GDELT request immediately.
+Open:
+Settings → CloudShare
 
-GDELT's own 429 response asks clients to limit requests to one every five seconds.
+The screen now has:
+- Overview
+- Create New
+- Join Existing
+- Repair / Test
+- Manage
 
-## Fix
+## Create New — automatic Cloudflare provisioning
 
-The GDELT client now uses:
+The user supplies:
+1. Cloudflare Account ID
+2. a one-time restricted Cloudflare API token
 
-- one actual GDELT request at most every **6 seconds globally**
-- a **15-minute per-symbol cache**
-- up to **1 hour stale-cache fallback** during transient provider trouble
-- a bounded **500-symbol cache**
-- **no sleep in the trading loop**
+The app then automatically:
 
-If the local GDELT request window is not open yet, CTS uses cached GDELT results when
-available or simply continues the current symbol without GDELT for that pass. RSS and
-other healthy providers continue normally.
+1. verifies the token can access the account D1 API;
+2. finds or creates the CloudShare D1 database;
+3. initializes the D1 schema;
+4. generates the first one-use registration invitation;
+5. finds or creates the R2 backup bucket;
+6. uploads the bundled CloudShare Worker;
+7. binds D1 to the Worker as `DB`;
+8. binds R2 as `BACKUPS`;
+9. generates the CloudShare owner/admin secret;
+10. enables the Worker on workers.dev;
+11. discovers/creates the account workers.dev subdomain;
+12. builds the final HTTPS Worker URL;
+13. tests `/v1/health`;
+14. stores the CloudShare owner token in encrypted Android storage;
+15. registers this Android device automatically;
+16. verifies client and intelligence endpoints;
+17. performs the first sync/backfill batch;
+18. enables CloudShare.
 
-This avoids turning a 16-30 symbol scan into a 1-3 minute blocking news wait.
+The Cloudflare provisioning token is never persisted by Crypto TradeStation and
+the UI clears it after each provisioning attempt.
+
+Required Cloudflare token permissions:
+- D1 Write
+- Workers R2 Storage Write
+- Workers Scripts Write
+
+EU D1/R2 jurisdiction is enabled by default but can be switched off in the wizard.
+
+## Join Existing
+
+The wizard walks through:
+- Worker URL
+- health test
+- invitation code
+- device registration
+- client/intelligence verification
+- sync interval
+- historical backfill
+- initial sync
+
+## Repair / Test
+
+Available actions:
+- full CloudShare health/auth/intelligence verification
+- force sync
+- upload full bootstrap archive
+- re-register this device with a new invitation
+- disconnect this device
+
+Disconnecting CloudShare does not stop local trading or local learning.
+
+## Manage
+
+Owner/admin tools include:
+- owner verification
+- create invitation
+- list invitations
+- list clients
+- forget owner token
+
+Existing lower-level client methods for revoke/enable/disable/rotate remain available
+for future dedicated management UI expansion.
+
+## Bundled backend
+
+The pack includes the CloudShare Worker and D1 schema under:
+
+`.cts-v4-migration/cloudshare_setup/`
+
+The build migration copies those assets into the Android application so the setup
+wizard can deploy the exact backend version expected by the Android CloudShare client.
 
 ## Included current fixes
 
 - diagnostics integration
-- full integration cleanup
+- full integration/lifecycle cleanup
 - Kraken minimum-order sizing
-- exact-preview UI + hamburger navigation
+- exact-preview UI + hamburger Quick Navigation
 - System Diagnostics + selectable directory
-- Backup/Diagnostics immediate selected-directory fix
-- GDELT request pacing/cache
+- Backup/Diagnostics selected-directory fix
+- GDELT global request pacing/cache
+- guided CloudShare setup/provisioning
 - canonical GitHub Actions workflow
 
 ## Build identity
 
-- versionName: 4.0.5
-- versionCode: 110
+- versionName: 4.0.6
+- versionCode: 111
 - applicationId: com.ksp.cryptobot
