@@ -33,8 +33,8 @@ env:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   CTS_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'debug' }}
   CTS_RUN_TESTS: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.run_tests }}
-  CTS_VERSION_NAME: 4.0.2
-  CTS_VERSION_CODE: 107
+  CTS_VERSION_NAME: 4.0.3
+  CTS_VERSION_CODE: 108
   CTS_DEBUG_CERT_SHA256: b690958cb434544e7f8963ecc86559562a82155ffbd915cb2088c9333e06aa28
 
 jobs:
@@ -167,6 +167,47 @@ jobs:
           set -euo pipefail
           python3 .cts-v4-migration/apply_exact_preview_ui.py "$GITHUB_WORKSPACE" | tee exact-preview-ui.log
 
+      - name: Apply System diagnostics and export UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .cts-v4-migration/apply_system_diagnostics_ui.py
+          python3 .cts-v4-migration/apply_system_diagnostics_ui.py "$GITHUB_WORKSPACE" | tee system-diagnostics-ui.log
+
+      - name: Validate System diagnostics contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYDIAG'
+          from pathlib import Path
+          root = Path('app/src/main/java/com/ksp/cryptobot')
+          main = (root/'MainActivity.kt').read_text(encoding='utf-8')
+          ui = (root/'PreviewReplicaUi.kt').read_text(encoding='utf-8')
+          controller = (root/'core/BotController.kt').read_text(encoding='utf-8')
+          store = (root/'settings/AppSettingsStore.kt').read_text(encoding='utf-8')
+          checks = {
+              'System segment works': 'if (it == 1) onOpen(AppTab.SYSTEM_TEST)' in ui,
+              'Backup segment works': 'if (it == 0) onOpen(AppTab.BACKUP)' in ui,
+              'diagnostics folder picker': 'Select Diagnostics Folder' in ui,
+              'diagnostics export button': 'Run & Save Full Diagnostics' in ui,
+              'diagnostics path persistence': 'diagnosticsDirectoryPath()' in store,
+              'full diagnostics exporter': 'exportFullDiagnosticsToFile' in controller,
+              'secret redaction': 'secrets=EXCLUDED_AND_REDACTED' in controller,
+              'runtime status included': '[RECENT_STATUS_LOG]' in controller,
+              'portfolio included': '[PORTFOLIO]' in controller,
+              'positions included': '[LIFECYCLE_POSITIONS]' in controller,
+              'orders included': '[OPEN_ORDERS]' in controller,
+              'trades included': '[RECENT_TRADES]' in controller,
+              'provider health included': '[NEWS_PROVIDER_HEALTH]' in controller,
+              'MainActivity wired': 'diagnosticsDirectoryPath = store.diagnosticsDirectoryPath()' in main,
+          }
+          for name, ok in checks.items():
+              print(('PASS' if ok else 'FAIL') + ' | ' + name)
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('System diagnostics contract failure: ' + ', '.join(failed))
+          PYDIAG
+
       - name: Validate preview visual contracts
         shell: bash
         run: |
@@ -187,6 +228,9 @@ jobs:
               'News & Intelligence preview screen': 'AppTab.NEWS -> PreviewNewsScreen' in main,
               'single Settings preview screen': 'AppTab.SETTINGS -> PreviewSettingsScreen' in main,
               'System Test preview screen': 'AppTab.SYSTEM_TEST -> PreviewSystemTestScreen' in main,
+              'System segment navigation works': 'if (it == 1) onOpen(AppTab.SYSTEM_TEST)' in ui,
+              'full diagnostics export UI': 'Run & Save Full Diagnostics' in ui and 'Select Diagnostics Folder' in ui,
+              'hamburger quick navigation works': 'DropdownMenu(' in ui and 'Quick Navigation' in ui,
               'Active Positions preview screen': 'AppTab.POSITIONS -> PreviewPositionsScreen' in main,
               'Backup & Recovery preview screen': 'AppTab.BACKUP -> PreviewBackupRecoveryScreen' in main,
               'AI signal detail preview screen': 'AppTab.AI_SIGNAL_DETAIL -> PreviewAiSignalDetailScreen' in main,
@@ -309,8 +353,8 @@ jobs:
           from pathlib import Path
           import re
 
-          version_name = "4.0.2"
-          version_code = 107
+          version_name = "4.0.3"
+          version_code = 108
 
           gradle = Path("app/build.gradle.kts")
           text = gradle.read_text(encoding="utf-8")
@@ -330,7 +374,7 @@ jobs:
 
           main = Path("app/src/main/java/com/ksp/cryptobot/MainActivity.kt")
           if main.exists():
-              text = main.read_text(encoding="utf-8").replace("v4.0.0 CTS", "v4.0.2 CTS")
+              text = main.read_text(encoding="utf-8").replace("v4.0.0 CTS", "v4.0.3 CTS")
               main.write_text(text, encoding="utf-8")
 
           print(f"Canonical update identity set: {version_name} ({version_code})")
@@ -365,9 +409,9 @@ jobs:
           release = Path('app/src/main/java/com/ksp/cryptobot/release/V4ReleaseInfo.kt').read_text(encoding='utf-8')
           checks = {
               'applicationId com.ksp.cryptobot': 'applicationId = "com.ksp.cryptobot"' in gradle,
-              'versionName 4.0.2': 'versionName = "4.0.2"' in gradle,
-              'versionCode 107': 'versionCode = 107' in gradle,
-              'V4ReleaseInfo 4.0.2': 'VERSION_NAME = "4.0.2"' in release and 'VERSION_CODE = 107' in release,
+              'versionName 4.0.3': 'versionName = "4.0.3"' in gradle,
+              'versionCode 108': 'versionCode = 108' in gradle,
+              'V4ReleaseInfo 4.0.3': 'VERSION_NAME = "4.0.3"' in release and 'VERSION_CODE = 108' in release,
               'Room schema 11': 'version = 11' in db,
               'non-destructive Room': re.search(r'(?m)^\s*\.fallbackToDestructiveMigration\s*\(', db) is None,
               'research handoff': Path('app/src/main/java/com/ksp/cryptobot/research/ResearchHandoffEngine.kt').exists(),
@@ -457,8 +501,8 @@ jobs:
 
           PACKAGE_LINE="$(cat ci-output/apk-package.txt)"
           echo "$PACKAGE_LINE" | grep -q "name='com.ksp.cryptobot'" || { echo "Wrong applicationId in built APK" >&2; exit 1; }
-          echo "$PACKAGE_LINE" | grep -q "versionCode='107'" || { echo "Wrong versionCode in built APK" >&2; exit 1; }
-          echo "$PACKAGE_LINE" | grep -q "versionName='4.0.2'" || { echo "Wrong versionName in built APK" >&2; exit 1; }
+          echo "$PACKAGE_LINE" | grep -q "versionCode='108'" || { echo "Wrong versionCode in built APK" >&2; exit 1; }
+          echo "$PACKAGE_LINE" | grep -q "versionName='4.0.3'" || { echo "Wrong versionName in built APK" >&2; exit 1; }
 
           if [ "$CTS_BUILD_TYPE" = "debug" ]; then
             EXPECTED="$(echo "$CTS_DEBUG_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
@@ -491,7 +535,7 @@ jobs:
       - name: Upload canonical CTS update APK
         uses: actions/upload-artifact@v4
         with:
-          name: CryptoTradeStation-v4.0.2-${{ env.CTS_BUILD_TYPE }}-update-apk
+          name: CryptoTradeStation-v4.0.3-${{ env.CTS_BUILD_TYPE }}-update-apk
           path: ci-output/
           if-no-files-found: error
           retention-days: 30
@@ -502,7 +546,7 @@ jobs:
         run: |
           set +e
           mkdir -p ci-failure
-          cp migration.log diagnostics-fix.log integration-cleanup.log exchange-minimum-order-fix.log exact-preview-ui.log preview-visual-contracts.log integration-contracts.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
+          cp migration.log diagnostics-fix.log integration-cleanup.log exchange-minimum-order-fix.log exact-preview-ui.log system-diagnostics-ui.log preview-visual-contracts.log integration-contracts.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
           git diff --stat > ci-failure/git-diff-stat.txt 2>&1 || true
           git diff --name-only > ci-failure/git-diff-files.txt 2>&1 || true
           java -version > ci-failure/java-version.txt 2>&1 || true
