@@ -103,6 +103,40 @@ jobs:
           set -euo pipefail
           python3 .cts-v4-migration/apply_full_integration_cleanup.py "$GITHUB_WORKSPACE" | tee integration-cleanup.log
 
+      - name: Apply Kraken exchange minimum-order sizing fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .cts-v4-migration/apply_exchange_minimum_order_fix.py
+          python3 .cts-v4-migration/apply_exchange_minimum_order_fix.py "$GITHUB_WORKSPACE" | tee exchange-minimum-order-fix.log
+
+      - name: Validate exchange minimum-order contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYMIN'
+          from pathlib import Path
+          controller = Path('app/src/main/java/com/ksp/cryptobot/core/BotController.kt').read_text(encoding='utf-8')
+          policy = Path('app/src/main/java/com/ksp/cryptobot/execution/ExchangeMinimumOrderPolicy.kt').read_text(encoding='utf-8')
+          tests = Path('app/src/test/java/com/ksp/cryptobot/execution/ExchangeMinimumOrderPolicyTest.kt').read_text(encoding='utf-8')
+          checks = {
+              'Kraken ordermin policy': 'minOrderSize' in policy and 'requiredMinimumQuantity' in policy,
+              'Kraken costmin policy': 'minOrderCost' in policy and 'COST_MIN_BUFFER' in policy,
+              'pre-risk safe minimum sizing': 'maxSpendableForExchangeMinimum' in controller and 'allowUpsizeToMinimum = true' in controller,
+              'post-risk no-force-upsize': 'exchangeMinimumAfterRisk' in controller and 'allowUpsizeToMinimum = false' in controller,
+              'final pre-submit defense': 'finalExchangeMinimumCheck' in controller,
+              'minimum-failure Telegram spam guard': 'deterministicMinimumRejection' in controller,
+              'NEAR regression test': 'nearEurThreePointSixSixIsRaisedToFourWhenSafe' in tests,
+              'hard-cap regression test': 'exchangeMinimumDoesNotOverrideHardRiskCap' in tests,
+              'reserve regression test': 'exchangeMinimumDoesNotSpendReservedCash' in tests,
+          }
+          for name, ok in checks.items():
+              print(('PASS' if ok else 'FAIL') + ' | ' + name)
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Exchange minimum-order contract failure: ' + ', '.join(failed))
+          PYMIN
+
       - name: Preflight exact-preview migration
         shell: bash
         run: |
@@ -468,7 +502,7 @@ jobs:
         run: |
           set +e
           mkdir -p ci-failure
-          cp migration.log diagnostics-fix.log integration-cleanup.log exact-preview-ui.log preview-visual-contracts.log integration-contracts.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
+          cp migration.log diagnostics-fix.log integration-cleanup.log exchange-minimum-order-fix.log exact-preview-ui.log preview-visual-contracts.log integration-contracts.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
           git diff --stat > ci-failure/git-diff-stat.txt 2>&1 || true
           git diff --name-only > ci-failure/git-diff-files.txt 2>&1 || true
           java -version > ci-failure/java-version.txt 2>&1 || true
