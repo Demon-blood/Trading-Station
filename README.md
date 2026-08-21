@@ -1,46 +1,44 @@
-# Crypto TradeStation v4.0.3 — System Diagnostics + Navigation Fix
+# Crypto TradeStation v4.0.5 — GDELT Rate-Limit Fix
 
-This update fixes the dead **System** segment on Backup & Recovery and adds a real exportable diagnostics workflow.
+This is the complete current update pack.
 
-## System navigation
-- Backup & Recovery → **System** now opens **System Diagnostics**.
-- System Diagnostics → **Backup & Recovery** navigates back.
-- The previous hamburger Quick Navigation fix is included in the replacement exact-preview migration.
+## Root cause
 
-## Full App Diagnostics
-Open:
-**Settings → Backup & Recovery → System**
+Crypto TradeStation evaluates news for each symbol. The previous GDELT client had
+no request throttle and no cache, so one successful GDELT call could be followed by
+another symbol's GDELT request immediately.
 
-The new **Full App Diagnostics** card contains:
-- **Select Diagnostics Folder**
-- **Run & Save Full Diagnostics**
+GDELT's own 429 response asks clients to limit requests to one every five seconds.
 
-The folder picker behaves like Backup and keeps Android read/write permission for the selected folder.
+## Fix
 
-The saved report includes:
-- package/version/device identity
-- selected non-secret trading settings
-- complete system-verification output
-- portfolio snapshot
-- lifecycle/position snapshot
-- open orders
-- news provider health
-- recent trades
-- recent runtime/status log
+The GDELT client now uses:
 
-The exporter explicitly excludes/redacts:
-- exchange API keys/secrets
-- Telegram bot token
-- Discord token/webhook
-- news API keys
-- remote-command PIN
+- one actual GDELT request at most every **6 seconds globally**
+- a **15-minute per-symbol cache**
+- up to **1 hour stale-cache fallback** during transient provider trouble
+- a bounded **500-symbol cache**
+- **no sleep in the trading loop**
 
-## Repository changes
-Replace:
-- `.cts-v4-migration/apply_exact_preview_ui.py`
-- `.github/workflows/android-v4-build.yml`
+If the local GDELT request window is not open yet, CTS uses cached GDELT results when
+available or simply continues the current symbol without GDELT for that pass. RSS and
+other healthy providers continue normally.
 
-Add:
-- `.cts-v4-migration/apply_system_diagnostics_ui.py`
+This avoids turning a 16-30 symbol scan into a 1-3 minute blocking news wait.
 
-Canonical update identity: **v4.0.3 / versionCode 108**.
+## Included current fixes
+
+- diagnostics integration
+- full integration cleanup
+- Kraken minimum-order sizing
+- exact-preview UI + hamburger navigation
+- System Diagnostics + selectable directory
+- Backup/Diagnostics immediate selected-directory fix
+- GDELT request pacing/cache
+- canonical GitHub Actions workflow
+
+## Build identity
+
+- versionName: 4.0.5
+- versionCode: 110
+- applicationId: com.ksp.cryptobot
