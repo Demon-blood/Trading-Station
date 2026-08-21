@@ -444,24 +444,42 @@ internal fun shouldDeferSoftLifecycleExitForChurn(
             1
         )
 
-    entry_anchor = '''            val entry = prev?.entryPriceEur?.toBigDecimalOrNull()
+    # Entry-price truth has two legitimate pre-cleanup shapes. Milestone 4
+    # upgrades the original fallback chain so a PENDING_ENTRY adopts its first
+    # confirmed BUY fill. Preserve that behavior while adding reopened-position
+    # lifecycle truth. Do not fail merely because M4 already modernized this block.
+    legacy_entry_anchor = '''            val entry = prev?.entryPriceEur?.toBigDecimalOrNull()
                 ?: lastBuy?.priceEur?.toBigDecimalOrNull()
                 ?: current
 '''
-    if entry_anchor in text:
-        entry_repl = '''            val lastBuyPrice = lastBuy?.priceEur?.toBigDecimalOrNull()
-            val storedEntry = prev?.entryPriceEur?.toBigDecimalOrNull()
-            val latestBuyIsNewLifecycle = lastBuy != null && (prev == null || !prev.status.equals("OPEN", ignoreCase = true) || lastBuy.timestampEpochMs > prev.openedAtEpochMs)
+    m4_entry_anchor = '''            val previousEntry = prev?.entryPriceEur?.toBigDecimalOrNull()
+            val confirmedBuyEntry = lastBuy?.priceEur?.toBigDecimalOrNull()?.takeIf { it > BigDecimal.ZERO }
+            val entry = if (prev?.status.equals("PENDING_ENTRY", true) && confirmedBuyEntry != null) confirmedBuyEntry
+                else previousEntry ?: confirmedBuyEntry ?: current
+'''
+    entry_repl = '''            val previousEntry = prev?.entryPriceEur?.toBigDecimalOrNull()
+            val confirmedBuyEntry = lastBuy?.priceEur?.toBigDecimalOrNull()?.takeIf { it > BigDecimal.ZERO }
+            val latestBuyIsNewLifecycle = lastBuy != null && (
+                prev == null ||
+                    (!prev.status.equals("OPEN", ignoreCase = true) && !prev.status.equals("PENDING_ENTRY", ignoreCase = true)) ||
+                    lastBuy.timestampEpochMs > prev.openedAtEpochMs
+            )
             val entry = when {
-                latestBuyIsNewLifecycle && lastBuyPrice != null && lastBuyPrice > BigDecimal.ZERO -> lastBuyPrice
-                storedEntry != null && storedEntry > BigDecimal.ZERO -> storedEntry
-                lastBuyPrice != null && lastBuyPrice > BigDecimal.ZERO -> lastBuyPrice
+                prev?.status.equals("PENDING_ENTRY", true) && confirmedBuyEntry != null -> confirmedBuyEntry
+                latestBuyIsNewLifecycle && confirmedBuyEntry != null -> confirmedBuyEntry
+                previousEntry != null && previousEntry > BigDecimal.ZERO -> previousEntry
+                confirmedBuyEntry != null -> confirmedBuyEntry
                 else -> current
             }
 '''
-        text = text.replace(entry_anchor, entry_repl, 1)
-    elif "val latestBuyIsNewLifecycle" not in text:
-        fail("lifecycle entry-price anchor changed")
+    if "val latestBuyIsNewLifecycle" in text:
+        pass
+    elif m4_entry_anchor in text:
+        text = text.replace(m4_entry_anchor, entry_repl, 1)
+    elif legacy_entry_anchor in text:
+        text = text.replace(legacy_entry_anchor, entry_repl, 1)
+    else:
+        fail("lifecycle entry-price block is unknown after Milestone 6; refusing an unsafe rewrite")
 
     # Reconcile stale OPEN rows only after a successful balance read.
     if "Stale lifecycle position closed" not in text:

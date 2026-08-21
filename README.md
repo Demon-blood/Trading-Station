@@ -1,12 +1,33 @@
-# Crypto TradeStation v4.0.2 — Exact Preview UI Hotfix 1
+# Crypto TradeStation v4 — Full Integration Cleanup Hotfix 2
 
-Upload/replace only these two files in `Demon-blood/Trading-Station`:
+## Confirmed GitHub Actions failure
 
-1. `.github/workflows/android-v4-build.yml`
-2. `.cts-v4-migration/apply_exact_preview_ui.py`
+The Action stopped in `apply_full_integration_cleanup.py` with:
 
-Commit them to `main`. Do not rerun the old failed attempt; the new commit will start a fresh
-canonical build.
+`[CTS full integration cleanup] lifecycle entry-price anchor changed`
 
-This hotfix keeps the exact-preview redesign while preserving News provider health/cooldown
-wiring and aligns the canonical release identity to v4.0.2 / versionCode 107.
+## Root cause
+
+`apply_milestone6.py` re-applies the Milestone 4 lifecycle truth patches before this cleanup runs.
+Milestone 4 legitimately changes the old entry-price fallback block into a
+`previousEntry / confirmedBuyEntry / PENDING_ENTRY` block.
+
+The cleanup migration still expected the older pre-M4 text, so it aborted even though the
+lifecycle source was valid and newer.
+
+## Fix
+
+Replace only:
+
+`.cts-v4-migration/apply_full_integration_cleanup.py`
+
+The migration now accepts all three valid states:
+
+1. original legacy entry-price block;
+2. Milestone 4 pending-entry confirmed-fill block;
+3. already-upgraded cleanup block.
+
+It preserves the Milestone 4 `PENDING_ENTRY` confirmed-fill rule while also adding the
+reopened-position / latest-BUY lifecycle reset.
+
+No workflow or exact-preview UI file needs changing for this specific failure.
