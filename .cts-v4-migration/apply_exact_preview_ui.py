@@ -288,8 +288,11 @@ def patch_main_activity(repo: Path) -> None:
         path.write_text(text, encoding="utf-8")
         return
 
-    if "import androidx.compose.foundation.layout.weight" not in text:
-        text = text.replace("import androidx.compose.foundation.layout.width\n", "import androidx.compose.foundation.layout.width\nimport androidx.compose.foundation.layout.weight\n", 1)
+    # `Modifier.weight(...)` is a RowScope/ColumnScope member extension in Compose.
+    # Do not explicitly import androidx.compose.foundation.layout.weight: with the
+    # Compose version used by CTS that resolves to an internal parent-data symbol
+    # and causes compileDebugKotlin to fail.
+    text = text.replace("import androidx.compose.foundation.layout.weight\n", "")
 
     palette = {
         'private val SpaceBlack = Color(0xFF081326)': 'private val SpaceBlack = Color(0xFF0C1522)',
