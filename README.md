@@ -1,33 +1,30 @@
-# Crypto TradeStation v4 — Full Integration Cleanup Hotfix 2
+# Crypto TradeStation v4.0.2 — Exact Preview UI Hotfix 3
 
-## Confirmed GitHub Actions failure
+## Confirmed compile-stage defect
 
-The Action stopped in `apply_full_integration_cleanup.py` with:
+The generated `PreviewReplicaUi.kt` contained two Compose `Box(...)` calls without
+a content lambda:
 
-`[CTS full integration cleanup] lifecycle entry-price anchor changed`
+1. the small asset-allocation legend color marker;
+2. the selected segmented-tab underline.
 
-## Root cause
-
-`apply_milestone6.py` re-applies the Milestone 4 lifecycle truth patches before this cleanup runs.
-Milestone 4 legitimately changes the old entry-price fallback block into a
-`previousEntry / confirmedBuyEntry / PENDING_ENTRY` block.
-
-The cleanup migration still expected the older pre-M4 text, so it aborted even though the
-lifecycle source was valid and newer.
+Compose `Box` requires a content block, so both statements are Kotlin compile errors.
 
 ## Fix
 
+Both visual-only boxes now use an explicit empty content block:
+
+`Box(...) {}`
+
 Replace only:
 
-`.cts-v4-migration/apply_full_integration_cleanup.py`
+`.cts-v4-migration/apply_exact_preview_ui.py`
 
-The migration now accepts all three valid states:
+No workflow, diagnostics, or full-integration-cleanup file needs changing for this
+specific compile failure.
 
-1. original legacy entry-price block;
-2. Milestone 4 pending-entry confirmed-fill block;
-3. already-upgraded cleanup block.
-
-It preserves the Milestone 4 `PENDING_ENTRY` confirmed-fill rule while also adding the
-reopened-position / latest-BUY lifecycle reset.
-
-No workflow or exact-preview UI file needs changing for this specific failure.
+Validation performed:
+- migration Python syntax: PASS
+- generated PREVIEW_SOURCE extraction: PASS
+- both invalid Box statements removed: PASS
+- no remaining one-line `Box(...)` statement without a content block: PASS
