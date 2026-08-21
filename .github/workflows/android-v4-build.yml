@@ -33,8 +33,8 @@ env:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
   CTS_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'debug' }}
   CTS_RUN_TESTS: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.run_tests }}
-  CTS_VERSION_NAME: 4.0.6
-  CTS_VERSION_CODE: 111
+  CTS_VERSION_NAME: 4.0.7
+  CTS_VERSION_CODE: 112
   CTS_DEBUG_CERT_SHA256: b690958cb434544e7f8963ecc86559562a82155ffbd915cb2088c9333e06aa28
 
 jobs:
@@ -250,6 +250,44 @@ jobs:
           if failed:
               raise SystemExit('CloudShare wizard contract failed: ' + ', '.join(failed))
           PYCLOUD
+
+      - name: Apply true step-by-step CloudShare assistant
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .cts-v4-migration/apply_cloudshare_guided_assistant.py
+          python3 .cts-v4-migration/apply_cloudshare_guided_assistant.py "$GITHUB_WORKSPACE" | tee cloudshare-guided-assistant.log
+
+      - name: Validate step-by-step CloudShare assistant contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYGUIDE'
+          from pathlib import Path
+          root = Path('app/src/main/java/com/ksp/cryptobot')
+          screen = (root/'ui/CloudShareScreen.kt').read_text(encoding='utf-8')
+          provisioner = (root/'cloudshare/CloudShareProvisioner.kt').read_text(encoding='utf-8')
+          checks = {
+              'not a tabbed setup form': 'ScrollableTabRow' not in screen and 'CloudShareWizardPanel' not in screen,
+              'create steps': all(x in screen for x in ['CreateStep.WELCOME','CreateStep.TOKEN','CreateStep.ACCOUNT','CreateStep.REVIEW','CreateStep.PROVISIONING','CreateStep.COMPLETE']),
+              'step counter': 'Step $step of $total' in screen,
+              'Cloudflare token page helper': 'https://dash.cloudflare.com/profile/api-tokens' in screen,
+              'Cloudflare dashboard helper': 'https://dash.cloudflare.com/' in screen,
+              'token verification': 'verifyProvisioningToken' in screen and 'verifyProvisioningToken' in provisioner,
+              'permission verification': 'verifyProvisioningAccess' in screen and 'verifyProvisioningAccess' in provisioner,
+              'D1/R2/Workers checks': all(x in provisioner for x in ['D1 Write access','R2 Storage Write access','Workers Scripts Write access']),
+              'simple defaults + advanced names': 'Advanced Resource Names' in screen and 'You normally do not need to change these.' in screen,
+              'live provisioning progress': 'onProgress = { row -> checkRows = checkRows + row }' in screen,
+              'final test': 'Run Final CloudShare Test' in screen,
+              'join steps': all(x in screen for x in ['JoinStep.WORKER','JoinStep.INVITE','JoinStep.OPTIONS','JoinStep.COMPLETE']),
+              'Cloudflare token not persisted': 'saveCloudflare' not in screen and 'saveCloudflare' not in provisioner,
+          }
+          for name, ok in checks.items():
+              print(('PASS' if ok else 'FAIL') + ' | ' + name)
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('CloudShare guided assistant contract failed: ' + ', '.join(failed))
+          PYGUIDE
 
       - name: Validate System diagnostics contracts
         shell: bash

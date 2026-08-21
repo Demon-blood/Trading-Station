@@ -1,114 +1,34 @@
-# Crypto TradeStation v4.0.6 — Guided CloudShare Setup Wizard
+# Crypto TradeStation v4.0.7 — True Step-by-Step CloudShare Assistant
 
-This is the complete current update pack.
+This replaces the v4.0.6 tabbed CloudShare configuration screen with a real guided setup assistant.
 
-## CloudShare setup is now guided in-app
+## Create your own CloudShare
 
-Open:
-Settings → CloudShare
+The screen now walks through one task at a time:
 
-The screen now has:
-- Overview
-- Create New
-- Join Existing
-- Repair / Test
-- Manage
+1. Welcome / what will be created
+2. Create and verify a temporary Cloudflare API token
+3. Find the 32-character Cloudflare Account ID and verify D1/R2/Workers permissions
+4. Review simple defaults (resource names stay hidden under Advanced)
+5. Automatic provisioning with live per-component status
+6. Final CloudShare verification and Finish
 
-## Create New — automatic Cloudflare provisioning
+The assistant contains buttons to open the Cloudflare API Tokens page and Cloudflare dashboard, and it does not let setup advance until the relevant verification passes.
 
-The user supplies:
-1. Cloudflare Account ID
-2. a one-time restricted Cloudflare API token
+## Join existing
 
-The app then automatically:
+Join is also sequential: Worker URL → health check → invite → registration/auth verification → sync/backfill options → initial sync → complete.
 
-1. verifies the token can access the account D1 API;
-2. finds or creates the CloudShare D1 database;
-3. initializes the D1 schema;
-4. generates the first one-use registration invitation;
-5. finds or creates the R2 backup bucket;
-6. uploads the bundled CloudShare Worker;
-7. binds D1 to the Worker as `DB`;
-8. binds R2 as `BACKUPS`;
-9. generates the CloudShare owner/admin secret;
-10. enables the Worker on workers.dev;
-11. discovers/creates the account workers.dev subdomain;
-12. builds the final HTTPS Worker URL;
-13. tests `/v1/health`;
-14. stores the CloudShare owner token in encrypted Android storage;
-15. registers this Android device automatically;
-16. verifies client and intelligence endpoints;
-17. performs the first sync/backfill batch;
-18. enables CloudShare.
+## Security
 
-The Cloudflare provisioning token is never persisted by Crypto TradeStation and
-the UI clears it after each provisioning attempt.
+The temporary Cloudflare provisioning token remains only in Compose memory, is never written to app settings or diagnostics, and is cleared after provisioning. The generated CloudShare owner token continues to use encrypted app storage.
 
-Required Cloudflare token permissions:
-- D1 Write
-- Workers R2 Storage Write
-- Workers Scripts Write
+## Existing fixes retained
 
-EU D1/R2 jurisdiction is enabled by default but can be switched off in the wizard.
-
-## Join Existing
-
-The wizard walks through:
-- Worker URL
-- health test
-- invitation code
-- device registration
-- client/intelligence verification
-- sync interval
-- historical backfill
-- initial sync
-
-## Repair / Test
-
-Available actions:
-- full CloudShare health/auth/intelligence verification
-- force sync
-- upload full bootstrap archive
-- re-register this device with a new invitation
-- disconnect this device
-
-Disconnecting CloudShare does not stop local trading or local learning.
-
-## Manage
-
-Owner/admin tools include:
-- owner verification
-- create invitation
-- list invitations
-- list clients
-- forget owner token
-
-Existing lower-level client methods for revoke/enable/disable/rotate remain available
-for future dedicated management UI expansion.
-
-## Bundled backend
-
-The pack includes the CloudShare Worker and D1 schema under:
-
-`.cts-v4-migration/cloudshare_setup/`
-
-The build migration copies those assets into the Android application so the setup
-wizard can deploy the exact backend version expected by the Android CloudShare client.
-
-## Included current fixes
-
-- diagnostics integration
-- full integration/lifecycle cleanup
-- Kraken minimum-order sizing
-- exact-preview UI + hamburger Quick Navigation
-- System Diagnostics + selectable directory
-- Backup/Diagnostics selected-directory fix
-- GDELT global request pacing/cache
-- guided CloudShare setup/provisioning
-- canonical GitHub Actions workflow
+This full pack also retains the lifecycle/integration cleanup, Kraken minimum-order fix, exact-preview UI/navigation, System Diagnostics and directory fixes, GDELT rate-limit fix, CloudShare Worker/D1/R2 backend assets, and canonical GitHub Actions workflow.
 
 ## Build identity
 
-- versionName: 4.0.6
-- versionCode: 111
+- versionName: 4.0.7
+- versionCode: 112
 - applicationId: com.ksp.cryptobot
