@@ -52,3 +52,19 @@ The effective source is patched during the canonical build after the existing v4
 
 The migration scripts themselves pass Python syntax validation.
 The all-in-one archive is a build/install package; a successful Android Gradle build and GitHub Actions release gate are still the final authority for APK release readiness.
+
+
+## Dashboard information button fix
+
+The Dashboard top-right information icon is functional in this revision.
+
+It opens a `Dashboard Information` dialog explaining:
+- PAPER/LIVE mode and provider,
+- Portfolio Value,
+- the current `24H P/L` semantics (realized journal P/L over the last rolling 24 hours),
+- Invested and Available,
+- `24H Volume` semantics,
+- active positions,
+- Scan / Execute / Start / Stop / News controls.
+
+The accessibility description is also changed from the generic `Action` to `Dashboard information`.

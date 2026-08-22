@@ -25,7 +25,9 @@
     "strategy-promotion-gate",
     "cost-aware-risk-sizing",
     "handoff-backtest-adapters",
-    "hard-release-contracts"
+    "hard-release-contracts",
+    "dashboard-information-button-fix"
   ],
-  "generated": "2026-08-22"
+  "generated": "2026-08-22",
+  "revision": "r2-dashboard-info"
 }

@@ -675,6 +675,130 @@ def patch_professional_external(path: Path) -> None:
     write(path, text)
 
 
+
+def patch_dashboard_info(main_path: Path, preview_path: Path) -> None:
+    text = read(main_path)
+    marker = "CTS_DASHBOARD_INFO_BUTTON_FIX_20260822"
+    if marker not in text:
+        import_anchor = "import androidx.compose.material3.Button\n"
+        if "import androidx.compose.material3.AlertDialog\n" not in text:
+            if import_anchor not in text:
+                fail("Dashboard info fix: Material3 Button import anchor changed")
+            text = text.replace(
+                import_anchor,
+                "import androidx.compose.material3.AlertDialog\n" + import_anchor,
+                1
+            )
+
+        state_anchor = "    var settings by remember { mutableStateOf(store.load()) }\n"
+        if state_anchor not in text:
+            fail("Dashboard info fix: AdvancedBotApp settings-state anchor changed")
+        text = text.replace(
+            state_anchor,
+            state_anchor +
+            "    // CTS_DASHBOARD_INFO_BUTTON_FIX_20260822\n"
+            "    var dashboardInfoVisible by remember { mutableStateOf(false) }\n",
+            1
+        )
+
+        action_anchor = (
+            "                    when (currentTab) {\n"
+            "                        AppTab.PORTFOLIO -> {\n"
+        )
+        if action_anchor not in text:
+            fail("Dashboard info fix: PreviewAppTopBar onAction switch anchor changed")
+        text = text.replace(
+            action_anchor,
+            "                    when (currentTab) {\n"
+            "                        AppTab.DASHBOARD -> dashboardInfoVisible = true\n"
+            "                        AppTab.PORTFOLIO -> {\n",
+            1
+        )
+
+        dialog_anchor = (
+            "                }\n"
+            "            )\n"
+            "            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {\n"
+        )
+        if dialog_anchor not in text:
+            fail("Dashboard info fix: top-bar/body anchor changed")
+
+        dialog = r'''                }
+            )
+
+            if (dashboardInfoVisible) {
+                val dashboardTotal = portfolioSnapshot?.totalValueEur ?: BigDecimal.ZERO
+                val dashboardAvailable = portfolioSnapshot?.freeEur ?: BigDecimal.ZERO
+                val dashboardInvested = dashboardTotal.subtract(dashboardAvailable).max(BigDecimal.ZERO)
+                val dashboardPositions = lifecycleSnapshot?.positions.orEmpty()
+                    .count { it.quantity > BigDecimal.ZERO }
+                AlertDialog(
+                    onDismissRequest = { dashboardInfoVisible = false },
+                    title = { Text("Dashboard Information") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Mode: ${settings.mode} • Exchange: ${settings.exchangeProvider}")
+                            Text(
+                                "Portfolio Value: the current total account valuation reported by the selected provider. " +
+                                    "Current snapshot: €${dashboardTotal.setScale(2, RoundingMode.HALF_UP)}."
+                            )
+                            Text(
+                                "24H P/L: realized P/L recorded in the trade journal during the last rolling 24 hours. " +
+                                    "It is not the same as all-time P/L or the change from the original PAPER starting balance."
+                            )
+                            Text(
+                                "Invested: Portfolio Value minus currently available EUR. " +
+                                    "Current: €${dashboardInvested.setScale(2, RoundingMode.HALF_UP)}."
+                            )
+                            Text(
+                                "Available: free EUR reported by the portfolio snapshot. " +
+                                    "Current: €${dashboardAvailable.setScale(2, RoundingMode.HALF_UP)}."
+                            )
+                            Text(
+                                "24H Volume: the sum of trade notional recorded by CTS during the last rolling 24 hours; " +
+                                    "it is not Kraken market-wide volume."
+                            )
+                            Text("Active Positions: $dashboardPositions open position(s) in the latest lifecycle snapshot.")
+                            Text(
+                                "Scan refreshes analysis without forcing a trade. Execute runs the configured execution path. " +
+                                    "Start/Stop control the background bot, and News opens the news/intelligence area."
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = { dashboardInfoVisible = false }) {
+                            Text("Close")
+                        }
+                    }
+                )
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+'''
+        text = text.replace(dialog_anchor, dialog, 1)
+        write(main_path, text)
+
+    if preview_path.exists():
+        preview = read(preview_path)
+        old = 'Icon(actionIcon, contentDescription = "Action", tint = PreviewText, modifier = Modifier.size(21.dp))'
+        new = '''Icon(
+                        actionIcon,
+                        contentDescription = when (currentTab) {
+                            AppTab.DASHBOARD -> "Dashboard information"
+                            AppTab.PORTFOLIO, AppTab.POSITIONS, AppTab.ORDERS -> "Refresh"
+                            AppTab.SYSTEM_TEST -> "Run system test"
+                            else -> "Action"
+                        },
+                        tint = PreviewText,
+                        modifier = Modifier.size(21.dp)
+                    )'''
+        if old in preview:
+            preview = preview.replace(old, new, 1)
+            write(preview_path, preview)
+        elif "Dashboard information" not in preview:
+            fail("Dashboard info fix: PreviewReplicaUi action-icon anchor changed")
+
+
 def patch_workflow(path: Path) -> None:
     text = read(path)
     # Fix any remaining late identity regression.
@@ -735,6 +859,8 @@ def patch_workflow(path: Path) -> None:
           external=(root/'research/ExternalContextEngines.kt').read_text(encoding='utf-8')
           prof=(root/'research/ProfessionalExternalIntelligenceEngine.kt').read_text(encoding='utf-8')
           models=(root/'core/Models.kt').read_text(encoding='utf-8')
+          main=(root.parent/'MainActivity.kt').read_text(encoding='utf-8')
+          preview=(root.parent/'PreviewReplicaUi.kt').read_text(encoding='utf-8')
           strategy=(root/'strategy/MultiStrategyEngine.kt').read_text(encoding='utf-8')
           checks.update({
               'Turtle enum': 'CTS_TURTLE_SPOT_SAFE' in models,
@@ -754,6 +880,7 @@ def patch_workflow(path: Path) -> None:
               'central news coordinator': 'newsAcquisitionCoordinator.fetch' in controller,
               'provenance sidecar': 'signalProvenanceStore.record' in controller,
               'release identity 4.0.7': 'versionName = "4.0.7"' in Path('app/build.gradle.kts').read_text(encoding='utf-8'),
+              'dashboard info action wired': 'AppTab.DASHBOARD -> dashboardInfoVisible = true' in main and 'Dashboard Information' in main and 'Dashboard information' in preview,
           })
           # There may be exchange implementation placeOrder methods; only application orchestration paths are forbidden.
           direct=[]
@@ -793,6 +920,7 @@ def static_validate(repo: Path) -> None:
         "production exit safety": "EntryExitSafetyPolicy.evaluate" in read(root/"governance/ProductionIntelligenceEngine.kt"),
         "normalized reference": "MarketReferenceNormalizer.normalize" in read(root/"research/ExternalContextEngines.kt"),
         "external sanity": "INVALID_EXTERNAL_NUMBER" in read(root/"research/ProfessionalExternalIntelligenceEngine.kt"),
+        "dashboard info button": "AppTab.DASHBOARD -> dashboardInfoVisible = true" in read(root.parent/"MainActivity.kt") and "Dashboard Information" in read(root.parent/"MainActivity.kt"),
     }
     for name,ok in checks.items(): print(("PASS" if ok else "FAIL")+" | "+name)
     bad=[n for n,o in checks.items() if not o]
@@ -823,6 +951,10 @@ def main() -> None:
     patch_protective(root/"execution/ProtectiveStopManager.kt")
     patch_external_context(root/"research/ExternalContextEngines.kt")
     patch_professional_external(root/"research/ProfessionalExternalIntelligenceEngine.kt")
+    patch_dashboard_info(
+        root.parent/"MainActivity.kt",
+        root.parent/"PreviewReplicaUi.kt"
+    )
     static_validate(repo)
     print("[CTS full completion] PASS")
     print("  - source provenance registry + Turtle/KAK reference separation")
