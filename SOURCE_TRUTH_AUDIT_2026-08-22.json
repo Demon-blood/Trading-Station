@@ -1,0 +1,866 @@
+{
+  "generated_for": "Crypto TradeStation v4.0.7 research-truth implementation",
+  "authoritative_handoff_freeze": "2026-08-22",
+  "strategy_count": 37,
+  "context_resolved_count": 5,
+  "source_truth_complete_count": 5,
+  "policy": "Missing source context/rules remain unknown and fail closed for automatic influence/execution. No prior-package details are silently merged into the 2026-08-22 handoff.",
+  "strategies": [
+    {
+      "strategy_id": "brandt_classical_atr_breakout_2026",
+      "trader": "Peter Brandt",
+      "name": "Classical horizontal pattern + ATR breakout (2026-described example)",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY",
+        "DIRECT_INTERVIEW"
+      ],
+      "source_refs": [
+        "brandt_cwt_329",
+        "brandt_factor_chart_lab"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "brandt_3dtsr",
+      "trader": "Peter Brandt",
+      "name": "3-Day Trailing Stop Rule",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "brandt_3dtsr_pdf",
+        "brandt_factor_questions"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "brandt_sos_sow_hinge",
+      "trader": "Peter Brandt",
+      "name": "Sign of Strength / Sign of Weakness from hinge",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "brandt_adx_ma_anticipatory",
+      "trader": "Peter Brandt",
+      "name": "ADX compression + 18-DMA directional cross",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "brandt_breakout_retest",
+      "trader": "Peter Brandt",
+      "name": "Pattern boundary retest after breakout",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "brandt_secondary_breakout",
+      "trader": "Peter Brandt",
+      "name": "Secondary breakout / second attempt",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cryptocred_htf_structure_ltf_trigger",
+      "trader": "CryptoCred",
+      "name": "Top-down structure → lower-timeframe trigger",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "DIRECT_PUBLIC_ARTICLE"
+      ],
+      "source_refs": [
+        "cryptocred_market_structure",
+        "cryptocred_entry_triggers"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cryptocred_sr_flip_first_retest",
+      "trader": "CryptoCred",
+      "name": "Broken S/R → first opposite-side retest",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "PUBLIC_MIRROR"
+      ],
+      "source_refs": [
+        "cryptocred_horizontal_sr",
+        "cryptocred_retests"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cryptocred_rounded_retest",
+      "trader": "CryptoCred",
+      "name": "Rounded retest classification",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "PUBLIC_MIRROR"
+      ],
+      "source_refs": [
+        "cryptocred_retests"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cryptocred_pdh_pdl_bias",
+      "trader": "CryptoCred",
+      "name": "Previous-day high/low intraday bias",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_ARTICLE"
+      ],
+      "source_refs": [
+        "cryptocred_pdh_pdl"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cryptocred_fta_management",
+      "trader": "CryptoCred",
+      "name": "First Trouble Area (FTA) management model",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "PUBLIC_MIRROR"
+      ],
+      "source_refs": [
+        "cryptocred_fta"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cryptocred_pattern_failure",
+      "trader": "CryptoCred",
+      "name": "Pattern failure / failed breakout context",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "source_refs": [
+        "cryptocred_pattern_failure"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cryptocred_risk_sizing",
+      "trader": "CryptoCred",
+      "name": "Risk-defined position sizing",
+      "research_freeze": "2026-08-17",
+      "fidelity": "A",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "DIRECT_PUBLIC_ARTICLE"
+      ],
+      "source_refs": [
+        "cryptocred_risk_management"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "tcg_backburner_bullish",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "BackBurner bullish continuation formalization",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "tcg_backburner_indicator",
+        "tcg_scalein"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "BLOCKED_SOURCE_UNKNOWN",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "tcg_equilibrium_break",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Equilibrium tightening → breakout",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY_HOST"
+      ],
+      "source_refs": [
+        "tcg_equilibrium"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "tcg_inside_bar",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Inside bar compression",
+      "research_freeze": "2026-08-17",
+      "fidelity": "A",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY_HOST"
+      ],
+      "source_refs": [
+        "tcg_inside_bar"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "tcg_ema12_rider",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "EMA12 Rider — public-core formalization",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "tcg_ema_rider"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "BLOCKED_SOURCE_UNKNOWN",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "tcg_stair_step_formalization",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Stair Step — public-core formalization",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "tcg_stairstep"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "BLOCKED_SOURCE_UNKNOWN",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "tcg_relative_strength_filter",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Correlation / relative-strength filter",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY_HOST"
+      ],
+      "source_refs": [
+        "tcg_correlations"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "krown_public_trend_vol_momentum_framework",
+      "trader": "Eric Krown",
+      "name": "Trend + volatility + momentum framework",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "krown_ta101",
+        "krown_quant"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "krown_quant_validation_process",
+      "trader": "Eric Krown",
+      "name": "Quant validation / walk-forward process",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "krown_quant"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "krown_vmp_exact",
+      "trader": "Eric Krown",
+      "name": "Krown VMP exact",
+      "research_freeze": "2026-08-17",
+      "fidelity": "X",
+      "fidelity_label": null,
+      "provenance": [
+        "PROPRIETARY_UNKNOWN"
+      ],
+      "source_refs": [
+        "krown_quant"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "BLOCKED_SOURCE_UNKNOWN",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cowen_dynamic_dca_concept",
+      "trader": "Benjamin Cowen",
+      "name": "Dynamic DCA by risk band — conceptual",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "cowen_entry_exit",
+        "cowen_dynamic_dca"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "BLOCKED_SOURCE_UNKNOWN",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cowen_btc_dominance_regime",
+      "trader": "Benjamin Cowen",
+      "name": "BTC dominance regime filter",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "cowen_itc"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "cowen_price_risk_exact",
+      "trader": "Benjamin Cowen",
+      "name": "ITC Price Risk exact",
+      "research_freeze": "2026-08-17",
+      "fidelity": "X",
+      "fidelity_label": null,
+      "provenance": [
+        "PROPRIETARY_UNKNOWN"
+      ],
+      "source_refs": [
+        "cowen_itc"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "BLOCKED_SOURCE_UNKNOWN",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "loukas_four_year_cycle_regime",
+      "trader": "Bob Loukas",
+      "name": "Bitcoin ~4-year cycle regime",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "SECONDARY_REPORTED"
+      ],
+      "source_refs": [
+        "loukas_4y",
+        "loukas_current"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "loukas_60day_cycle_context",
+      "trader": "Bob Loukas",
+      "name": "~60-day tactical cycle context",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "source_refs": [
+        "loukas_cycles_trader"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "pizzino_swing_trade_plan",
+      "trader": "Jason Pizzino",
+      "name": "Swing trade plan — entry/stop/target framework",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "source_refs": [
+        "pizzino_swing"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "pizzino_cycle_structure_filter",
+      "trader": "Jason Pizzino",
+      "name": "Cycle + HH/HL structure filter",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "SECONDARY_REPORTED"
+      ],
+      "source_refs": [
+        "pizzino_channel"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "rastani_opening_gap_original",
+      "trader": "Alessio Rastani",
+      "name": "Opening-gap fill — original session-market example",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "rastani_opening_gap"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "rastani_elliott_wave_context",
+      "trader": "Alessio Rastani",
+      "name": "Elliott Wave contextual model",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "fidelity_label": null,
+      "provenance": [
+        "DIRECT_PRIMARY",
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "source_refs": [
+        "rastani_elliott"
+      ],
+      "live_truth_gate": "BLOCK_UNVERIFIED",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": false,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT",
+        "NO_TRADE_CONDITIONS"
+      ],
+      "implementation_behavior": "RESEARCH_ONLY__LATEST_HANDOFF_LACKS_STRUCTURED_USAGE_OR_NO_TRADE_CONTEXT",
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "strategy_id": "chris_dunn_1234_crypto_breakout",
+      "trader": "Chris Dunn",
+      "name": "1234 Crypto Breakout",
+      "research_freeze": "2026-08-22",
+      "fidelity": "B",
+      "fidelity_label": "SOURCE_FAITHFUL_WITH_DISCRETION",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "dunn_breakout_guide",
+        "dunn_trade_recap"
+      ],
+      "live_truth_gate": "BLOCK_UNTIL_APP_STOP/SIZING_FORMALIZATION_IS_VALIDATED_AND_LABELLED",
+      "structured_usage_context_resolved": true,
+      "structured_no_trade_conditions_resolved": true,
+      "source_truth_material_unknowns": [],
+      "implementation_behavior": "PAPER_FORMALIZATION_CANDIDATE__LIVE_BLOCKED_BY_HANDOFF",
+      "must_not_claim": "Do not claim historical ETH parameters are universal or Dunn's self-reported accuracy is independently audited."
+    },
+    {
+      "strategy_id": "josh_olszewicz_crypto_ichimoku_20_60_120_30_component",
+      "trader": "Josh Olszewicz",
+      "name": "Crypto Ichimoku 20/60/120/30 toolkit",
+      "research_freeze": "2026-08-22",
+      "fidelity": "B",
+      "fidelity_label": "SOURCE_FAITHFUL_WITH_DISCRETION",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "source_refs": [
+        "olszewicz_ichimoku_video"
+      ],
+      "live_truth_gate": "RESEARCH_ONLY_SPLIT_INTO_SOURCE_SPECIFIC_SUBSTRATEGIES_FIRST",
+      "structured_usage_context_resolved": true,
+      "structured_no_trade_conditions_resolved": true,
+      "source_truth_material_unknowns": [],
+      "implementation_behavior": "RESEARCH_CONTEXT_ONLY__NO_UNIVERSAL_ENTRY",
+      "must_not_claim": "20/60/120/30 settings alone are not a complete trading strategy."
+    },
+    {
+      "strategy_id": "josh_olszewicz_alligator_fractal_public_core",
+      "trader": "Josh Olszewicz",
+      "name": "Alligator + Fractal trend-following public core",
+      "research_freeze": "2026-08-22",
+      "fidelity": "C",
+      "fidelity_label": "FORMALIZED_FROM_PUBLIC_CORE",
+      "provenance": [
+        "DIRECT_INTERVIEW",
+        "SECONDARY_REPORTED_EXAMPLE"
+      ],
+      "source_refs": [
+        "olszewicz_set_interview"
+      ],
+      "live_truth_gate": "MISSING_PARAMETERS_NOT_IMPLEMENTED_EXACTLY",
+      "structured_usage_context_resolved": true,
+      "structured_no_trade_conditions_resolved": true,
+      "source_truth_material_unknowns": [],
+      "implementation_behavior": "BLOCKED_SOURCE_INSUFFICIENT__PARAMETERS_NOT_INVENTED",
+      "must_not_claim": "Do not call an independently selected Alligator configuration the exact GATOR strategy."
+    },
+    {
+      "strategy_id": "krown_lti_public_core_2026",
+      "trader": "Eric Krown",
+      "name": "Long Term Investor public-core convergence framework",
+      "research_freeze": "2026-08-22",
+      "fidelity": "C",
+      "fidelity_label": "FORMALIZED_FROM_PUBLIC_CORE",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "krown_lti"
+      ],
+      "live_truth_gate": "EXACT_PRESET_PROPRIETARY; INDEPENDENT_VARIANT_ONLY",
+      "structured_usage_context_resolved": true,
+      "structured_no_trade_conditions_resolved": true,
+      "source_truth_material_unknowns": [],
+      "implementation_behavior": "RESEARCH_CONTEXT_ONLY__PARTIAL_PUBLIC_CORE",
+      "must_not_claim": "Do not treat historical chart claims as audited results or guess the private BTC preset."
+    },
+    {
+      "strategy_id": "cowen_macro_regime_memo_2026",
+      "trader": "Benjamin Cowen",
+      "name": "2026 macro/crypto risk-regime memo framework",
+      "research_freeze": "2026-08-22",
+      "fidelity": "C",
+      "fidelity_label": "CONCEPT_INSPIRED",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "source_refs": [
+        "cowen_aug_2026",
+        "cowen_july_2026"
+      ],
+      "live_truth_gate": "INDEPENDENT_REGIME_MODEL_ONLY_UNLESS_PROPRIETARY_METRICS_LICENSED",
+      "structured_usage_context_resolved": true,
+      "structured_no_trade_conditions_resolved": true,
+      "source_truth_material_unknowns": [],
+      "implementation_behavior": "RESEARCH_CONTEXT_ONLY__MISSING_MACRO_FAILS_NEUTRAL",
+      "must_not_claim": "Do not use August 2026 scenario percentages as permanent probabilities or call an independent composite Cowen Price Risk."
+    },
+    {
+      "strategy_id": "pizzino_three_bar_confirmation_candidate_2026",
+      "trader": "Jason Pizzino",
+      "name": "Three-bar bull confirmation — candidate pending primary extraction",
+      "research_freeze": "2026-08-22",
+      "fidelity": "X",
+      "fidelity_label": "SECONDARY_CANDIDATE_REQUIRES_PRIMARY_EXTRACTION",
+      "provenance": [
+        "SECONDARY_REPORTED"
+      ],
+      "source_refs": [
+        "pizzino_3bar_secondary"
+      ],
+      "live_truth_gate": "BLOCK",
+      "structured_usage_context_resolved": false,
+      "structured_no_trade_conditions_resolved": true,
+      "source_truth_material_unknowns": [
+        "USAGE_CONTEXT"
+      ],
+      "implementation_behavior": "BLOCKED_SECONDARY_ONLY__PRIMARY_RULES_UNRESOLVED",
+      "must_not_claim": "Do not implement from a third-party summary."
+    }
+  ]
+}

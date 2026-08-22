@@ -1,0 +1,23 @@
+CTS v4.0.7 + 2026-08-22 Research Truth Implementation — Validation Report
+
+PASS | authoritative handoff strategy count = 37 unique IDs
+PASS | weekly additions = 6/6 present
+PASS | VIDEO_RESEARCH_INDEX.csv rows = 55
+PASS | strategy source references = all resolved through registry or 7 explicit legacy aliases
+PASS | Python syntax = apply_research_handoff_2026_08_22.py
+PASS | Python syntax = INSTALL_RESEARCH_TRUTH_2026_08_22.py
+PASS | research patcher synthetic current-anchor transformation
+PASS | research patcher second-run idempotency
+PASS | master installer second-run idempotency
+PASS | v4.0.7 release identity fixer included
+PASS | WeeklyResearchFormalizations.kt local kotlinc compile
+PASS | Dunn formalization self-test: high-volume breakout required
+PASS | Olszewicz Ichimoku self-test: context-only semantics retained
+PASS | Krown LTI self-test: partial-public-core semantics retained
+PASS | patched source-faithfulness model local kotlinc fixture compile
+PASS | strategy context/source-faithfulness gate installed before automatic influence/execution
+PASS | scalar/array source rule parser installed
+PASS | source-insufficient/proprietary strategies hard blocked
+PASS | generated Source Truth Audit contains all 37 strategies
+
+NOT RUN | Full Android Gradle/GitHub Actions build — connected GitHub integration is read-only and container has no repository/network checkout.

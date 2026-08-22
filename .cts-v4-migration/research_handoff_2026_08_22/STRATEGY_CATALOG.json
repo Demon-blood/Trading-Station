@@ -1,0 +1,1964 @@
+{
+  "schema_version": "1.2",
+  "research_freeze": "2026-08-22",
+  "strategies": [
+    {
+      "id": "brandt_classical_atr_breakout_2026",
+      "trader": "Peter Brandt",
+      "name": "Classical horizontal pattern + ATR breakout (2026-described example)",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY",
+        "DIRECT_INTERVIEW"
+      ],
+      "purpose": "Low-frequency breakout from mature horizontal/continuation structure.",
+      "timeframes": [
+        "weekly_identification",
+        "daily_timing"
+      ],
+      "setup_conditions": [
+        "recognizable horizontal/continuation pattern; current interview example ~8-14 weeks and compact range; optional ADX14 compression <~12; 18-day MA trend proxy"
+      ],
+      "entry_trigger": [
+        "resting stop beyond boundary by ~0.5 * ATR(30) in the described setup"
+      ],
+      "invalidation": [
+        "price falls back through structural invalidation / protective stop"
+      ],
+      "stop_logic": [
+        "protective order attached immediately; exact structural stop selection remains pattern/context dependent"
+      ],
+      "position_sizing": [
+        "risk-budget / entry-stop distance; cap by available spot cash; include costs"
+      ],
+      "trade_management": [
+        "avoid frequent discretionary intraday edits; advance risk only under defined tactic"
+      ],
+      "target_exit": [
+        "pattern measured target / management rules; preserve rare large winners"
+      ],
+      "required_data": [
+        "OHLCV weekly/daily",
+        "ATR30",
+        "ADX14",
+        "SMA_or_MA18",
+        "pattern boundaries"
+      ],
+      "belgium_kraken_spot_policy": "LONG_ONLY implementation; bearish version may exit/avoid; no derivatives/leverage by default.",
+      "empirical_status": "Creator has unusually strong historical performance evidence, but this specific formalization requires independent Kraken backtest.",
+      "discretionary_elements": "pattern recognition, exact boundary, target measurement, stop choice",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "brandt_cwt_329",
+        "brandt_factor_chart_lab"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "brandt_3dtsr",
+      "trader": "Peter Brandt",
+      "name": "3-Day Trailing Stop Rule",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Tactical exit/tightening; occasionally entry/add-on.",
+      "timeframes": [
+        "daily"
+      ],
+      "setup_conditions": [
+        "after directional move identify extreme day; subsequent close beyond that extreme day's opposite side creates setup"
+      ],
+      "entry_trigger": [
+        "penetration of setup-day extreme in reversal direction"
+      ],
+      "invalidation": [
+        "rule itself is a reversal/tactical trigger rather than a full thesis invalidation"
+      ],
+      "stop_logic": [
+        "use as tightened protective stop/exit once setup exists; preserve directional reversal logic"
+      ],
+      "position_sizing": [
+        "not a sizing system; inherits base trade risk"
+      ],
+      "trade_management": [
+        "Brandt has described using it to jam stops when a move is mature (~70% expected distance); historical use also for pyramid/add-on"
+      ],
+      "target_exit": [
+        "exit/stop trigger; if used as new position, requires independent base risk plan"
+      ],
+      "required_data": [
+        "daily OHLC",
+        "pattern target progress"
+      ],
+      "belgium_kraken_spot_policy": "Long-side stop management is spot-compatible. Short-entry use disabled by default.",
+      "empirical_status": "No standalone profitability established for the rule in this package.",
+      "discretionary_elements": "definition of current extreme, when to activate, target-progress estimate",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "brandt_3dtsr_pdf",
+        "brandt_factor_questions"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "brandt_sos_sow_hinge",
+      "trader": "Peter Brandt",
+      "name": "Sign of Strength / Sign of Weakness from hinge",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Anticipatory entry from highly compressed mature pattern.",
+      "timeframes": [
+        "daily"
+      ],
+      "setup_conditions": [
+        "very narrow hinge / very low volume at mature pattern boundary"
+      ],
+      "entry_trigger": [
+        "SOS: strong consecutive wide bullish bodies; SOW: strong consecutive wide bearish bodies"
+      ],
+      "invalidation": [
+        "failure back through hinge/structural level"
+      ],
+      "stop_logic": [
+        "structural; source notes higher risk and restricted sizing"
+      ],
+      "position_sizing": [
+        "smaller than normal due higher-risk anticipatory nature"
+      ],
+      "trade_management": [
+        "manage toward main pattern target; normal Factor risk tactics"
+      ],
+      "target_exit": [
+        "pattern target / protective stop"
+      ],
+      "required_data": [
+        "OHLCV",
+        "pattern boundary",
+        "volume"
+      ],
+      "belgium_kraken_spot_policy": "Implement bullish SOS only for new long; SOW can reduce/exit.",
+      "empirical_status": "Needs independent test.",
+      "discretionary_elements": "what qualifies as hinge, wide-body, volume threshold",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "brandt_adx_ma_anticipatory",
+      "trader": "Peter Brandt",
+      "name": "ADX compression + 18-DMA directional cross",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Anticipatory pattern entry before/around breakout.",
+      "timeframes": [
+        "daily"
+      ],
+      "setup_conditions": [
+        "mature pattern; ADX very low (historical Chart Lab example <12); 18-DMA trending expected direction"
+      ],
+      "entry_trigger": [
+        "price crosses 18-DMA in expected direction"
+      ],
+      "invalidation": [
+        "structural failure / protective stop"
+      ],
+      "stop_logic": [
+        "context dependent"
+      ],
+      "position_sizing": [
+        "normal risk cap or lower if anticipatory"
+      ],
+      "trade_management": [
+        "inherit Brandt risk-management tactics"
+      ],
+      "target_exit": [
+        "pattern target / stop"
+      ],
+      "required_data": [
+        "OHLC",
+        "ADX",
+        "MA18",
+        "pattern boundaries"
+      ],
+      "belgium_kraken_spot_policy": "Long-only bullish version.",
+      "empirical_status": "Needs independent validation; ADX threshold is a published tactic, not universal proof.",
+      "discretionary_elements": "mature-pattern judgment, MA slope threshold",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "brandt_breakout_retest",
+      "trader": "Peter Brandt",
+      "name": "Pattern boundary retest after breakout",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Enter after breakout by buying a retest rather than initial thrust.",
+      "timeframes": [
+        "daily"
+      ],
+      "setup_conditions": [
+        "qualified mature pattern; confirmed breakout"
+      ],
+      "entry_trigger": [
+        "historical Chart Lab tactic: retest order around boundary adjusted by ~0.5 ATR as described in source context"
+      ],
+      "invalidation": [
+        "retest fails and price returns decisively inside pattern"
+      ],
+      "stop_logic": [
+        "structural/retest failure"
+      ],
+      "position_sizing": [
+        "risk-budget sizing"
+      ],
+      "trade_management": [
+        "normal Factor management"
+      ],
+      "target_exit": [
+        "pattern target or protective stop"
+      ],
+      "required_data": [
+        "OHLC",
+        "ATR30",
+        "pattern boundaries"
+      ],
+      "belgium_kraken_spot_policy": "Long-only for entry.",
+      "empirical_status": "Needs independent validation.",
+      "discretionary_elements": "exact retest offset/direction, breakout qualification",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "brandt_secondary_breakout",
+      "trader": "Peter Brandt",
+      "name": "Secondary breakout / second attempt",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Allow a second breakout attempt after first failure without infinite re-entry.",
+      "timeframes": [
+        "daily"
+      ],
+      "setup_conditions": [
+        "qualified pattern; first breakout failed/stopped"
+      ],
+      "entry_trigger": [
+        "strong move back beyond boundary / beyond first breakout bar extreme as source examples permit"
+      ],
+      "invalidation": [
+        "second attempt fails"
+      ],
+      "stop_logic": [
+        "structural stop"
+      ],
+      "position_sizing": [
+        "risk separately; obey aggregate campaign risk"
+      ],
+      "trade_management": [
+        "maximum attempts must be versioned; public Chart Lab discusses willingness to try twice"
+      ],
+      "target_exit": [
+        "pattern target / stop"
+      ],
+      "required_data": [
+        "OHLC",
+        "pattern boundaries",
+        "trade history"
+      ],
+      "belgium_kraken_spot_policy": "Long-only new entries.",
+      "empirical_status": "Independent validation required.",
+      "discretionary_elements": "what qualifies as strong re-break",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "brandt_factor_chart_lab"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cryptocred_htf_structure_ltf_trigger",
+      "trader": "CryptoCred",
+      "name": "Top-down structure → lower-timeframe trigger",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "DIRECT_PUBLIC_ARTICLE"
+      ],
+      "purpose": "Align execution trigger with higher-timeframe directional structure.",
+      "timeframes": [
+        "higher_timeframe_context",
+        "lower_timeframe_execution"
+      ],
+      "setup_conditions": [
+        "establish HTF trend/range and key S/R; define thesis before looking for LTF trigger"
+      ],
+      "entry_trigger": [
+        "strategy-specific LTF confirmation at planned location"
+      ],
+      "invalidation": [
+        "HTF thesis invalidated, not merely tiny LTF noise"
+      ],
+      "stop_logic": [
+        "at technical invalidation; avoid moving to BE too early if normal retest expected"
+      ],
+      "position_sizing": [
+        "money willing to lose / stop distance, cost adjusted in app"
+      ],
+      "trade_management": [
+        "management timeframe should be appropriate to thesis; don't micromanage HTF idea on tiny TF"
+      ],
+      "target_exit": [
+        "FTA / planned structural target / invalidation"
+      ],
+      "required_data": [
+        "multi-timeframe OHLCV",
+        "S/R",
+        "market structure"
+      ],
+      "belgium_kraken_spot_policy": "Long-only new trades. Bearish context can inhibit/reduce longs.",
+      "empirical_status": "Strong process logic; no audited personal P&L; each trigger requires testing.",
+      "discretionary_elements": "S/R placement, trigger quality, timeframe mapping",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cryptocred_market_structure",
+        "cryptocred_entry_triggers"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cryptocred_sr_flip_first_retest",
+      "trader": "CryptoCred",
+      "name": "Broken S/R → first opposite-side retest",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "PUBLIC_MIRROR"
+      ],
+      "purpose": "Trade role reversal after a meaningful level breaks.",
+      "timeframes": [
+        "H1_or_D1_context",
+        "execution_lower_or_same"
+      ],
+      "setup_conditions": [
+        "key S/R identified; decisive break; preferably first meaningful opposite-side retest"
+      ],
+      "entry_trigger": [
+        "retest holds + chosen trigger confirms"
+      ],
+      "invalidation": [
+        "price accepts back through broken level / invalidates role reversal"
+      ],
+      "stop_logic": [
+        "beyond structural invalidation; not an arbitrary percentage"
+      ],
+      "position_sizing": [
+        "risk budget / effective per-unit loss"
+      ],
+      "trade_management": [
+        "use FTA and structure; don't overmanage"
+      ],
+      "target_exit": [
+        "nearest relevant opposing S/R / FTA"
+      ],
+      "required_data": [
+        "OHLCV",
+        "S/R levels",
+        "test counts"
+      ],
+      "belgium_kraken_spot_policy": "Long implementation: broken resistance becomes support. Reverse side is exit/avoid.",
+      "empirical_status": "Independent net-of-cost backtest required.",
+      "discretionary_elements": "level quality, decisive break, test classification",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cryptocred_horizontal_sr",
+        "cryptocred_retests"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cryptocred_rounded_retest",
+      "trader": "CryptoCred",
+      "name": "Rounded retest classification",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "PUBLIC_MIRROR"
+      ],
+      "purpose": "Prefer retest with time/space and HTF visibility over immediate micro retest.",
+      "timeframes": [
+        "multi"
+      ],
+      "setup_conditions": [
+        "breakout followed by meaningful separation/time before returning"
+      ],
+      "entry_trigger": [
+        "retest + confirmation"
+      ],
+      "invalidation": [
+        "failed role reversal"
+      ],
+      "stop_logic": [
+        "structural"
+      ],
+      "position_sizing": [
+        "risk-based"
+      ],
+      "trade_management": [
+        "contextual"
+      ],
+      "target_exit": [
+        "FTA/structural"
+      ],
+      "required_data": [
+        "OHLCV",
+        "elapsed bars",
+        "distance from level"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible.",
+      "empirical_status": "Classification itself does not prove edge.",
+      "discretionary_elements": "minimum time/distance not fixed publicly",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cryptocred_retests"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cryptocred_pdh_pdl_bias",
+      "trader": "CryptoCred",
+      "name": "Previous-day high/low intraday bias",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PUBLIC_ARTICLE"
+      ],
+      "purpose": "Use prior-day extremes as liquidity/reference within HTF context.",
+      "timeframes": [
+        "daily_context",
+        "intraday_execution"
+      ],
+      "setup_conditions": [
+        "PDH/PDL overlaps or interacts with Daily/HTF S/R and dominant structure"
+      ],
+      "entry_trigger": [
+        "long example: price trades below PDL then shows strength/impulse recovery; bearish reverse above PDH"
+      ],
+      "invalidation": [
+        "failure to reclaim / HTF thesis invalidates"
+      ],
+      "stop_logic": [
+        "structural below/above reclaim structure"
+      ],
+      "position_sizing": [
+        "risk-based; app cost adjusted"
+      ],
+      "trade_management": [
+        "use daily open / intraday trouble areas only as context"
+      ],
+      "target_exit": [
+        "structural FTA"
+      ],
+      "required_data": [
+        "daily OHLC",
+        "intraday OHLCV",
+        "PDH",
+        "PDL",
+        "HTF S/R"
+      ],
+      "belgium_kraken_spot_policy": "Implement bullish reclaim as long. Bearish rejection = reduce/avoid.",
+      "empirical_status": "Needs independent validation.",
+      "discretionary_elements": "strength/weakness/impulse definition",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cryptocred_pdh_pdl"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cryptocred_fta_management",
+      "trader": "CryptoCred",
+      "name": "First Trouble Area (FTA) management model",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "PUBLIC_MIRROR"
+      ],
+      "purpose": "Separate nearest obstacle for profit, management and entry confirmation.",
+      "timeframes": [
+        "thesis_tf",
+        "management_tf"
+      ],
+      "setup_conditions": [
+        "active trade with mapped opposing S/R"
+      ],
+      "entry_trigger": [
+        "not an entry strategy by itself"
+      ],
+      "invalidation": [
+        "thesis invalidation unchanged"
+      ],
+      "stop_logic": [
+        "base strategy stop"
+      ],
+      "position_sizing": [
+        "inherits base strategy"
+      ],
+      "trade_management": [
+        "map fta_target, fta_management, fta_entry separately; do not collapse"
+      ],
+      "target_exit": [
+        "partial/full decision at relevant FTA according to parent strategy"
+      ],
+      "required_data": [
+        "S/R maps multi-timeframe"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible.",
+      "empirical_status": "Risk-management framework, not independently proven alpha.",
+      "discretionary_elements": "which FTA to act on; partial sizing",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cryptocred_fta"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cryptocred_pattern_failure",
+      "trader": "CryptoCred",
+      "name": "Pattern failure / failed breakout context",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "purpose": "Use failed expected continuation as information for reversal/opposite bias.",
+      "timeframes": [
+        "multi"
+      ],
+      "setup_conditions": [
+        "recognized pattern/breakout thesis exists"
+      ],
+      "entry_trigger": [
+        "expected continuation fails and price reclaims/loses key structure"
+      ],
+      "invalidation": [
+        "reversal thesis fails back through failure point"
+      ],
+      "stop_logic": [
+        "structural"
+      ],
+      "position_sizing": [
+        "risk based"
+      ],
+      "trade_management": [
+        "respect HTF context"
+      ],
+      "target_exit": [
+        "next structural level"
+      ],
+      "required_data": [
+        "OHLCV",
+        "pattern boundaries"
+      ],
+      "belgium_kraken_spot_policy": "Bearish failures can exit longs; bullish failures can create long candidates.",
+      "empirical_status": "Needs independent validation.",
+      "discretionary_elements": "pattern definition, failure acceptance",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cryptocred_pattern_failure"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cryptocred_risk_sizing",
+      "trader": "CryptoCred",
+      "name": "Risk-defined position sizing",
+      "research_freeze": "2026-08-17",
+      "fidelity": "A",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "DIRECT_PUBLIC_ARTICLE"
+      ],
+      "purpose": "Calculate size from planned loss, not arbitrary allocation.",
+      "timeframes": [
+        "all"
+      ],
+      "setup_conditions": [
+        "valid setup with entry and stop"
+      ],
+      "entry_trigger": [
+        "n/a"
+      ],
+      "invalidation": [
+        "stop reached"
+      ],
+      "stop_logic": [
+        "technical stop"
+      ],
+      "position_sizing": [
+        "base_qty = risk_budget_quote / abs(entry-stop), then adjust for fees/slippage and cash cap"
+      ],
+      "trade_management": [
+        "n/a"
+      ],
+      "target_exit": [
+        "n/a"
+      ],
+      "required_data": [
+        "entry",
+        "stop",
+        "equity",
+        "fees",
+        "slippage"
+      ],
+      "belgium_kraken_spot_policy": "Core spot risk function.",
+      "empirical_status": "Risk control, not alpha. Formula is mechanically sound; profitability depends on strategy.",
+      "discretionary_elements": "",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cryptocred_risk_management"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "tcg_backburner_bullish",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "BackBurner bullish continuation formalization",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Buy first lower-timeframe oversold countertrend reaction inside larger bullish trend.",
+      "timeframes": [
+        "5m_to_1h",
+        "1h_to_1d",
+        "other_mapping_experimental"
+      ],
+      "setup_conditions": [
+        "significant bullish larger-TF move/trend; wait for first meaningful lower-TF oversold/countertrend pullback"
+      ],
+      "entry_trigger": [
+        "oversold extreme + evidence higher-TF trend remains intact; exact paid-indicator trigger unavailable"
+      ],
+      "invalidation": [
+        "larger-TF higher-low thesis fails"
+      ],
+      "stop_logic": [
+        "below planned higher-low/structural invalidation"
+      ],
+      "position_sizing": [
+        "risk-based; tiering optional but total campaign risk fixed"
+      ],
+      "trade_management": [
+        "public scaling article: add only while RSI remains extreme/more extreme; after bounce, no further scaling under that setup"
+      ],
+      "target_exit": [
+        "larger-TF continuation target / structure"
+      ],
+      "required_data": [
+        "OHLCV multi-TF",
+        "RSI",
+        "trend state",
+        "volatility"
+      ],
+      "belgium_kraken_spot_policy": "Long-only variant is directly suitable conceptually; must pass Kraken cost test.",
+      "empirical_status": "Underlying concept public; proprietary indicator formula unknown; no audited P&L.",
+      "discretionary_elements": "significant move, first condition, exact RSI/volatility thresholds",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "tcg_backburner_indicator",
+        "tcg_scalein"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "tcg_equilibrium_break",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Equilibrium tightening → breakout",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY_HOST"
+      ],
+      "purpose": "Trade/monitor volatility compression formed by lower highs and higher lows.",
+      "timeframes": [
+        "any"
+      ],
+      "setup_conditions": [
+        "series of lower highs and higher lows / tightening range"
+      ],
+      "entry_trigger": [
+        "break of defined equilibrium boundary with chosen confirmation"
+      ],
+      "invalidation": [
+        "breakout failure back through structure"
+      ],
+      "stop_logic": [
+        "opposite equilibrium boundary or tighter structural stop per version"
+      ],
+      "position_sizing": [
+        "risk based"
+      ],
+      "trade_management": [
+        "optionally require retest/volume; must be explicitly versioned"
+      ],
+      "target_exit": [
+        "measured/structural target"
+      ],
+      "required_data": [
+        "OHLCV",
+        "swing pivots",
+        "optional volume"
+      ],
+      "belgium_kraken_spot_policy": "Long breakout only for new live spot trade.",
+      "empirical_status": "Common TA pattern; creator-specific profitability unverified.",
+      "discretionary_elements": "pivot algorithm, confirmation",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "tcg_equilibrium"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "tcg_inside_bar",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Inside bar compression",
+      "research_freeze": "2026-08-17",
+      "fidelity": "A",
+      "provenance": [
+        "DIRECT_PRIMARY_HOST"
+      ],
+      "purpose": "Detect a mother-bar-contained range as compression information.",
+      "timeframes": [
+        "any"
+      ],
+      "setup_conditions": [
+        "bar.high <= mother.high AND bar.low >= mother.low (equality policy configurable)"
+      ],
+      "entry_trigger": [
+        "break of mother/inside range only if parent strategy permits"
+      ],
+      "invalidation": [
+        "opposite break / false break"
+      ],
+      "stop_logic": [
+        "parent strategy defined"
+      ],
+      "position_sizing": [
+        "parent strategy defined"
+      ],
+      "trade_management": [
+        "do not equate detection with automatic trade"
+      ],
+      "target_exit": [
+        "parent strategy target"
+      ],
+      "required_data": [
+        "OHLCV"
+      ],
+      "belgium_kraken_spot_policy": "Long-side breakout supported; bearish break can exit/avoid.",
+      "empirical_status": "Pattern detection exact; trading edge not established by detection alone.",
+      "discretionary_elements": "mother-bar chain policy",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "tcg_inside_bar"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "tcg_ema12_rider",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "EMA12 Rider — public-core formalization",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Enter trending move on structured interaction with EMA12 rather than chase initial breakout.",
+      "timeframes": [
+        "multi"
+      ],
+      "setup_conditions": [
+        "established trend; price interacts/pulls toward EMA12"
+      ],
+      "entry_trigger": [
+        "full gated entry rules unavailable; independent trigger must be explicitly named"
+      ],
+      "invalidation": [
+        "trend/EMA structure failure according to formalized version"
+      ],
+      "stop_logic": [
+        "formalized structural stop"
+      ],
+      "position_sizing": [
+        "risk-based"
+      ],
+      "trade_management": [
+        "EMA may guide staying with momentum; exact exit specifics unavailable publicly"
+      ],
+      "target_exit": [
+        "formalized structure/exit"
+      ],
+      "required_data": [
+        "OHLCV",
+        "EMA12"
+      ],
+      "belgium_kraken_spot_policy": "Spot long only.",
+      "empirical_status": "Exact current guide not fully public. Do not claim exact TCG EMA Rider.",
+      "discretionary_elements": "entry timeframe, touch/close rules, exit",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "tcg_ema_rider"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "tcg_stair_step_formalization",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Stair Step — public-core formalization",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Countertrend reversal/location with a tight stop.",
+      "timeframes": [
+        "any"
+      ],
+      "setup_conditions": [
+        "countertrend stair-step structure; exact gated definition unavailable in source set"
+      ],
+      "entry_trigger": [
+        "formalized trigger required"
+      ],
+      "invalidation": [
+        "tight structural failure point"
+      ],
+      "stop_logic": [
+        "tight structure-based stop"
+      ],
+      "position_sizing": [
+        "risk-based"
+      ],
+      "trade_management": [
+        "experimental"
+      ],
+      "target_exit": [
+        "experimental"
+      ],
+      "required_data": [
+        "OHLCV",
+        "swing pivots"
+      ],
+      "belgium_kraken_spot_policy": "Long-only bullish reversal variant.",
+      "empirical_status": "Exact full method unavailable publicly; research only until authorized guide supplied.",
+      "discretionary_elements": "core pattern algorithm",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "tcg_stairstep"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "tcg_relative_strength_filter",
+      "trader": "Dan McDermitt / The Chart Guys",
+      "name": "Correlation / relative-strength filter",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY_HOST"
+      ],
+      "purpose": "Choose stronger long candidate relative to correlated benchmark/peer.",
+      "timeframes": [
+        "multi"
+      ],
+      "setup_conditions": [
+        "candidate and benchmark have meaningful recent correlation/context"
+      ],
+      "entry_trigger": [
+        "parent strategy triggers on candidate; prefer positive relative strength"
+      ],
+      "invalidation": [
+        "parent strategy invalidation"
+      ],
+      "stop_logic": [
+        "parent strategy"
+      ],
+      "position_sizing": [
+        "parent strategy"
+      ],
+      "trade_management": [
+        "filter only"
+      ],
+      "target_exit": [
+        "parent strategy"
+      ],
+      "required_data": [
+        "OHLCV candidate+benchmark",
+        "returns",
+        "correlation"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible; relative weakness = avoid/reduce, not short by default.",
+      "empirical_status": "Relative strength/momentum has broader research support, but exact TCG use still needs testing.",
+      "discretionary_elements": "correlation window, relative-strength metric",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "tcg_correlations"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "krown_public_trend_vol_momentum_framework",
+      "trader": "Eric Krown",
+      "name": "Trend + volatility + momentum framework",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Build confluence from independent market-state dimensions.",
+      "timeframes": [
+        "multi"
+      ],
+      "setup_conditions": [
+        "trend state + volatility state + momentum state"
+      ],
+      "entry_trigger": [
+        "strategy-specific confluence trigger"
+      ],
+      "invalidation": [
+        "strategy-specific"
+      ],
+      "stop_logic": [
+        "strategy-specific"
+      ],
+      "position_sizing": [
+        "risk-defined"
+      ],
+      "trade_management": [
+        "strategy-specific"
+      ],
+      "target_exit": [
+        "strategy-specific"
+      ],
+      "required_data": [
+        "OHLCV",
+        "MA",
+        "RSI",
+        "volatility measure",
+        "momentum"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible when long-only.",
+      "empirical_status": "Architecture is public; exact profitable template not established.",
+      "discretionary_elements": "weights, thresholds, exact indicators",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "krown_ta101",
+        "krown_quant"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "krown_quant_validation_process",
+      "trader": "Eric Krown",
+      "name": "Quant validation / walk-forward process",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Validate rule sets across test periods and monitor strategy shelf-life.",
+      "timeframes": [
+        "research"
+      ],
+      "setup_conditions": [
+        "defined deterministic strategy"
+      ],
+      "entry_trigger": [
+        "n/a"
+      ],
+      "invalidation": [
+        "n/a"
+      ],
+      "stop_logic": [
+        "n/a"
+      ],
+      "position_sizing": [
+        "n/a"
+      ],
+      "trade_management": [
+        "minimum sample/testing period; walk-forward; sensitivity; shelf-life monitoring"
+      ],
+      "target_exit": [
+        "promotion/rejection decision"
+      ],
+      "required_data": [
+        "historical OHLCV",
+        "fees",
+        "slippage",
+        "parameter grid"
+      ],
+      "belgium_kraken_spot_policy": "Mandatory research process, not live signal.",
+      "empirical_status": "Strong methodological value; validation cannot guarantee future performance.",
+      "discretionary_elements": "exact proprietary curriculum thresholds not public",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "krown_quant"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "krown_vmp_exact",
+      "trader": "Eric Krown",
+      "name": "Krown VMP exact",
+      "research_freeze": "2026-08-17",
+      "fidelity": "X",
+      "provenance": [
+        "PROPRIETARY_UNKNOWN"
+      ],
+      "purpose": "Proprietary volatility/momentum/statistical oscillator.",
+      "timeframes": [
+        "unknown/private"
+      ],
+      "setup_conditions": [
+        "not publicly disclosed in sufficient detail"
+      ],
+      "entry_trigger": [
+        "DO NOT IMPLEMENT AS EXACT"
+      ],
+      "invalidation": [
+        "unknown"
+      ],
+      "stop_logic": [
+        "unknown"
+      ],
+      "position_sizing": [
+        "unknown"
+      ],
+      "trade_management": [
+        "unknown"
+      ],
+      "target_exit": [
+        "unknown"
+      ],
+      "required_data": [
+        "unknown/private formula"
+      ],
+      "belgium_kraken_spot_policy": "Do not fabricate.",
+      "empirical_status": "No exact public formula verified.",
+      "discretionary_elements": "entire exact formula/settings",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "krown_quant"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cowen_dynamic_dca_concept",
+      "trader": "Benjamin Cowen",
+      "name": "Dynamic DCA by risk band — conceptual",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Vary scheduled allocation with broad risk state.",
+      "timeframes": [
+        "daily_to_monthly"
+      ],
+      "setup_conditions": [
+        "bounded risk state available"
+      ],
+      "entry_trigger": [
+        "low risk => larger scheduled buy; higher risk => smaller/no buy; high risk may support scaling out per user plan"
+      ],
+      "invalidation": [
+        "not a stop-based trading system"
+      ],
+      "stop_logic": [
+        "portfolio policy, not fixed trade stop"
+      ],
+      "position_sizing": [
+        "allocation schedule constrained by cash/min order/cost"
+      ],
+      "trade_management": [
+        "periodically update risk state; avoid emotional override"
+      ],
+      "target_exit": [
+        "scale-out policy tied to independently defined risk bands"
+      ],
+      "required_data": [
+        "price",
+        "chosen risk-model features",
+        "cash"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible.",
+      "empirical_status": "Concept public; Cowen exact current risk metric proprietary. Independent model required.",
+      "discretionary_elements": "exact risk formula and band allocation mapping",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "cowen_entry_exit",
+        "cowen_dynamic_dca"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cowen_btc_dominance_regime",
+      "trader": "Benjamin Cowen",
+      "name": "BTC dominance regime filter",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Use BTC market-cap dominance trend/state to alter BTC vs alt exposure.",
+      "timeframes": [
+        "daily_to_weekly"
+      ],
+      "setup_conditions": [
+        "compute/source BTC dominance; identify trend/regime"
+      ],
+      "entry_trigger": [
+        "filter parent strategies rather than direct entry"
+      ],
+      "invalidation": [
+        "regime changes"
+      ],
+      "stop_logic": [
+        "parent strategy"
+      ],
+      "position_sizing": [
+        "portfolio allocation caps"
+      ],
+      "trade_management": [
+        "favor BTC strategies when BTC.D rising if formalized/tested; alt risk weighting changes"
+      ],
+      "target_exit": [
+        "parent strategy"
+      ],
+      "required_data": [
+        "BTC market cap",
+        "total crypto market cap",
+        "OHLCV"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible. Only trade Kraken-available assets.",
+      "empirical_status": "BTC dominance is observable; predictive rule needs independent validation.",
+      "discretionary_elements": "trend window, thresholds",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "cowen_itc"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "cowen_price_risk_exact",
+      "trader": "Benjamin Cowen",
+      "name": "ITC Price Risk exact",
+      "research_freeze": "2026-08-17",
+      "fidelity": "X",
+      "provenance": [
+        "PROPRIETARY_UNKNOWN"
+      ],
+      "purpose": "ITC proprietary risk analysis.",
+      "timeframes": [
+        "unknown"
+      ],
+      "setup_conditions": [
+        "private/current formula not established"
+      ],
+      "entry_trigger": [
+        "DO NOT IMPLEMENT AS EXACT"
+      ],
+      "invalidation": [
+        "unknown"
+      ],
+      "stop_logic": [
+        "unknown"
+      ],
+      "position_sizing": [
+        "unknown"
+      ],
+      "trade_management": [
+        "unknown"
+      ],
+      "target_exit": [
+        "unknown"
+      ],
+      "required_data": [
+        "private features/weights"
+      ],
+      "belgium_kraken_spot_policy": "Do not fabricate.",
+      "empirical_status": "No exact public current formula verified.",
+      "discretionary_elements": "formula, weights, thresholds",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "cowen_itc"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "loukas_four_year_cycle_regime",
+      "trader": "Bob Loukas",
+      "name": "Bitcoin ~4-year cycle regime",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "SECONDARY_REPORTED"
+      ],
+      "purpose": "Slow allocation/regime framework.",
+      "timeframes": [
+        "weekly_to_monthly"
+      ],
+      "setup_conditions": [
+        "locate market within a versioned cycle window/model"
+      ],
+      "entry_trigger": [
+        "adjust allocation aggressiveness; not direct tick entry"
+      ],
+      "invalidation": [
+        "cycle thesis changes / model window passes"
+      ],
+      "stop_logic": [
+        "portfolio risk policy"
+      ],
+      "position_sizing": [
+        "allocation/cash reserve"
+      ],
+      "trade_management": [
+        "combine with shorter cycle/price confirmation"
+      ],
+      "target_exit": [
+        "scale allocation according to versioned plan"
+      ],
+      "required_data": [
+        "BTC OHLC long history",
+        "cycle dates",
+        "optional long MA"
+      ],
+      "belgium_kraken_spot_policy": "Spot BTC allocation compatible.",
+      "empirical_status": "Historical calls exist; no guarantee cycle persists; halving/cycle behavior can structurally change.",
+      "discretionary_elements": "cycle anchor, window width, exact model version",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "loukas_4y",
+        "loukas_current"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "loukas_60day_cycle_context",
+      "trader": "Bob Loukas",
+      "name": "~60-day tactical cycle context",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "purpose": "Shorter-cycle timing within larger position framework.",
+      "timeframes": [
+        "daily"
+      ],
+      "setup_conditions": [
+        "identify cycle low/high windows according to Loukas framework"
+      ],
+      "entry_trigger": [
+        "parent strategy confirmation"
+      ],
+      "invalidation": [
+        "cycle count invalidates"
+      ],
+      "stop_logic": [
+        "parent strategy"
+      ],
+      "position_sizing": [
+        "parent strategy"
+      ],
+      "trade_management": [
+        "context only"
+      ],
+      "target_exit": [
+        "context only"
+      ],
+      "required_data": [
+        "BTC OHLC"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible as filter.",
+      "empirical_status": "Needs independent formalization and validation.",
+      "discretionary_elements": "cycle segmentation/translation exact rules",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "loukas_cycles_trader"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "pizzino_swing_trade_plan",
+      "trader": "Jason Pizzino",
+      "name": "Swing trade plan — entry/stop/target framework",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "purpose": "Plan a swing with technical entry, invalidation and profit target.",
+      "timeframes": [
+        "swing"
+      ],
+      "setup_conditions": [
+        "market structure/cycle supports thesis"
+      ],
+      "entry_trigger": [
+        "formalized TA trigger"
+      ],
+      "invalidation": [
+        "planned stop invalidated"
+      ],
+      "stop_logic": [
+        "technical stop"
+      ],
+      "position_sizing": [
+        "risk based"
+      ],
+      "trade_management": [
+        "follow trading plan; avoid emotional exact-bottom chasing"
+      ],
+      "target_exit": [
+        "planned target / structure"
+      ],
+      "required_data": [
+        "OHLCV",
+        "market structure"
+      ],
+      "belgium_kraken_spot_policy": "Spot long compatible.",
+      "empirical_status": "Public video supports process but not enough exact thresholds for one canonical algorithm.",
+      "discretionary_elements": "indicator/entry specifics",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "pizzino_swing"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "pizzino_cycle_structure_filter",
+      "trader": "Jason Pizzino",
+      "name": "Cycle + HH/HL structure filter",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO",
+        "SECONDARY_REPORTED"
+      ],
+      "purpose": "Prefer trades aligned with higher-timeframe bullish structure/cycle.",
+      "timeframes": [
+        "daily_to_weekly"
+      ],
+      "setup_conditions": [
+        "higher highs/higher lows and broader cycle confirmation"
+      ],
+      "entry_trigger": [
+        "filter only"
+      ],
+      "invalidation": [
+        "structure reverses"
+      ],
+      "stop_logic": [
+        "parent"
+      ],
+      "position_sizing": [
+        "parent"
+      ],
+      "trade_management": [
+        "filter"
+      ],
+      "target_exit": [
+        "parent"
+      ],
+      "required_data": [
+        "OHLCV",
+        "swing pivots"
+      ],
+      "belgium_kraken_spot_policy": "Spot compatible.",
+      "empirical_status": "Concept common; exact Pizzino predictive edge unverified.",
+      "discretionary_elements": "cycle timing and confirmation definitions",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "pizzino_channel"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "rastani_opening_gap_original",
+      "trader": "Alessio Rastani",
+      "name": "Opening-gap fill — original session-market example",
+      "research_freeze": "2026-08-17",
+      "fidelity": "B",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Trade session opening gap toward previous session close.",
+      "timeframes": [
+        "2m",
+        "5m"
+      ],
+      "setup_conditions": [
+        "session market; previous close and current open create a gap; sufficient room/context"
+      ],
+      "entry_trigger": [
+        "trade toward previous close under strategy conditions"
+      ],
+      "invalidation": [
+        "gap-fill thesis fails / strategy stop"
+      ],
+      "stop_logic": [
+        "source says stops vary by strategy; do not assign universal fixed stop"
+      ],
+      "position_sizing": [
+        "risk based"
+      ],
+      "trade_management": [
+        "target prior close; management context dependent"
+      ],
+      "target_exit": [
+        "previous close"
+      ],
+      "required_data": [
+        "session OHLC",
+        "previous close",
+        "current open"
+      ],
+      "belgium_kraken_spot_policy": "NOT directly portable as exact strategy to 24/7 crypto. Crypto variant must be labelled adaptation.",
+      "empirical_status": "Original concept is public; performance claim not independently audited.",
+      "discretionary_elements": "qualifying gap, universal stop, context",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "rastani_opening_gap"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "rastani_elliott_wave_context",
+      "trader": "Alessio Rastani",
+      "name": "Elliott Wave contextual model",
+      "research_freeze": "2026-08-17",
+      "fidelity": "C",
+      "provenance": [
+        "DIRECT_PRIMARY",
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "purpose": "Scenario generation using impulse/corrective wave structure and Fibonacci relationships.",
+      "timeframes": [
+        "multi"
+      ],
+      "setup_conditions": [
+        "candidate wave counts"
+      ],
+      "entry_trigger": [
+        "not a unique mechanical trigger unless separate rules supplied"
+      ],
+      "invalidation": [
+        "wave count invalidation"
+      ],
+      "stop_logic": [
+        "scenario-specific"
+      ],
+      "position_sizing": [
+        "parent strategy"
+      ],
+      "trade_management": [
+        "use as low-weight context only"
+      ],
+      "target_exit": [
+        "scenario targets/Fibonacci if independently formalized"
+      ],
+      "required_data": [
+        "OHLCV",
+        "swing pivots",
+        "Fibonacci"
+      ],
+      "belgium_kraken_spot_policy": "Spot-compatible as context.",
+      "empirical_status": "Elliott Wave labeling is subjective/non-unique; no exact personal profitability verified.",
+      "discretionary_elements": "wave count selection, degree, pivots",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "rastani_elliott"
+      ],
+      "must_not_claim": "Do not claim verified profitability or exact creator replication beyond the fidelity/provenance stated."
+    },
+    {
+      "id": "chris_dunn_1234_crypto_breakout",
+      "trader": "Chris Dunn",
+      "name": "1234 Crypto Breakout",
+      "research_freeze": "2026-08-22",
+      "fidelity": "B",
+      "fidelity_label": "SOURCE_FAITHFUL_WITH_DISCRETION",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Capture large swing continuation breakouts after trend, lower-volume pullback and consolidation.",
+      "timeframes": [
+        "swing; days-to-weeks holding described, no single universal chart timeframe"
+      ],
+      "setup_conditions": [
+        "directional run establishes trend",
+        "pullback on lower trading volume",
+        "consolidation and retest of horizontal resistance",
+        "longer consolidation may support a larger expected move",
+        "meaningful positive news catalyst is optional, not mandatory"
+      ],
+      "entry_trigger": "Break above resistance on high trading volume.",
+      "invalidation": "Breakout fails according to a preplanned structural stop; no universal stop formula was found.",
+      "stop_logic": "Predefine stop. Historical ETH example used roughly a 30-35% stop zone; do not generalize it.",
+      "position_sizing": "Creator explicitly treats position size as a core risk decision, but no universal formula was verified. Use the app's risk-budget sizing.",
+      "trade_management": "Scale out at predetermined targets, then reassess; aim for the meat of the move, not the exact top.",
+      "target_exit": "Preplanned structural/opportunity targets; universal formula unknown.",
+      "required_data": [
+        "OHLCV",
+        "horizontal resistance",
+        "volume",
+        "optional verified catalyst/fundamental/sentiment inputs"
+      ],
+      "belgium_kraken_spot_policy": "Bullish long breakout maps to long-only spot. Historical shorts/hedges are not enabled by default.",
+      "empirical_status": "Creator-published examples and recap exist; no independent audited long-term P&L verified.",
+      "discretionary_elements": "trend quality, consolidation quality, meaningful volume increase, catalyst quality, exact stop and target",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "dunn_breakout_guide",
+        "dunn_trade_recap"
+      ],
+      "usage_context": {
+        "best_conditions": [
+          "clear trend",
+          "clear consolidation",
+          "large enough expected move to clear costs",
+          "liquid spot pair"
+        ],
+        "required_conditions": [
+          "trend run",
+          "lower-volume pullback",
+          "consolidation/retest",
+          "high-volume resistance breakout"
+        ],
+        "acceptable_conditions": [
+          "meaningful positive catalyst"
+        ],
+        "avoid_conditions": [
+          "small noisy breakout with poor net reward",
+          "chasing after extension",
+          "overtrading"
+        ],
+        "invalid_conditions": [
+          "no clear resistance",
+          "no preplanned risk",
+          "minimum order exceeds risk budget"
+        ],
+        "market_regime": [
+          "trend continuation / post-consolidation expansion"
+        ],
+        "volatility_regime": [
+          "sufficient expansion potential"
+        ],
+        "liquidity_requirements": [
+          "spread/slippage must fit expected move"
+        ],
+        "timeframe_relationship": {
+          "holding": "days-to-weeks"
+        },
+        "direction_policy": "LONG_ENTRY only in default Belgium spot profile",
+        "expected_holding_period": "days to weeks",
+        "source_evidence": [
+          "dunn_breakout_guide"
+        ]
+      },
+      "live_truth_gate": "BLOCK_UNTIL_APP_STOP/SIZING_FORMALIZATION_IS_VALIDATED_AND_LABELLED",
+      "must_not_claim": "Do not claim historical ETH parameters are universal or Dunn's self-reported accuracy is independently audited."
+    },
+    {
+      "id": "josh_olszewicz_crypto_ichimoku_20_60_120_30_component",
+      "trader": "Josh Olszewicz",
+      "name": "Crypto Ichimoku 20/60/120/30 toolkit",
+      "research_freeze": "2026-08-22",
+      "fidelity": "B",
+      "fidelity_label": "SOURCE_FAITHFUL_WITH_DISCRETION",
+      "provenance": [
+        "DIRECT_PUBLIC_VIDEO"
+      ],
+      "purpose": "Use crypto-adapted Ichimoku components for trend, reversal, cloud edge-to-edge and management analysis.",
+      "timeframes": [
+        "multiple; each specific strategy variant must define its own timeframe"
+      ],
+      "setup_conditions": [
+        "Ichimoku configured 20/60/120/30 for crypto"
+      ],
+      "entry_trigger": "No single universal entry rule; the source teaches multiple sub-strategies.",
+      "invalidation": "Strategy-specific; fractals are explicitly taught as trailing-stop tools.",
+      "stop_logic": "Fractal-based trailing-stop component is sourced; exact sub-strategy rule must be extracted separately.",
+      "position_sizing": "Not established in this source; use independent app risk layer.",
+      "trade_management": "Cloud/TK/fractal variant-specific.",
+      "target_exit": "Edge-to-edge and other variants are taught; exact rule required per variant.",
+      "required_data": [
+        "OHLCV",
+        "Ichimoku 20/60/120/30",
+        "fractals where relevant"
+      ],
+      "belgium_kraken_spot_policy": "Long signals can map to spot; bearish variants become EXIT/REDUCE/AVOID by default.",
+      "empirical_status": "Detailed public education exists; no audited personal P&L verified.",
+      "discretionary_elements": "which Ichimoku sub-strategy, timeframe and context",
+      "proprietary_unknown": false,
+      "source_refs": [
+        "olszewicz_ichimoku_video"
+      ],
+      "usage_context": {
+        "best_conditions": [],
+        "required_conditions": [
+          "a specific sourced Ichimoku sub-strategy must be selected before execution"
+        ],
+        "acceptable_conditions": [],
+        "avoid_conditions": [
+          "do not trade solely because the settings are loaded"
+        ],
+        "invalid_conditions": [
+          "no specific source variant selected"
+        ],
+        "market_regime": [],
+        "volatility_regime": [],
+        "liquidity_requirements": [
+          "cost gate"
+        ],
+        "timeframe_relationship": {},
+        "direction_policy": "long-only adaptation",
+        "expected_holding_period": "strategy-specific",
+        "source_evidence": [
+          "olszewicz_ichimoku_video"
+        ]
+      },
+      "live_truth_gate": "RESEARCH_ONLY_SPLIT_INTO_SOURCE_SPECIFIC_SUBSTRATEGIES_FIRST",
+      "must_not_claim": "20/60/120/30 settings alone are not a complete trading strategy."
+    },
+    {
+      "id": "josh_olszewicz_alligator_fractal_public_core",
+      "trader": "Josh Olszewicz",
+      "name": "Alligator + Fractal trend-following public core",
+      "research_freeze": "2026-08-22",
+      "fidelity": "C",
+      "fidelity_label": "FORMALIZED_FROM_PUBLIC_CORE",
+      "provenance": [
+        "DIRECT_INTERVIEW",
+        "SECONDARY_REPORTED_EXAMPLE"
+      ],
+      "purpose": "Objective trend following using Alligator moving averages for trend and fractals for entries/stops.",
+      "timeframes": [
+        "lower-timeframe components; exact original Set configuration unknown"
+      ],
+      "setup_conditions": [
+        "three-Alligator-MA trend state"
+      ],
+      "entry_trigger": "Fractal entry according to original system; exact parameterization not recovered.",
+      "invalidation": "Fractal stop according to original system; exact parameterization not recovered.",
+      "stop_logic": "Fractal-based; exact parameters unknown.",
+      "position_sizing": "UNKNOWN",
+      "trade_management": "Objective/set-and-forget philosophy; full details unknown.",
+      "target_exit": "UNKNOWN / example-specific chart targets.",
+      "required_data": [
+        "OHLCV",
+        "Alligator",
+        "Williams fractals"
+      ],
+      "belgium_kraken_spot_policy": "Research bullish long variant only until exact rules are recovered.",
+      "empirical_status": "Historical TokenSets deployment verifies a real strategy/product existed, but a reliable complete performance series was not recovered.",
+      "discretionary_elements": "exact parameters and complete rules unknown",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "olszewicz_set_interview"
+      ],
+      "usage_context": {
+        "best_conditions": [
+          "persistent trends"
+        ],
+        "required_conditions": [
+          "objective trend state"
+        ],
+        "acceptable_conditions": [],
+        "avoid_conditions": [
+          "choppy/noisy market",
+          "naive breakout chasing"
+        ],
+        "invalid_conditions": [
+          "exact parameters unavailable for source-faithful clone"
+        ],
+        "market_regime": [
+          "trend"
+        ],
+        "volatility_regime": [],
+        "liquidity_requirements": [
+          "cost gate"
+        ],
+        "timeframe_relationship": {},
+        "direction_policy": "long-only research adaptation",
+        "expected_holding_period": "UNKNOWN",
+        "source_evidence": [
+          "olszewicz_set_interview"
+        ]
+      },
+      "live_truth_gate": "MISSING_PARAMETERS_NOT_IMPLEMENTED_EXACTLY",
+      "must_not_claim": "Do not call an independently selected Alligator configuration the exact GATOR strategy."
+    },
+    {
+      "id": "krown_lti_public_core_2026",
+      "trader": "Eric Krown",
+      "name": "Long Term Investor public-core convergence framework",
+      "research_freeze": "2026-08-22",
+      "fidelity": "C",
+      "fidelity_label": "FORMALIZED_FROM_PUBLIC_CORE",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Identify long-term accumulation/macro-low conditions through convergence of multiple independent components.",
+      "timeframes": [
+        "weekly / higher-timeframe"
+      ],
+      "setup_conditions": [
+        "BBWP",
+        "RSI",
+        "PMARP",
+        "Percent-Below-High",
+        "Krown Cross 21/55 EMA",
+        "Pesto Fear & Greed",
+        "Hash Ribbons",
+        "Weekly/Bi-Weekly EMA",
+        "Low Month Days",
+        "optional Moon Phases",
+        "N-signal convergence filter"
+      ],
+      "entry_trigger": "Strong label when enough enabled components fire; exact BTC preset thresholds/N are not public.",
+      "invalidation": "UNKNOWN from public page.",
+      "stop_logic": "Long-term allocation tool; exact stop policy not public.",
+      "position_sizing": "UNKNOWN from public page.",
+      "trade_management": "Preset/convergence dependent; exact rules private.",
+      "target_exit": "UNKNOWN from public page.",
+      "required_data": [
+        "OHLCV",
+        "BBWP",
+        "RSI",
+        "PMARP",
+        "drawdown",
+        "EMA21",
+        "EMA55",
+        "sentiment",
+        "hash ribbons",
+        "HTF EMA",
+        "calendar/seasonal"
+      ],
+      "belgium_kraken_spot_policy": "Potentially useful for slow BTC spot allocation. Do not copy private preset settings.",
+      "empirical_status": "Historical signal charts are creator/backtest claims, not independently audited.",
+      "discretionary_elements": "thresholds, weights, N, preset settings",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "krown_lti"
+      ],
+      "usage_context": {
+        "best_conditions": [
+          "long-term accumulation / macro-low research"
+        ],
+        "required_conditions": [
+          "sufficient history for percentile and HTF inputs"
+        ],
+        "acceptable_conditions": [],
+        "avoid_conditions": [
+          "short-term execution use"
+        ],
+        "invalid_conditions": [
+          "claiming exact BTC preset without licensed settings"
+        ],
+        "market_regime": [
+          "macro accumulation"
+        ],
+        "volatility_regime": [
+          "compressed/extreme states are components"
+        ],
+        "liquidity_requirements": [
+          "spot cost gate"
+        ],
+        "timeframe_relationship": {
+          "primary": "weekly/HTF"
+        },
+        "direction_policy": "long allocation",
+        "expected_holding_period": "long-term",
+        "source_evidence": [
+          "krown_lti"
+        ]
+      },
+      "live_truth_gate": "EXACT_PRESET_PROPRIETARY; INDEPENDENT_VARIANT_ONLY",
+      "must_not_claim": "Do not treat historical chart claims as audited results or guess the private BTC preset."
+    },
+    {
+      "id": "cowen_macro_regime_memo_2026",
+      "trader": "Benjamin Cowen",
+      "name": "2026 macro/crypto risk-regime memo framework",
+      "research_freeze": "2026-08-22",
+      "fidelity": "C",
+      "fidelity_label": "CONCEPT_INSPIRED",
+      "provenance": [
+        "DIRECT_PRIMARY"
+      ],
+      "purpose": "Classify broad market risk and deployment posture using macro, liquidity, breadth and long-term BTC state.",
+      "timeframes": [
+        "weekly-to-monthly regime"
+      ],
+      "setup_conditions": [
+        "labor",
+        "unemployment",
+        "claims",
+        "inflation/energy",
+        "Fed policy",
+        "dollar",
+        "liquidity",
+        "breadth",
+        "BTC long-term MA",
+        "BTC dominance",
+        "on-chain risk"
+      ],
+      "entry_trigger": "Not an entry strategy; outputs regime/deployment posture.",
+      "invalidation": "Scenario evidence/probabilities change.",
+      "stop_logic": "n/a",
+      "position_sizing": "Independent allocation policy required; do not fabricate Cowen's exact ladder.",
+      "trade_management": "Update regime as the underlying features change.",
+      "target_exit": "n/a",
+      "required_data": [
+        "macro series",
+        "BTC OHLCV",
+        "BTC dominance",
+        "breadth",
+        "liquidity",
+        "independently defined on-chain metrics"
+      ],
+      "belgium_kraken_spot_policy": "Use only as a slow allocation/risk gate for spot.",
+      "empirical_status": "Primary reports show real analytical process; proprietary composites prevent exact clone.",
+      "discretionary_elements": "scenario model, composite formulas and weights",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "cowen_aug_2026",
+        "cowen_july_2026"
+      ],
+      "usage_context": {
+        "best_conditions": [
+          "portfolio/regime decisions"
+        ],
+        "required_conditions": [
+          "current macro and market data"
+        ],
+        "acceptable_conditions": [],
+        "avoid_conditions": [
+          "intraday entry use"
+        ],
+        "invalid_conditions": [
+          "using stale memo probabilities as live constants"
+        ],
+        "market_regime": [
+          "late-cycle",
+          "correction",
+          "recession-transition",
+          "recovery"
+        ],
+        "volatility_regime": [],
+        "liquidity_requirements": [],
+        "timeframe_relationship": {
+          "regime": "weekly/monthly"
+        },
+        "direction_policy": "allocation gate",
+        "expected_holding_period": "weeks to months",
+        "source_evidence": [
+          "cowen_aug_2026",
+          "cowen_july_2026"
+        ]
+      },
+      "live_truth_gate": "INDEPENDENT_REGIME_MODEL_ONLY_UNLESS_PROPRIETARY_METRICS_LICENSED",
+      "must_not_claim": "Do not use August 2026 scenario percentages as permanent probabilities or call an independent composite Cowen Price Risk."
+    },
+    {
+      "id": "pizzino_three_bar_confirmation_candidate_2026",
+      "trader": "Jason Pizzino",
+      "name": "Three-bar bull confirmation — candidate pending primary extraction",
+      "research_freeze": "2026-08-22",
+      "fidelity": "X",
+      "fidelity_label": "SECONDARY_CANDIDATE_REQUIRES_PRIMARY_EXTRACTION",
+      "provenance": [
+        "SECONDARY_REPORTED"
+      ],
+      "purpose": "Candidate weekly confirmation framework after a major low.",
+      "timeframes": [
+        "weekly"
+      ],
+      "setup_conditions": [
+        "secondary material reports three consecutive up bars at a significant level plus structure/range context"
+      ],
+      "entry_trigger": "NOT VERIFIED FROM PRIMARY",
+      "invalidation": "NOT VERIFIED FROM PRIMARY",
+      "stop_logic": "UNKNOWN",
+      "position_sizing": "UNKNOWN",
+      "trade_management": "UNKNOWN",
+      "target_exit": "UNKNOWN",
+      "required_data": [
+        "weekly OHLCV"
+      ],
+      "belgium_kraken_spot_policy": "Research only.",
+      "empirical_status": "No exact primary rule or independent performance verified.",
+      "discretionary_elements": "material rules unresolved",
+      "proprietary_unknown": true,
+      "source_refs": [
+        "pizzino_3bar_secondary"
+      ],
+      "usage_context": {
+        "best_conditions": [],
+        "required_conditions": [],
+        "acceptable_conditions": [],
+        "avoid_conditions": [
+          "all live use"
+        ],
+        "invalid_conditions": [
+          "primary rule unavailable"
+        ],
+        "market_regime": [],
+        "volatility_regime": [],
+        "liquidity_requirements": [],
+        "timeframe_relationship": {
+          "primary": "weekly"
+        },
+        "direction_policy": "research only",
+        "expected_holding_period": "UNKNOWN",
+        "source_evidence": [
+          "pizzino_3bar_secondary"
+        ]
+      },
+      "live_truth_gate": "BLOCK",
+      "must_not_claim": "Do not implement from a third-party summary."
+    }
+  ],
+  "weekly_research_last_run": "2026-08-22"
+}

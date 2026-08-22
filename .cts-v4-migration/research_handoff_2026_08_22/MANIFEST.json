@@ -1,0 +1,38 @@
+{
+  "package": "crypto_trading_research_handoff",
+  "version": "2026-08-22-weekly-run-1",
+  "research_freeze": "2026-08-22",
+  "weekly_research_last_run": "2026-08-22",
+  "updated_utc": "2026-08-22T07:42:37.020952+00:00",
+  "traders": [
+    "Peter Brandt",
+    "CryptoCred",
+    "Dan McDermitt / The Chart Guys",
+    "Eric Krown",
+    "Benjamin Cowen",
+    "Bob Loukas",
+    "Jason Pizzino",
+    "Alessio Rastani",
+    "Chris Dunn",
+    "Josh Olszewicz / CarpeNoctom"
+  ],
+  "strategy_count": 37,
+  "truth_policy": "Never invent proprietary/unknown rules or equate creator claims/backtests with independently audited performance.",
+  "files": [
+    "BELGIUM_KRAKEN_CONSTRAINTS.md",
+    "EVIDENCE_MATRIX.md",
+    "HANDOFF_PROMPT.md",
+    "IMPLEMENTATION_SPEC.md",
+    "README.md",
+    "RESEARCH_SOURCES.md",
+    "SOURCE_REGISTRY.json",
+    "STRATEGY_CATALOG.json",
+    "STRATEGY_TRUTH_STANDARD.md",
+    "TRADER_DUE_DILIGENCE.md",
+    "UNVERIFIED_AND_PROPRIETARY.md",
+    "VIDEO_EXTRACTION_NOTES.md",
+    "VIDEO_RESEARCH_INDEX.csv",
+    "WEEKLY_REPORT_2026-08-22.md",
+    "WEEKLY_RESEARCH_RUNBOOK.md"
+  ]
+}
