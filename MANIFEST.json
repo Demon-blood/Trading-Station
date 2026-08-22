@@ -1,11 +1,31 @@
 {
-  "name": "CryptoTradeStation_v4_ExactPreviewUI_v4_20260821",
-  "date": "2026-08-21",
-  "visual_source_of_truth": "approved preview composite",
-  "github_files": [
-    ".github/workflows/android-v4-build.yml",
-    ".cts-v4-migration/apply_diagnostics_integration_fix.py",
-    ".cts-v4-migration/apply_full_integration_cleanup.py",
-    ".cts-v4-migration/apply_exact_preview_ui.py"
-  ]
+  "package": "CTS_v4.0.7_ALL_IN_ONE_2026-08-22",
+  "target_repo": "Demon-blood/Trading-Station",
+  "target_branch": "main",
+  "canonical_workflow": ".github/workflows/android-v4-build.yml",
+  "version_name": "4.0.7",
+  "version_code": 112,
+  "components": [
+    "CTS-READINESS-001",
+    "CTS-BALANCE-002",
+    "CTS-ORDERINTENT-003",
+    "strategy-provenance",
+    "CTS_TURTLE_SPOT_SAFE",
+    "KAK-source-framework-separation",
+    "persistent-candle-repository",
+    "persistent-reservation-ledger",
+    "execution-idempotency",
+    "unified-order-intent-router",
+    "training-domain-isolation",
+    "kill-switch-entry-exit-policy",
+    "central-news-budget-cache",
+    "database-retention-compaction",
+    "market-reference-normalization",
+    "small-account-suitability",
+    "strategy-promotion-gate",
+    "cost-aware-risk-sizing",
+    "handoff-backtest-adapters",
+    "hard-release-contracts"
+  ],
+  "generated": "2026-08-22"
 }
