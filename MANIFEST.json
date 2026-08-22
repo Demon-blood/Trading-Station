@@ -26,8 +26,10 @@
     "cost-aware-risk-sizing",
     "handoff-backtest-adapters",
     "hard-release-contracts",
-    "dashboard-information-button-fix"
+    "dashboard-information-button-fix",
+    "dashboard-info-generator-source-fix"
   ],
   "generated": "2026-08-22",
-  "revision": "r2-dashboard-info"
+  "revision": "r3-dashboard-info-generator",
+  "dashboard_info_fix_location": ".cts-v4-migration/apply_exact_preview_ui.py::PREVIEW_SOURCE"
 }

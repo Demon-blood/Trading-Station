@@ -68,3 +68,22 @@ It opens a `Dashboard Information` dialog explaining:
 - Scan / Execute / Start / Stop / News controls.
 
 The accessibility description is also changed from the generic `Action` to `Dashboard information`.
+
+
+## r3 — Dashboard Info fixed at the canonical generator
+
+The previous r2 attempted to repair Dashboard handling in a later completion layer.
+Inspection of the current repository showed the canonical workflow does not invoke those
+completion hooks. It *does* always invoke `.cts-v4-migration/apply_exact_preview_ui.py`.
+
+r3 therefore patches the actual `PREVIEW_SOURCE` embedded in that generator.
+
+The Dashboard top-right Info icon now:
+1. handles Dashboard locally inside `PreviewAppTopBar`,
+2. sets `dashboardInfoVisible = true`,
+3. opens a Material3 `Dashboard Information` dialog,
+4. leaves Portfolio/Positions/Orders/System-Test actions on the existing callback path.
+
+For a GitHub Actions APK build, the changed
+`.cts-v4-migration/apply_exact_preview_ui.py` must be committed and pushed after running
+`INSTALL_ALL_IN_ONE.ps1`.
