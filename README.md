@@ -1,65 +1,68 @@
-# Crypto TradeStation — Milestone 1 Baseline Fix
+# Crypto TradeStation — Milestone 2: Canonical Source Freeze
 
-Target repository: `Demon-blood/Trading-Station`
+This converts the current v4.0.7 build from:
 
-## What this fixes
+`checked-in source -> Python migration/patch chain -> Kotlin compile`
 
-The canonical Android workflow declares:
+into:
 
-- `CTS_VERSION_NAME: 4.0.7`
-- `CTS_VERSION_CODE: 112`
+`committed canonical Kotlin source -> validation -> Kotlin compile`
 
-but later hard-codes v4.0.6 / 111 into the source-patching, source-validation,
-APK-validation and artifact-naming stages.
+## Materialization order
 
-This package makes the workflow environment values the single source of truth.
+The installer reproduces the current canonical CI order exactly:
+
+1. diagnostics integration fix
+2. cumulative milestone 6
+3. full integration / UX cleanup
+4. Kraken minimum-order sizing fix
+5. approved preview UI
+6. system diagnostics / export UI
+7. GDELT pacing / cache fix
+8. CloudShare setup wizard
+9. CloudShare guided assistant
+
+It freezes the resulting `app/` tree, sets v4.0.7 / versionCode 112, commits the JUnit dependency, restores `.cts-v4-migration/` to its original historical state, and removes all migration `apply_*.py` calls from the build workflow.
 
 ## Safety boundary
 
-This milestone does **not** change:
+This milestone intentionally does **not** redesign strategies, Kraken execution, PAPER/LIVE/SHADOW semantics, risk rules, AI decisions, Room schema, or Android foreground-service behavior.
 
-- Kraken trading logic
-- PAPER / LIVE / SHADOW behavior
-- strategies
-- risk management
-- Room schema/data
-- background-service behavior
-- AI behavior
-
-Only `.github/workflows/android-v4-build.yml` is modified.
-
-## Apply on Windows
+## Apply
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\APPLY_M1_BASELINE.ps1 -RepoPath "C:\path\to\Trading-Station"
+powershell -ExecutionPolicy Bypass -File .\APPLY_M2_CANONICALIZE.ps1 -RepoPath "C:\path\to\Trading-Station"
 ```
 
-The original workflow is backed up to:
+The tool refuses to overwrite uncommitted changes under `app/` or `.cts-v4-migration/`.
 
-`.cts-m1-backup/android-v4-build.yml`
+## Backup and rollback safety
 
-## Verify manually
+Before modifying the project it creates, beside the repository:
+
+`Trading-Station_before_M2_canonicalize_YYYYMMDD_HHMMSS.zip`
+
+and a materialization log. If a transformation or verification fails, `app/`, `.cts-v4-migration/`, and the canonical workflow are automatically restored.
+
+## After it passes
+
+Review:
 
 ```powershell
-python .\verify_m1.py "C:\path\to\Trading-Station"
+git status --short
+git diff --stat
 ```
 
-## Roll back
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\REVERT_M1_BASELINE.ps1 -RepoPath "C:\path\to\Trading-Station"
-```
+Then commit/push and let GitHub Actions compile and run unit tests.
 
 ## Expected result
 
-The workflow should build and validate one consistent identity:
+The workflow contains no:
 
-- versionName `4.0.7`
-- versionCode `112`
+`python3 .cts-v4-migration/apply_...`
+
+calls. The v4.0.7 files that CI used to generate now exist directly under `app/`.
 
 ## Next milestone
 
-After the baseline CI passes, freeze/materialize the effective generated v4.0.7
-source into the normal `app/` tree and remove build-time source mutation from the
-canonical workflow. Only after that should the new 24/7 Android hosting changes
-and low-cost Luna/Sol/data utilities be layered in.
+After the frozen source passes CI, harden Android for 24/7 autonomous hosting: foreground-service classification, process/reboot recovery, network transition reconciliation, and battery/background configuration health checks.
