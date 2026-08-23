@@ -1,0 +1,229 @@
+name: Crypto TradeStation Canonical Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: APK build type
+        required: true
+        default: debug
+        type: choice
+        options:
+          - debug
+          - release
+      run_tests:
+        description: Run unit tests before APK build
+        required: true
+        default: true
+        type: boolean
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'app/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'app/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cts-canonical-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  CTS_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type || 'debug' }}
+  CTS_RUN_TESTS: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.run_tests }}
+  CTS_VERSION_NAME: 4.0.7
+  CTS_VERSION_CODE: 112
+  CTS_DEBUG_CERT_SHA256: b690958cb434544e7f8963ecc86559562a82155ffbd915cb2088c9333e06aa28
+
+jobs:
+  build:
+    name: Build committed canonical Android source
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | head -n 1 || true)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under $ANDROID_HOME/cmdline-tools" >&2
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verify canonical committed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_canonical_v407.py "$GITHUB_WORKSPACE" | tee canonical-verify.log
+
+      - name: Prepare release signing
+        if: env.CTS_BUILD_TYPE == 'release'
+        shell: bash
+        env:
+          CTS_RELEASE_KEYSTORE_B64: ${{ secrets.CTS_RELEASE_KEYSTORE_B64 }}
+          CTS_RELEASE_STORE_PASSWORD: ${{ secrets.CTS_RELEASE_STORE_PASSWORD }}
+          CTS_RELEASE_KEY_ALIAS: ${{ secrets.CTS_RELEASE_KEY_ALIAS }}
+          CTS_RELEASE_KEY_PASSWORD: ${{ secrets.CTS_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in CTS_RELEASE_KEYSTORE_B64 CTS_RELEASE_STORE_PASSWORD CTS_RELEASE_KEY_ALIAS CTS_RELEASE_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required GitHub Actions secret: $name" >&2
+              exit 1
+            fi
+          done
+          mkdir -p .github-ci
+          printf '%s' "$CTS_RELEASE_KEYSTORE_B64" | base64 --decode > .github-ci/release.jks
+          {
+            printf 'storeFile=../.github-ci/release.jks\n'
+            printf 'storePassword=%s\n' "$CTS_RELEASE_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$CTS_RELEASE_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$CTS_RELEASE_KEY_PASSWORD"
+          } > signing.properties
+          chmod 600 signing.properties .github-ci/release.jks
+
+      - name: Compile debug Kotlin
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:compileDebugKotlin 2>&1 | tee compile-debug.log
+
+      - name: Run unit tests
+        if: env.CTS_RUN_TESTS == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee unit-tests.log
+
+      - name: Build canonical APK
+        shell: bash
+        run: |
+          set -o pipefail
+          if [ "$CTS_BUILD_TYPE" = "release" ]; then
+            gradle --no-daemon :app:assembleRelease 2>&1 | tee apk-build.log
+          else
+            gradle --no-daemon :app:assembleDebug 2>&1 | tee apk-build.log
+          fi
+
+      - name: Verify APK identity and signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-output
+
+          if [ "$CTS_BUILD_TYPE" = "release" ]; then
+            APK="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          else
+            APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          fi
+
+          if [ -z "${APK:-}" ] || [ ! -f "$APK" ]; then
+            echo "APK output not found." >&2
+            exit 1
+          fi
+
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee ci-output/apk-signature.txt
+          "$AAPT" dump badging "$APK" | head -n 1 | tee ci-output/apk-package.txt
+
+          CERT="$(grep -i 'Signer #1 certificate SHA-256 digest:' ci-output/apk-signature.txt | head -n 1 | sed 's/.*digest:[[:space:]]*//' | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          if [ -z "$CERT" ]; then
+            echo "Could not read APK signer SHA-256." >&2
+            exit 1
+          fi
+
+          PACKAGE_LINE="$(cat ci-output/apk-package.txt)"
+          echo "$PACKAGE_LINE" | grep -q "name='com.ksp.cryptobot'" || { echo "Wrong applicationId in built APK" >&2; exit 1; }
+          echo "$PACKAGE_LINE" | grep -q "versionCode='$CTS_VERSION_CODE'" || { echo "Wrong versionCode in built APK" >&2; exit 1; }
+          echo "$PACKAGE_LINE" | grep -q "versionName='$CTS_VERSION_NAME'" || { echo "Wrong versionName in built APK" >&2; exit 1; }
+
+          if [ "$CTS_BUILD_TYPE" = "debug" ]; then
+            EXPECTED="$(echo "$CTS_DEBUG_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+            if [ "$CERT" != "$EXPECTED" ]; then
+              echo "Debug APK signer mismatch. expected=$EXPECTED actual=$CERT" >&2
+              exit 1
+            fi
+          fi
+
+          OUT="ci-output/CryptoTradeStation-v${CTS_VERSION_NAME}-${CTS_BUILD_TYPE}-update.apk"
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" | tee ci-output/SHA256SUMS.txt
+
+          {
+            echo "applicationId=com.ksp.cryptobot"
+            echo "versionName=$CTS_VERSION_NAME"
+            echo "versionCode=$CTS_VERSION_CODE"
+            echo "roomSchema=11"
+            echo "buildType=$CTS_BUILD_TYPE"
+            echo "signerSha256=$CERT"
+            echo "commit=$GITHUB_SHA"
+            echo "runId=$GITHUB_RUN_ID"
+            echo "canonicalCommittedSource=true"
+          } > ci-output/INSTALL_IDENTITY.txt
+
+      - name: Upload canonical APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CryptoTradeStation-v${{ env.CTS_VERSION_NAME }}-${{ env.CTS_BUILD_TYPE }}-update-apk
+          path: ci-output/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-failure
+          cp canonical-verify.log compile-debug.log unit-tests.log apk-build.log ci-failure/ 2>/dev/null || true
+          git diff --stat > ci-failure/git-diff-stat.txt 2>&1 || true
+          git diff --name-only > ci-failure/git-diff-files.txt 2>&1 || true
+          java -version > ci-failure/java-version.txt 2>&1 || true
+          gradle --version > ci-failure/gradle-version.txt 2>&1 || true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CryptoTradeStation-canonical-build-failure-${{ github.run_number }}
+          path: ci-failure/
+          if-no-files-found: warn
+          retention-days: 14
