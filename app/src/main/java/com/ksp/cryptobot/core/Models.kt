@@ -409,7 +409,11 @@ data class OrderRequest(
     val orderType: OrderType = OrderType.LIMIT,
     val clientOrderId: String = "ksp-${System.currentTimeMillis()}",
     val reduceOnly: Boolean = false,
-    val purpose: String = "ENTRY"
+    val purpose: String = "ENTRY",
+    /** Maker-only flag. Kraken REST maps this to oflags=post for LIMIT orders. */
+    val postOnly: Boolean = false,
+    /** Optional technical stop attached to a BUY as Kraken conditional close when supported. */
+    val protectiveStopPrice: BigDecimal? = null
 )
 
 data class OrderResult(
@@ -420,6 +424,8 @@ data class OrderResult(
     val averagePrice: BigDecimal,
     val fee: BigDecimal,
     val paper: Boolean,
+    /** Realized P&L in the order quote currency when the exchange/simulator can know it. */
+    val realizedPnlQuote: BigDecimal = BigDecimal.ZERO,
     val timestamp: Instant = Instant.now()
 )
 
@@ -604,7 +610,11 @@ data class ExchangeSymbolInfo(
     val priceDecimals: Int,
     val quantityDecimals: Int,
     val tradable: Boolean,
-    val reason: String = ""
+    val reason: String = "",
+    /** Exchange-reported minimum order cost/notional in quote currency. */
+    val minOrderCost: BigDecimal = BigDecimal.ZERO,
+    /** Exchange-reported valid price tick. Zero means unknown/fallback precision only. */
+    val tickSize: BigDecimal = BigDecimal.ZERO
 )
 
 data class SymbolDiscoveryCandidate(
@@ -622,7 +632,9 @@ data class SymbolDiscoveryCandidate(
     val change24hPercent: BigDecimal = BigDecimal.ZERO,
     val score: Int = 0,
     val enabledForRotation: Boolean = false,
-    val reason: String = ""
+    val reason: String = "",
+    val minOrderCost: BigDecimal = BigDecimal.ZERO,
+    val tickSize: BigDecimal = BigDecimal.ZERO
 )
 
 data class LiveOrderInfo(

@@ -1,0 +1,292 @@
+package com.ksp.cryptobot.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.ksp.cryptobot.cloudshare.CloudShareSettingsStore
+import com.ksp.cryptobot.cloudshare.CloudShareSyncEngine
+import com.ksp.cryptobot.core.BotController
+import com.ksp.cryptobot.data.AppDatabase
+import com.ksp.cryptobot.release.V4MigrationBackupManager
+import com.ksp.cryptobot.release.V4MaintenanceManager
+import com.ksp.cryptobot.release.V4ReleaseInfo
+import com.ksp.cryptobot.release.V4SystemVerifier
+import com.ksp.cryptobot.release.V4VerificationItem
+import com.ksp.cryptobot.research.ResearchSettingsStore
+import kotlinx.coroutines.launch
+
+private enum class V4Panel(val label: String) { OVERVIEW("Overview"), CLOUDSHARE("CloudShare"), RESEARCH("Research"), RECOVERY("Recovery") }
+
+@Composable
+fun V4ControlCenterScreen() {
+    val context = LocalContext.current
+    var panel by remember { mutableStateOf(V4Panel.OVERVIEW) }
+    Column(Modifier.fillMaxSize()) {
+        ScrollableTabRow(selectedTabIndex = V4Panel.values().indexOf(panel), edgePadding = 8.dp) {
+            V4Panel.values().forEach { item ->
+                Tab(selected = panel == item, onClick = { panel = item }, text = { Text(item.label) })
+            }
+        }
+        when (panel) {
+            V4Panel.OVERVIEW -> V4OverviewPanel()
+            V4Panel.CLOUDSHARE -> CloudShareScreen()
+            V4Panel.RESEARCH -> V4ResearchPanel()
+            V4Panel.RECOVERY -> V4RecoveryPanel()
+        }
+    }
+}
+
+@Composable
+private fun V4OverviewPanel() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val verifier = remember { V4SystemVerifier(context) }
+    val controller = remember { BotController(context.applicationContext) }
+    val database = remember { AppDatabase.get(context.applicationContext) }
+    val cloudStore = remember { CloudShareSettingsStore(context) }
+    val cloudEngine = remember { CloudShareSyncEngine(context) }
+    var checks by remember { mutableStateOf<List<V4VerificationItem>>(emptyList()) }
+    var summary by remember { mutableStateOf("Stage 6/6 final integration ready.") }
+    var busy by remember { mutableStateOf(false) }
+
+    fun verify() {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val settings = com.ksp.cryptobot.settings.AppSettingsStore(context).load()
+            checks = runCatching { verifier.verify(settings) }.getOrElse { listOf(V4VerificationItem("FAIL", "V4 verifier", it.message ?: it.javaClass.simpleName)) }
+            val fail = checks.count { it.status == "FAIL" }
+            val warn = checks.count { it.status == "WARN" }
+            summary = "V4 verification: ${checks.size - fail - warn} PASS, $warn WARN, $fail FAIL"
+            busy = false
+        }
+    }
+
+    LaunchedEffect(Unit) { verify() }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Crypto TradeStation v4", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+        Text("${V4ReleaseInfo.MIGRATION_STAGE_COMPLETE}/${V4ReleaseInfo.MIGRATION_STAGE_COUNT} migration stages integrated • Room ${V4ReleaseInfo.ROOM_SCHEMA_VERSION} • CloudShare ${V4ReleaseInfo.CLOUDSHARE_PROTOCOL}")
+        ElevatedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Final architecture", fontWeight = FontWeight.Bold)
+                V4ReleaseInfo.stages.forEachIndexed { index, stage -> Text("✓ ${index + 1}. $stage") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { verify() }, enabled = !busy) { Text("Verify v4") }
+            OutlinedButton(onClick = {
+                if (!busy) { busy = true; scope.launch {
+                    val result = runCatching { cloudEngine.syncIfDue(force = true) }.getOrNull()
+                    summary = if (!cloudStore.enabled) "CloudShare is disabled; local operation is unaffected."
+                    else result?.let { "CloudShare sync: uploaded=${it.uploaded}, downloaded=${it.downloaded}, collective=${it.collectiveOutcomeRows}${if (it.error.isBlank()) "" else ", error=${it.error}"}" } ?: "CloudShare sync failed."
+                    busy = false
+                } }
+            }, enabled = !busy) { Text("Sync CloudShare") }
+            OutlinedButton(onClick = {
+                if (!busy) { busy = true; scope.launch {
+                    val lines = runCatching { controller.runSystemFeatureVerification() }.getOrElse { listOf("FAIL | System test | ${it.message}") }
+                    summary = "Full System Test: PASS=${lines.count { it.startsWith("PASS") }}, WARN=${lines.count { it.startsWith("WARN") }}, FAIL=${lines.count { it.startsWith("FAIL") }}"
+                    busy = false
+                } }
+            }, enabled = !busy) { Text("Full System Test") }
+        }
+        Text(summary, fontWeight = FontWeight.Bold)
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        checks.forEach { check -> VerificationCard(check) }
+        val dbVersion = runCatching { database.openHelper.readableDatabase.version }.getOrDefault(-1)
+        Text("Local database schema: $dbVersion", style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
+private fun VerificationCard(check: V4VerificationItem) {
+    val color = when (check.status) {
+        "PASS" -> MaterialTheme.colorScheme.secondary
+        "WARN" -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.error
+    }
+    OutlinedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Text("${check.status} • ${check.name}", color = color, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp)); Text(check.detail)
+        }
+    }
+}
+
+@Composable
+fun V4ResearchPanel() {
+    val context = LocalContext.current
+    val store = remember { ResearchSettingsStore(context) }
+    var enabled by remember { mutableStateOf(store.enabled()) }
+    var strategies by remember { mutableStateOf(store.advancedStrategiesEnabled()) }
+    var professionalStrategies by remember { mutableStateOf(store.professionalStrategiesEnabled()) }
+    var desktopParityIntelligence by remember { mutableStateOf(store.desktopParityIntelligenceEnabled()) }
+    var multiExchangeReference by remember { mutableStateOf(store.multiExchangeReferenceEnabled()) }
+    var btcMempool by remember { mutableStateOf(store.btcMempoolEnabled()) }
+    var defillama by remember { mutableStateOf(store.defillamaEnabled()) }
+    var etherscan by remember { mutableStateOf(store.etherscanEnabled()) }
+    var dropstab by remember { mutableStateOf(store.dropstabUnlocksEnabled()) }
+    var onchainCacheSeconds by remember { mutableStateOf(store.onchainCacheSeconds().toString()) }
+    var walkForward by remember { mutableStateOf(store.walkForwardEnabled()) }
+    var monteCarlo by remember { mutableStateOf(store.monteCarloEnabled()) }
+    var sequence by remember { mutableStateOf(store.sequenceModelEnabled()) }
+    var rl by remember { mutableStateOf(store.rlSandboxEnabled()) }
+    var futures by remember { mutableStateOf(store.futuresContextEnabled()) }
+    var wallets by remember { mutableStateOf(store.labeledWalletEnabled()) }
+    var paperPromotion by remember { mutableStateOf(store.researchPromotionInPaper()) }
+    var livePromotion by remember { mutableStateOf(store.researchPromotionInLive()) }
+    var handoffEngine by remember { mutableStateOf(store.handoffEngineEnabled()) }
+    var handoffAutoPaper by remember { mutableStateOf(store.handoffAutoPaperExecutionEnabled()) }
+    var handoffLiveSource by remember { mutableStateOf(store.handoffSourceTruthLiveEntriesEnabled()) }
+    var handoffProtectiveLive by remember { mutableStateOf(store.handoffProtectiveLiveActionsEnabled()) }
+    var handoffFormalizedPaper by remember { mutableStateOf(store.handoffFormalizedPaperExecutionEnabled()) }
+    var handoffRiskPct by remember { mutableStateOf(store.handoffRiskPerTradeFraction().multiply(java.math.BigDecimal("100")).stripTrailingZeros().toPlainString()) }
+    var handoffCostMarginPct by remember { mutableStateOf(store.handoffCostSafetyMarginPct().stripTrailingZeros().toPlainString()) }
+    var handoffClusterRiskPct by remember { mutableStateOf(store.handoffCorrelatedRiskCapFraction().multiply(java.math.BigDecimal("100")).stripTrailingZeros().toPlainString()) }
+    var handoffFreshnessDays by remember { mutableStateOf(store.handoffFreshnessWarnDays().toString()) }
+    var positive by remember { mutableStateOf(store.maxPositiveAdjustment().toString()) }
+    var negative by remember { mutableStateOf(store.maxNegativeAdjustment().toString()) }
+    var simulations by remember { mutableStateOf(store.monteCarloSimulations().toString()) }
+    var samples by remember { mutableStateOf(store.minimumOutcomeSamples().toString()) }
+    var whaleKey by remember { mutableStateOf(store.whaleAlertApiKey()) }
+    var etherscanKey by remember { mutableStateOf(store.etherscanApiKey()) }
+    var dropstabKey by remember { mutableStateOf(store.dropstabApiKey()) }
+    var whaleMin by remember { mutableStateOf(store.whaleAlertMinUsd().toString()) }
+    var whaleRisk by remember { mutableStateOf(store.whaleAlertExchangeRiskUsd().toString()) }
+    var whaleOutflow by remember { mutableStateOf(store.whaleAlertExchangeOutflowBullUsd().toString()) }
+    var status by remember { mutableStateOf("Research-created LIVE entries remain OFF by default.") }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Desktop-Parity + Professional Research", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Desktop-parity algorithms reproduce the v1.0.50 research/strategy behavior where platform-equivalent. Professional variants add practitioner-style MTF, ATR/volatility, volume, VWAP, DMI/ADX and execution-quality confirmation. Research runs before M3 governance and M4 execution and cannot raise M4's approved capital ceiling.")
+        ResearchToggle("Research ensemble", enabled) { enabled = it }
+        ResearchToggle("Desktop-parity strategy families", strategies) { strategies = it }
+        ResearchToggle("Professional practitioner variants", professionalStrategies) { professionalStrategies = it }
+        ResearchToggle("Desktop parity smart intelligence", desktopParityIntelligence) { desktopParityIntelligence = it }
+        ResearchToggle("Walk-forward validation", walkForward) { walkForward = it }
+        ResearchToggle("Monte Carlo robustness", monteCarlo) { monteCarlo = it }
+        ResearchToggle("Sequence model", sequence) { sequence = it }
+        ResearchToggle("RL sandbox", rl) { rl = it }
+        ResearchToggle("Kraken Futures context", futures) { futures = it }
+        ResearchToggle("Labeled-wallet context", wallets) { wallets = it }
+        ResearchToggle("Allow research promotion in PAPER", paperPromotion) { paperPromotion = it }
+        ResearchToggle("Allow research-created LIVE entries", livePromotion) { livePromotion = it }
+        if (livePromotion) Text("Warning: LIVE research promotion is enabled. M3/M4 guards still apply, but the recommended default is OFF.", color = MaterialTheme.colorScheme.error)
+        HorizontalDivider()
+        Text("2026-08-17 Research Handoff — Truth & Automatic Execution", fontWeight = FontWeight.Bold)
+        Text("All 31 handoff strategies/processes are evaluated automatically. PAPER executes mechanically eligible A/B rules and explicitly-labelled C formalizations when their cost/risk gates pass. Protective EXIT/REDUCE may act automatically in LIVE. Positive LIVE source entries require the per-strategy source-truth gate to PASS; this switch is permission, never an override. Proprietary/unknown rules remain BLOCKED_SOURCE_UNKNOWN.")
+        ResearchToggle("Handoff truth engine", handoffEngine) { handoffEngine = it }
+        ResearchToggle("Automatic eligible PAPER execution", handoffAutoPaper) { handoffAutoPaper = it }
+        ResearchToggle("Permit source-truth LIVE entries", handoffLiveSource) { handoffLiveSource = it }
+        ResearchToggle("Automatic protective LIVE EXIT/REDUCE", handoffProtectiveLive) { handoffProtectiveLive = it }
+        ResearchToggle("Allow explicitly formalized public-core rules in PAPER", handoffFormalizedPaper) { handoffFormalizedPaper = it }
+        OutlinedTextField(handoffRiskPct, { v -> handoffRiskPct = v.filter { it.isDigit() || it == '.' } }, label = { Text("Risk per handoff trade % (0.05–1.00)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(handoffCostMarginPct, { v -> handoffCostMarginPct = v.filter { it.isDigit() || it == '.' } }, label = { Text("Cost safety margin % (0–2)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(handoffClusterRiskPct, { v -> handoffClusterRiskPct = v.filter { it.isDigit() || it == '.' } }, label = { Text("Correlated campaign risk cap % (0.25–5)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(handoffFreshnessDays, { handoffFreshnessDays = it.filter(Char::isDigit) }, label = { Text("Source revalidation warning days (1–90)") }, modifier = Modifier.fillMaxWidth())
+        Text("Default small-account risk is 0.35% per trade and 2.0% correlated campaign risk. These are app product-policy defaults, not claims about any creator's exact risk rule.", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(positive, { positive = it.filter(Char::isDigit) }, label = { Text("Max positive research adjustment (0–10)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(negative, { negative = it.filter(Char::isDigit) }, label = { Text("Max negative research adjustment (0–15)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(simulations, { simulations = it.filter(Char::isDigit) }, label = { Text("Monte Carlo simulations (100–5000)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(samples, { samples = it.filter(Char::isDigit) }, label = { Text("Minimum outcome samples (5–100)") }, modifier = Modifier.fillMaxWidth())
+        HorizontalDivider()
+        Text("External / on-chain professional context", fontWeight = FontWeight.Bold)
+        Text("External feeds are advisory and fail neutral. Kraken remains the execution venue.")
+        ResearchToggle("Multi-exchange reference validation", multiExchangeReference) { multiExchangeReference = it }
+        ResearchToggle("Bitcoin mempool context", btcMempool) { btcMempool = it }
+        ResearchToggle("DefiLlama stablecoin/chain context", defillama) { defillama = it }
+        ResearchToggle("Etherscan gas context", etherscan) { etherscan = it }
+        ResearchToggle("DropsTab token-unlock context", dropstab) { dropstab = it }
+        OutlinedTextField(onchainCacheSeconds, { onchainCacheSeconds = it.filter(Char::isDigit) }, label = { Text("External context cache seconds (30–3600)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(etherscanKey, { etherscanKey = it }, label = { Text("Etherscan API key") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(dropstabKey, { dropstabKey = it }, label = { Text("DropsTab API key") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+        HorizontalDivider()
+        Text("Optional labeled-wallet / Whale Alert context", fontWeight = FontWeight.Bold)
+        OutlinedTextField(whaleKey, { whaleKey = it }, label = { Text("Whale Alert API key") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(whaleMin, { whaleMin = it.filter(Char::isDigit) }, label = { Text("Minimum labeled transfer USD") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(whaleRisk, { whaleRisk = it.filter(Char::isDigit) }, label = { Text("Exchange inflow risk threshold USD") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(whaleOutflow, { whaleOutflow = it.filter(Char::isDigit) }, label = { Text("Exchange outflow bullish threshold USD") }, modifier = Modifier.fillMaxWidth())
+        Button(onClick = {
+            store.setEnabled(enabled); store.setAdvancedStrategiesEnabled(strategies)
+            store.setProfessionalStrategiesEnabled(professionalStrategies); store.setDesktopParityIntelligenceEnabled(desktopParityIntelligence)
+            store.setMultiExchangeReferenceEnabled(multiExchangeReference); store.setBtcMempoolEnabled(btcMempool)
+            store.setDefillamaEnabled(defillama); store.setEtherscanEnabled(etherscan); store.setDropstabUnlocksEnabled(dropstab)
+            store.setOnchainCacheSeconds(onchainCacheSeconds.toIntOrNull() ?: 300)
+            store.setWalkForwardEnabled(walkForward)
+            store.setMonteCarloEnabled(monteCarlo); store.setSequenceModelEnabled(sequence); store.setRlSandboxEnabled(rl)
+            store.setFuturesContextEnabled(futures); store.setLabeledWalletEnabled(wallets)
+            store.setResearchPromotionInPaper(paperPromotion); store.setResearchPromotionInLive(livePromotion)
+            store.setHandoffEngineEnabled(handoffEngine); store.setHandoffAutoPaperExecutionEnabled(handoffAutoPaper)
+            store.setHandoffSourceTruthLiveEntriesEnabled(handoffLiveSource); store.setHandoffProtectiveLiveActionsEnabled(handoffProtectiveLive)
+            store.setHandoffFormalizedPaperExecutionEnabled(handoffFormalizedPaper)
+            store.setHandoffRiskPerTradeFraction((handoffRiskPct.toBigDecimalOrNull() ?: java.math.BigDecimal("0.35")).divide(java.math.BigDecimal("100"), 8, java.math.RoundingMode.HALF_UP))
+            store.setHandoffCostSafetyMarginPct(handoffCostMarginPct.toBigDecimalOrNull() ?: java.math.BigDecimal("0.25"))
+            store.setHandoffCorrelatedRiskCapFraction((handoffClusterRiskPct.toBigDecimalOrNull() ?: java.math.BigDecimal("2.0")).divide(java.math.BigDecimal("100"), 8, java.math.RoundingMode.HALF_UP))
+            store.setHandoffFreshnessWarnDays(handoffFreshnessDays.toIntOrNull() ?: 7)
+            store.setMaxPositiveAdjustment(positive.toIntOrNull() ?: 6); store.setMaxNegativeAdjustment(negative.toIntOrNull() ?: 8)
+            store.setMonteCarloSimulations(simulations.toIntOrNull() ?: 500); store.setMinimumOutcomeSamples(samples.toIntOrNull() ?: 10)
+            store.saveWhaleAlertApiKey(whaleKey); store.saveEtherscanApiKey(etherscanKey); store.saveDropstabApiKey(dropstabKey)
+            store.setWhaleAlertMinUsd(whaleMin.toLongOrNull() ?: 500_000L)
+            store.setWhaleAlertExchangeRiskUsd(whaleRisk.toLongOrNull() ?: 1_000_000L)
+            store.setWhaleAlertExchangeOutflowBullUsd(whaleOutflow.toLongOrNull() ?: 1_000_000L)
+            status = "Research settings saved. Handoff=${store.handoffEngineEnabled()}, AutoPaper=${store.handoffAutoPaperExecutionEnabled()}, SourceTruthLivePermission=${store.handoffSourceTruthLiveEntriesEnabled()} (per-strategy truth gate still authoritative), ProtectiveLive=${store.handoffProtectiveLiveActionsEnabled()}, risk=${store.handoffRiskPerTradeFraction().multiply(java.math.BigDecimal("100"))}%. Professional=${store.professionalStrategiesEnabled()}, DesktopParity=${store.desktopParityIntelligenceEnabled()}."
+        }) { Text("Save Research Settings") }
+        Text(status)
+    }
+}
+
+@Composable
+private fun ResearchToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, modifier = Modifier.weight(1f)); Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+fun V4RecoveryPanel() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val manager = remember { V4MigrationBackupManager(context) }
+    val maintenance = remember { V4MaintenanceManager(context) }
+    val controller = remember { BotController(context.applicationContext) }
+    var input by remember { mutableStateOf("") }
+    var replace by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("Core backup + v4 supplemental backup provides the complete migration recovery set.") }
+    var busy by remember { mutableStateOf(false) }
+
+    fun run(block: suspend () -> String) {
+        if (busy) return; busy = true
+        scope.launch { status = runCatching { block() }.getOrElse { "ERROR: ${it.message ?: it.javaClass.simpleName}" }; busy = false }
+    }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Backup, Recovery & Diagnostics", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Core backup preserves normal CTS settings/trades/learning. The v4 supplemental file preserves governance, execution-quality, advanced-execution and research history. CloudShare tokens/admin credentials and research API keys are deliberately not exported by the supplemental backup.")
+        Button(onClick = { run { controller.exportFullLocalBackupToFile() } }, enabled = !busy) { Text("Export Core Full Backup") }
+        Button(onClick = { run { manager.exportSupplementalBackupToFile() } }, enabled = !busy) { Text("Export v4 Supplemental Backup") }
+        OutlinedButton(onClick = { run { manager.exportDiagnosticsBundleToFile() } }, enabled = !busy) { Text("Export Redacted Diagnostics ZIP") }
+        OutlinedButton(onClick = { run { maintenance.compact(365).detail } }, enabled = !busy) { Text("Compact v4 Operational Data") }
+        Text("Compaction keeps core trades and learned profiles. It prunes v4 operational/research telemetry older than 365 days, old uploaded CloudShare outbox rows and old sync audit rows, then checkpoints/vacuums SQLite.")
+        HorizontalDivider()
+        Text("Restore v4 supplemental", fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            value = input, onValueChange = { input = it }, modifier = Modifier.fillMaxWidth(), minLines = 3,
+            label = { Text("File path, content:// URI, or raw supplemental JSON") }
+        )
+        ResearchToggle("Replace existing v4 operational/research history", replace) { replace = it }
+        Button(onClick = { run { manager.restoreSupplementalBackup(input, replace) } }, enabled = !busy && input.isNotBlank()) { Text("Restore v4 Supplemental") }
+        Text("For a complete device recovery: restore the Core Full Backup first, then restore the v4 Supplemental Backup. CloudShare credentials must be re-joined/re-entered on the new device.")
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        OutlinedCard(Modifier.fillMaxWidth()) { Text(status, Modifier.padding(12.dp)) }
+    }
+}
