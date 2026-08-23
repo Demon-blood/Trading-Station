@@ -1,89 +1,65 @@
-# Crypto TradeStation v4.0.7 — ALL IN ONE
+# Crypto TradeStation — Milestone 1 Baseline Fix
 
-Target repository:
-- `Demon-blood/Trading-Station`
-- branch: `main`
-- canonical workflow: `.github/workflows/android-v4-build.yml`
+Target repository: `Demon-blood/Trading-Station`
 
-This archive combines the entire current v4.0.7 stabilization/completion work into one package.
+## What this fixes
 
-Included:
-- CTS-READINESS-001 startup readiness state machine
-- CTS-BALANCE-002 spendable-balance model
-- CTS-ORDERINTENT-003 first-class OrderIntent / Kraken validate path
-- strategy provenance/version registry
-- `CTS_TURTLE_SPOT_SAFE`
-- Koroush source-framework / CTS-reference separation
-- persistent committed candle history
-- persistent execution state / ReservationLedger
-- unified OrderIntent router
-- PAPER/LIVE/SHADOW/BACKTEST domain isolation
-- HIGH/CRITICAL entry-block / protective-exit policy
-- centralized news acquisition budgets/cache
-- database retention/WAL maintenance
-- external reference normalization and numeric sanity
-- correlation/small-account/promotion guards
-- cost-aware Turtle risk sizing
-- handoff research/backtest adapters and tests
-- hard release-contract checks
-- canonical 4.0.7 / versionCode 112 workflow identity corrections
+The canonical Android workflow declares:
 
-## Install
+- `CTS_VERSION_NAME: 4.0.7`
+- `CTS_VERSION_CODE: 112`
 
-From PowerShell:
+but later hard-codes v4.0.6 / 111 into the source-patching, source-validation,
+APK-validation and artifact-naming stages.
+
+This package makes the workflow environment values the single source of truth.
+
+## Safety boundary
+
+This milestone does **not** change:
+
+- Kraken trading logic
+- PAPER / LIVE / SHADOW behavior
+- strategies
+- risk management
+- Room schema/data
+- background-service behavior
+- AI behavior
+
+Only `.github/workflows/android-v4-build.yml` is modified.
+
+## Apply on Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File `
-".\CTS_v4.0.7_ALL_IN_ONE_2026-08-22\INSTALL_ALL_IN_ONE.ps1" `
-"C:\path\to\Trading-Station"
+powershell -ExecutionPolicy Bypass -File .\APPLY_M1_BASELINE.ps1 -RepoPath "C:\path\to\Trading-Station"
 ```
 
-The installer:
-1. backs up the canonical workflow,
-2. installs both migration scripts into `.cts-v4-migration`,
-3. installs the completion `payload` beside the migration,
-4. validates Python syntax,
-5. installs both canonical-workflow hooks.
+The original workflow is backed up to:
 
-It intentionally does NOT mutate the raw pre-migration `app/` tree in-place.
-The effective source is patched during the canonical build after the existing v4 source-generation/migration layers.
+`.cts-m1-backup/android-v4-build.yml`
 
-## Important validation status
+## Verify manually
 
-The migration scripts themselves pass Python syntax validation.
-The all-in-one archive is a build/install package; a successful Android Gradle build and GitHub Actions release gate are still the final authority for APK release readiness.
+```powershell
+python .\verify_m1.py "C:\path\to\Trading-Station"
+```
 
+## Roll back
 
-## Dashboard information button fix
+```powershell
+powershell -ExecutionPolicy Bypass -File .\REVERT_M1_BASELINE.ps1 -RepoPath "C:\path\to\Trading-Station"
+```
 
-The Dashboard top-right information icon is functional in this revision.
+## Expected result
 
-It opens a `Dashboard Information` dialog explaining:
-- PAPER/LIVE mode and provider,
-- Portfolio Value,
-- the current `24H P/L` semantics (realized journal P/L over the last rolling 24 hours),
-- Invested and Available,
-- `24H Volume` semantics,
-- active positions,
-- Scan / Execute / Start / Stop / News controls.
+The workflow should build and validate one consistent identity:
 
-The accessibility description is also changed from the generic `Action` to `Dashboard information`.
+- versionName `4.0.7`
+- versionCode `112`
 
+## Next milestone
 
-## r3 — Dashboard Info fixed at the canonical generator
-
-The previous r2 attempted to repair Dashboard handling in a later completion layer.
-Inspection of the current repository showed the canonical workflow does not invoke those
-completion hooks. It *does* always invoke `.cts-v4-migration/apply_exact_preview_ui.py`.
-
-r3 therefore patches the actual `PREVIEW_SOURCE` embedded in that generator.
-
-The Dashboard top-right Info icon now:
-1. handles Dashboard locally inside `PreviewAppTopBar`,
-2. sets `dashboardInfoVisible = true`,
-3. opens a Material3 `Dashboard Information` dialog,
-4. leaves Portfolio/Positions/Orders/System-Test actions on the existing callback path.
-
-For a GitHub Actions APK build, the changed
-`.cts-v4-migration/apply_exact_preview_ui.py` must be committed and pushed after running
-`INSTALL_ALL_IN_ONE.ps1`.
+After the baseline CI passes, freeze/materialize the effective generated v4.0.7
+source into the normal `app/` tree and remove build-time source mutation from the
+canonical workflow. Only after that should the new 24/7 Android hosting changes
+and low-cost Luna/Sol/data utilities be layered in.
