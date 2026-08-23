@@ -82,6 +82,15 @@ class KrakenSpotClient(
     @Volatile private var pairCache: Map<String, KrakenPairRule> = emptyMap()
     @Volatile private var pairCacheLoadedAtMs: Long = 0L
 
+    suspend fun getWebSocketsToken(): String = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) {
+            error("Kraken API key and private key are required for authenticated WebSocket execution state.")
+        }
+        val root = privateJson("/0/private/GetWebSocketsToken", emptyMap())
+        root.optJSONObject("result")?.optString("token")?.takeIf { it.isNotBlank() }
+            ?: error("Kraken GetWebSocketsToken returned no token.")
+    }
+
     override suspend fun validateSymbol(symbol: String): ExchangeSymbolInfo = withContext(Dispatchers.IO) {
         val rule = resolvePairRule(symbol)
         ExchangeSymbolInfo(
@@ -473,7 +482,18 @@ class KrakenSpotClient(
         val rule = resolvePairRule(request.symbol)
         if (!rule.tradable) error("Kraken pair is not tradable: ${request.symbol}. ${rule.status}")
         val path = "/0/private/AddOrder"
-        val nonce = System.currentTimeMillis().toString()
+        val nonce = KrakenNonceSequencer.next()
+        val krakenClientOrderId = KrakenClientOrderId.normalize(request.clientOrderId)
+
+        if (request.side == OrderSide.BUY && request.purpose.equals("ENTRY", ignoreCase = true)) {
+            val existingBuy = getOpenOrders().firstOrNull {
+                it.symbol.equals(rule.canonicalSymbol, ignoreCase = true) && it.side == OrderSide.BUY
+            }
+            if (existingBuy != null) {
+                error("Kraken duplicate entry blocked: open BUY already exists for ${rule.canonicalSymbol}; txid=${existingBuy.exchangeOrderId}, status=${existingBuy.status}, remaining=${existingBuy.remainingQuantity}.")
+            }
+        }
+
         val orderType = when (request.orderType) {
             OrderType.MARKET -> "market"
             OrderType.STOP_LOSS -> "stop-loss"
@@ -488,7 +508,7 @@ class KrakenSpotClient(
             "type" to if (request.side == OrderSide.BUY) "buy" else "sell",
             "ordertype" to orderType,
             "volume" to cleanQuantity.stripTrailingZeros().toPlainString(),
-            "userref" to userRefFromClientOrderId(request.clientOrderId).toString(),
+            "cl_ord_id" to krakenClientOrderId,
             "validate" to "false"
         )
         val orderPriceForMinimum = if (request.orderType == OrderType.MARKET) {
@@ -518,15 +538,34 @@ class KrakenSpotClient(
         val signature = krakenSignature(path, nonce, encoded, secretKey)
         val body = encoded.toRequestBody("application/x-www-form-urlencoded; charset=utf-8".toMediaType())
         val req = Request.Builder().url("https://api.kraken.com$path").addHeader("API-Key", apiKey).addHeader("API-Sign", signature).post(body).build()
+        KrakenPrivateExecutionRegistry.markSubmissionPending(
+            clientOrderId = krakenClientOrderId,
+            symbol = rule.canonicalSymbol,
+            side = request.side
+        )
         http.newCall(req).execute().use { res ->
             val responseBody = res.body?.string().orEmpty()
-            if (!res.isSuccessful) error("Kraken AddOrder HTTP ${res.code}: $responseBody")
+            if (!res.isSuccessful) {
+                if (res.code >= 500) {
+                    KrakenPrivateExecutionRegistry.markFailureIfPending(
+                        krakenClientOrderId,
+                        "Kraken AddOrder HTTP ${res.code}"
+                    )
+                } else {
+                    KrakenPrivateExecutionRegistry.clearSubmission(krakenClientOrderId)
+                }
+                error("Kraken AddOrder HTTP ${res.code}: $responseBody")
+            }
             val root = org.json.JSONObject(responseBody)
             val errors = root.optJSONArray("error")
-            if (errors != null && errors.length() > 0) error("Kraken AddOrder error: $errors")
+            if (errors != null && errors.length() > 0) {
+                KrakenPrivateExecutionRegistry.clearSubmission(krakenClientOrderId)
+                error("Kraken AddOrder error: $errors")
+            }
             val result = root.getJSONObject("result")
             val txidArray = result.optJSONArray("txid")
             val txid = if (txidArray != null && txidArray.length() > 0) txidArray.getString(0) else request.clientOrderId
+            KrakenPrivateExecutionRegistry.markSubmissionAcknowledged(krakenClientOrderId, txid)
 
             // Kraken AddOrder usually only returns txid/description, not the actual fill.
             // QueryOrders gives vol_exec, cost, price and fee so alerts/history do not show 0 values.
@@ -580,7 +619,7 @@ class KrakenSpotClient(
     }
 
     private fun privateJson(path: String, parameters: Map<String, String>): org.json.JSONObject {
-        val nonce = System.currentTimeMillis().toString()
+        val nonce = KrakenNonceSequencer.next()
         val form = linkedMapOf("nonce" to nonce)
         form.putAll(parameters)
         val encoded = encodeForm(form)
