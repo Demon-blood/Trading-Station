@@ -19,6 +19,7 @@ import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.data.AppDatabase
 import com.ksp.cryptobot.governance.ProductionIntelligenceServiceMonitor
 import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
+import com.ksp.cryptobot.exchange.KrakenPrivateExecutionRegistry
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import kotlinx.coroutines.*
@@ -110,6 +111,7 @@ class BotForegroundService : Service() {
             val startSettings = settingsStore.load()
             if (!awaitUsableNetwork("startup")) return@launch
             configureRealtimeMarketData(startSettings, connectivity.snapshot.usable)
+            configurePrivateExecutionState(startSettings, connectivity.snapshot.usable)
 
             if (startSettings.mode == BotMode.LIVE_AUTO) {
                 updateNotification("LIVE_AUTO startup verification…")
@@ -139,6 +141,7 @@ class BotForegroundService : Service() {
 
                 val network = connectivity.refresh()
                 KrakenRealtimeMarketDataRegistry.onNetworkAvailable(network.usable)
+                KrakenPrivateExecutionRegistry.onNetworkAvailable(network.usable)
                 if (!network.usable) {
                     lastNetworkUsable = false
                     hostStore.recovery("PAUSED_NETWORK")
@@ -162,6 +165,7 @@ class BotForegroundService : Service() {
 
                 val current = settingsStore.load()
                 configureRealtimeMarketData(current, network.usable)
+                configurePrivateExecutionState(current, network.usable)
                 val cycleStart = System.currentTimeMillis()
                 try {
                     val cloud = cloudShareSync.syncIfDue()
@@ -192,8 +196,9 @@ class BotForegroundService : Service() {
 
                     val modeText = "${afterCommands.mode}/${afterCommands.exchangeProvider}"
                     val wsHealth = KrakenRealtimeMarketDataRegistry.health()
+                    val execHealth = KrakenPrivateExecutionRegistry.health()
                     updateNotification(
-                        "RUNNING $modeText • net=${network.transports} • ws=${wsHealth.state}/${wsHealth.systemStatus} • next=${selectedDelay}s • signals=${decisions.size}"
+                        "RUNNING $modeText • net=${network.transports} • ws=${wsHealth.state}/${wsHealth.systemStatus} • exec=${execHealth.state}${if (execHealth.knownForEntries) "/known" else "/unknown"} • next=${selectedDelay}s • signals=${decisions.size}"
                     )
                 } catch (error: Exception) {
                     productionMonitor.recordLoopError(error.message ?: error.javaClass.simpleName)
@@ -247,6 +252,33 @@ class BotForegroundService : Service() {
         )
     }
 
+    private fun configurePrivateExecutionState(
+        settings: com.ksp.cryptobot.core.BotSettings,
+        networkUsable: Boolean
+    ) {
+        val shouldRun = settings.exchangeProvider == ExchangeProvider.KRAKEN &&
+            settings.mode != BotMode.PAPER
+        if (!shouldRun) {
+            KrakenPrivateExecutionRegistry.stop()
+            return
+        }
+
+        val key = settingsStore.exchangeApiKey(ExchangeProvider.KRAKEN).orEmpty()
+        val secret = settingsStore.exchangeSecretKey(ExchangeProvider.KRAKEN).orEmpty()
+        if (key.isBlank() || secret.isBlank()) {
+            KrakenPrivateExecutionRegistry.stop()
+            return
+        }
+
+        KrakenPrivateExecutionRegistry.start(key, secret)
+        KrakenPrivateExecutionRegistry.onNetworkAvailable(networkUsable)
+        val health = KrakenPrivateExecutionRegistry.health()
+        statusStore.write(
+            "Kraken private execution-state host: ${health.summary()}",
+            if (health.lastError.isBlank()) "INFO" else "WARN"
+        )
+    }
+
     private suspend fun awaitUsableNetwork(reason: String): Boolean {
         while (scope.isActive && hostStore.snapshot().desiredRunning) {
             val network = connectivity.refresh()
@@ -284,6 +316,9 @@ class BotForegroundService : Service() {
             val openOrders = controller.loadOpenOrdersSnapshot(settings)
             val lifecycle = controller.loadLifecycleSnapshot(settings)
             val portfolio = controller.loadPortfolioSnapshot(settings)
+            if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
+                KrakenPrivateExecutionRegistry.markRestReconciled(openOrders.size)
+            }
 
             hostStore.reconciliationSucceeded(
                 "live:$reason orders=${openOrders.size} positions=${lifecycle.positions.size} assets=${portfolio.assets.size}"
@@ -307,6 +342,7 @@ class BotForegroundService : Service() {
     private fun stopBot() {
         statusStore.write("Stop requested. Trading host shutting down.", "WARN")
         KrakenRealtimeMarketDataRegistry.stop()
+        KrakenPrivateExecutionRegistry.stop()
         controller.stop()
         loopJob?.cancel()
         loopJob = null
@@ -394,6 +430,7 @@ class BotForegroundService : Service() {
 
     override fun onDestroy() {
         KrakenRealtimeMarketDataRegistry.stop()
+        KrakenPrivateExecutionRegistry.stop()
         connectivity.stop()
         loopJob?.cancel()
         scope.cancel()

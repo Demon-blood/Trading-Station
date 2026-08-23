@@ -12,6 +12,7 @@ import com.ksp.cryptobot.exchange.CryptoExchangeClient
 import com.ksp.cryptobot.exchange.ExchangeCapabilityChecker
 import com.ksp.cryptobot.exchange.KrakenSpotClient
 import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
+import com.ksp.cryptobot.exchange.KrakenPrivateExecutionRegistry
 import com.ksp.cryptobot.exchange.ManualExecutionClient
 import com.ksp.cryptobot.exchange.PaperExchangeClient
 import com.ksp.cryptobot.execution.ExecutionGuard
@@ -1400,6 +1401,9 @@ Crypto TradeStation remote commands:
             manageExistingLiveOrders(settings, exchange)
             lifecycleManager.runPreScanMaintenance(settings, exchange)
             val reconciliation = advancedExecution.reconcileLive(settings, exchange)
+            if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
+                KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)
+            }
             reconciliation.messages.take(8).forEach { updateStatus("Advanced reconciliation: $it", if (reconciliation.removed > 0) "WARN" else "INFO") }
         }
         if (settings.mode == BotMode.PAPER && settings.liveLifecycleManagerEnabled) {
@@ -2080,8 +2084,25 @@ Crypto TradeStation remote commands:
         )
         val orderModeLabel = request.orderType.name
         val submittedNotionalEstimate = request.quantity.multiply(price).setScale(8, RoundingMode.HALF_UP)
+
+        if (settings.mode == BotMode.LIVE_AUTO &&
+            settings.exchangeProvider == ExchangeProvider.KRAKEN &&
+            request.side == OrderSide.BUY &&
+            request.purpose.equals("ENTRY", ignoreCase = true)
+        ) {
+            val executionTruth = KrakenPrivateExecutionRegistry.canSubmitNewEntry(request.symbol, request.side)
+            if (!executionTruth.first) {
+                updateStatus("LIVE_AUTO entry blocked by Kraken execution-state gate: ${executionTruth.second}", "ERROR")
+                return ExecutionAttemptResult(false)
+            }
+        }
+
         updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${submittedNotionalEstimate.setScale(2, RoundingMode.DOWN)} $quoteAsset, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
+            KrakenPrivateExecutionRegistry.markFailureIfPending(
+                request.clientOrderId,
+                error.message ?: error.javaClass.simpleName
+            )
             updateStatus("Order submit failed: ${error.message}", "ERROR")
             val deterministicMinimumRejection =
                 error.message?.contains("order size too small", ignoreCase = true) == true ||
