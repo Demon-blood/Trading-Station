@@ -9,6 +9,9 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.ksp.cryptobot.core.BotController
 import com.ksp.cryptobot.core.BotMode
+import com.ksp.cryptobot.cloudshare.CloudShareSyncEngine
+import com.ksp.cryptobot.governance.ProductionIntelligenceServiceMonitor
+import com.ksp.cryptobot.data.AppDatabase
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import kotlinx.coroutines.*
@@ -18,12 +21,16 @@ class BotForegroundService : Service() {
     private lateinit var controller: BotController
     private lateinit var settingsStore: AppSettingsStore
     private lateinit var statusStore: BotStatusStore
+    private lateinit var cloudShareSync: CloudShareSyncEngine
+    private lateinit var productionMonitor: ProductionIntelligenceServiceMonitor
 
     override fun onCreate() {
         super.onCreate()
         controller = BotController(applicationContext)
         settingsStore = AppSettingsStore(applicationContext)
         statusStore = BotStatusStore(applicationContext)
+        cloudShareSync = CloudShareSyncEngine(applicationContext)
+        productionMonitor = ProductionIntelligenceServiceMonitor(AppDatabase.get(applicationContext).governanceDao())
         createChannel()
     }
 
@@ -53,6 +60,7 @@ class BotForegroundService : Service() {
         statusStore.write("Background auto bot service starting. Provider=${settings.exchangeProvider}, mode=${settings.mode}, manual=${settings.manualExecutionMode}, backgroundAuto=$backgroundAuto")
         startForeground(NOTIFICATION_ID, notification(text))
         scope.launch {
+            productionMonitor.onServiceStart()
             val startSettings = settingsStore.load()
             if (startSettings.mode == BotMode.LIVE_AUTO) {
                 updateNotification("Running LIVE_AUTO preflight verification...")
@@ -77,6 +85,13 @@ class BotForegroundService : Service() {
                 val current = settingsStore.load()
                 val cycleStart = System.currentTimeMillis()
                 try {
+                    productionMonitor.heartbeat()
+                    val cloud = cloudShareSync.syncIfDue()
+                    if (cloud.error.isNotBlank()) {
+                        statusStore.write("CloudShare sync deferred: ${cloud.error}", "WARN")
+                    } else if (cloud.uploaded + cloud.duplicates + cloud.rejected + cloud.downloaded + cloud.backfilled + cloud.aggregatesQueued > 0) {
+                        statusStore.write("CloudShare sync: upload=${cloud.uploaded}, duplicate=${cloud.duplicates}, rejected=${cloud.rejected}, download=${cloud.downloaded}, aggregate=${cloud.aggregatesQueued}, backfill=${cloud.backfilled}, collective=${cloud.collectiveOutcomeRows}", "INFO")
+                    }
                     controller.processRemoteCommands(current)
                     if (!controller.running) break
                     val currentAfterCommands = settingsStore.load()
@@ -91,6 +106,7 @@ class BotForegroundService : Service() {
                     }
                     updateNotification(statusStore.latestText())
                 } catch (error: Exception) {
+                    productionMonitor.recordLoopError(error.message ?: error.javaClass.simpleName)
                     statusStore.write("Service cycle failed: ${error.message}", "ERROR")
                     updateNotification("Bot error: ${error.message}")
                 }

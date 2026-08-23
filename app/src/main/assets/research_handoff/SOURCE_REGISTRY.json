@@ -1,0 +1,327 @@
+{
+  "research_freeze": "2026-08-17",
+  "sources": [
+    {
+      "id": "fsma_derivatives",
+      "type": "official_regulator",
+      "title": "FSMA regulation governing distribution of certain derivative financial instruments",
+      "url": "https://www.fsma.be/en/faq/fsma-regulation-governing-distribution-certain-derivative-financial-instruments-binary-options",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "fsma_casp",
+      "type": "official_regulator",
+      "title": "FSMA Crypto-asset service provider (CASP)",
+      "url": "https://www.fsma.be/en/crypto-asset-service-provider-casp",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "kraken_licenses",
+      "type": "official_exchange",
+      "title": "Where is Kraken licensed or regulated?",
+      "url": "https://support.kraken.com/articles/where-is-kraken-licensed-or-regulated",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "kraken_fees",
+      "type": "official_exchange",
+      "title": "Kraken Fee Schedule",
+      "url": "https://www.kraken.com/features/fee-schedule",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "kraken_minimums",
+      "type": "official_exchange",
+      "title": "Overview of cryptocurrency minimums",
+      "url": "https://support.kraken.com/articles/360001389303-overview-of-cryptocurrency-minimums",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_about",
+      "type": "primary",
+      "title": "Peter Brandt — About",
+      "url": "https://www.peterlbrandt.com/about-us/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_platform",
+      "type": "primary",
+      "title": "Trading books / trading platforms",
+      "url": "https://www.peterlbrandt.com/trading-books-trading-platforms/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_trading_day",
+      "type": "primary",
+      "title": "My Trading Day",
+      "url": "https://www.peterlbrandt.com/my-trading-day/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_cwt_329",
+      "type": "direct_interview",
+      "title": "Chat With Traders #329 — Peter Brandt",
+      "url": "https://chatwithtraders.com/episode/329-peter-brandt",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_factor_chart_lab",
+      "type": "primary_pdf",
+      "title": "The Factor Chart Lab",
+      "url": "https://www.peterlbrandt.com/wp-content/uploads/2021/07/The-Factor-Chart-Lab.pdf",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_3dtsr_pdf",
+      "type": "primary_pdf",
+      "title": "3-Day Trailing Stop Rule",
+      "url": "https://peterlbrandt.com/wp-content/uploads/2016/03/3-Day-Trailing-Stop-Rule-3DTSR.pdf",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_factor_questions",
+      "type": "primary",
+      "title": "Factor Member Questions",
+      "url": "https://www.peterlbrandt.com/factor-member-questions/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "brandt_factor_knowledge",
+      "type": "primary",
+      "title": "Factor Knowledge Center",
+      "url": "https://www.peterlbrandt.com/factor-knowledge-center/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_channel",
+      "type": "primary_video_index",
+      "title": "CryptoCred YouTube",
+      "url": "https://www.youtube.com/@CryptoCred",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_risk_management",
+      "type": "primary_video",
+      "title": "Risk Management UPDATED",
+      "url": "https://www.youtube.com/watch?v=XeQV2ECtZVQ",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_entry_triggers",
+      "type": "primary_video",
+      "title": "Entry Triggers UPDATED",
+      "url": "https://www.youtube.com/watch?v=7mnz-JxhHnk",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_horizontal_sr",
+      "type": "primary_video",
+      "title": "Horizontal Support/Resistance UPDATED",
+      "url": "https://www.youtube.com/watch?v=j5pBnAiQz-c",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_retests",
+      "type": "primary_video",
+      "title": "Retests",
+      "url": "https://www.youtube.com/watch?v=inqHN8q57X4",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_fta",
+      "type": "primary_video",
+      "title": "First Trouble Area",
+      "url": "https://www.youtube.com/watch?v=Yp0k8HD5xro",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_market_structure",
+      "type": "primary_video",
+      "title": "Market Structure",
+      "url": "https://www.youtube.com/watch?v=BHwoN7VPrBE",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_pattern_failure",
+      "type": "primary_video",
+      "title": "Pattern Failure",
+      "url": "https://www.youtube.com/watch?v=f9mkEe-Y67A",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cryptocred_pdh_pdl",
+      "type": "primary_article",
+      "title": "Using Previous Day High/Low for Intraday Bias",
+      "url": "https://medium.com/@cryptocreddy",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_dan",
+      "type": "primary",
+      "title": "Dan McDermitt profile",
+      "url": "https://www.chartguys.com/team/chartingmandan",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_backburner_indicator",
+      "type": "primary",
+      "title": "BackBurner Indicator / strategy description",
+      "url": "https://www.chartguys.com/indicators/backburner",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_scalein",
+      "type": "primary",
+      "title": "3 Scale-In Strategies",
+      "url": "https://www.chartguys.com/blog/3-scale-in-strategies",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_stairstep",
+      "type": "primary",
+      "title": "Stair Step Trading Strategy",
+      "url": "https://www.chartguys.com/educational-videos/stair-step-trading-strategy",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_ema_rider",
+      "type": "primary",
+      "title": "EMA Rider Strategy / EMA Trading Strategy",
+      "url": "https://www.chartguys.com/ebooks/ema-trading-strategy",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_small_account",
+      "type": "primary",
+      "title": "Growing A Small Trading Account",
+      "url": "https://www.chartguys.com/ebooks/growing-a-small-trading-account",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_riskfree",
+      "type": "primary",
+      "title": "How To Establish A Risk-Free Trade",
+      "url": "https://www.chartguys.com/ebooks/how-to-establish-a-risk-free-trade",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_video_library",
+      "type": "primary",
+      "title": "Educational Videos Library",
+      "url": "https://www.chartguys.com/educational-videos",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "tcg_tradrpro",
+      "type": "primary",
+      "title": "TradrPro crypto alerts",
+      "url": "https://www.chartguys.com/tradrpro",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "krown_channel",
+      "type": "primary_video_index",
+      "title": "Krown YouTube",
+      "url": "https://www.youtube.com/channel/UCnwxzpFzZNtLH8NgTeAROFA",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "krown_ta101",
+      "type": "primary",
+      "title": "Krown TA101 / course site",
+      "url": "https://krown-trading.teachable.com/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "krown_quant",
+      "type": "primary",
+      "title": "Krown Quant Prime curriculum",
+      "url": "https://krown-trading.teachable.com/p/quant-prime",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "krown_quant_video",
+      "type": "primary_video",
+      "title": "Krown Quant Project — 12 Statistically Tested Bitcoin Trading Strategies",
+      "url": "https://www.youtube.com/watch?v=vacro9FmdHE",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cowen_itc",
+      "type": "primary",
+      "title": "Into The Cryptoverse",
+      "url": "https://intothecryptoverse.com/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cowen_entry_exit",
+      "type": "primary_video",
+      "title": "Bitcoin: Entry/Exit Strategies",
+      "url": "https://www.youtube.com/watch?v=ReziClqylXA",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cowen_dynamic_dca",
+      "type": "primary_video",
+      "title": "Bitcoin Dynamic DCA: How I Navigate Crypto",
+      "url": "https://www.youtube.com/watch?v=hx_neha7BVQ",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "cowen_risk",
+      "type": "primary_video",
+      "title": "Bitcoin: Risk Metric",
+      "url": "https://www.youtube.com/watch?v=g_ryyK58svM",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "loukas_channel",
+      "type": "primary_video_index",
+      "title": "Bob Loukas YouTube",
+      "url": "https://www.youtube.com/@bobloukas3493",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "loukas_4y",
+      "type": "primary_video",
+      "title": "The Next 4-Year Cycle Started",
+      "url": "https://www.youtube.com/watch?v=PZvOhJYW_Hw",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "loukas_swing",
+      "type": "primary_video",
+      "title": "Watch That Swing — Bitcoin",
+      "url": "https://www.youtube.com/watch?v=oPXQa47iT28",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "pizzino_channel",
+      "type": "primary_video_index",
+      "title": "Jason Pizzino YouTube",
+      "url": "https://www.youtube.com/@JasonPizzinoOfficial",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "pizzino_swing",
+      "type": "primary_video",
+      "title": "How To Swing Trade For Beginners — Part 1",
+      "url": "https://www.youtube.com/watch?v=wrNFtyCJsNY",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "rastani_site",
+      "type": "primary",
+      "title": "LeadingTrader",
+      "url": "https://leadingtrader.com/",
+      "accessed": "2026-08-17"
+    },
+    {
+      "id": "rastani_channel",
+      "type": "primary_video_index",
+      "title": "Alessio Rastani YouTube",
+      "url": "https://www.youtube.com/user/alessiorastani",
+      "accessed": "2026-08-17"
+    }
+  ]
+}

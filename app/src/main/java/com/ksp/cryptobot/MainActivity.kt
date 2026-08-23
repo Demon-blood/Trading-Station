@@ -1,5 +1,6 @@
 package com.ksp.cryptobot
 
+
 import android.Manifest
 import android.content.Intent
 import android.os.Bundle
@@ -47,6 +48,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -93,6 +96,10 @@ import com.ksp.cryptobot.core.PerformanceLabSnapshot
 import com.ksp.cryptobot.pro.ProAutomationSuite
 import com.ksp.cryptobot.service.BotForegroundService
 import com.ksp.cryptobot.settings.AppSettingsStore
+import com.ksp.cryptobot.ui.CloudShareScreen
+import com.ksp.cryptobot.ui.V4ResearchPanel
+import com.ksp.cryptobot.ui.V4RecoveryPanel
+import com.ksp.cryptobot.news.NewsProviderHealthRegistry
 import com.ksp.cryptobot.status.BotStatusStore
 import com.ksp.cryptobot.learning.TrueSelfLearningEngine
 import com.ksp.cryptobot.data.TradeEntity
@@ -102,16 +109,16 @@ import kotlinx.coroutines.delay
 import java.math.BigDecimal
 import java.math.RoundingMode
 
-private val SpaceBlack = Color(0xFF081326)
-private val Panel = Color(0xFF0F1B33)
-private val PanelAlt = Color(0xFF142544)
-private val Stroke = Color(0xFF2A4471)
-private val Electric = Color(0xFF47B8FF)
-private val Mint = Color(0xFF55F0DE)
-private val Amber = Color(0xFFFFC857)
-private val Danger = Color(0xFFFF5E8A)
-private val Muted = Color(0xFFA5B4D0)
-private val TextPrimary = Color(0xFFEAF3FF)
+private val SpaceBlack = Color(0xFF0C1522)
+private val Panel = Color(0xFF141D2A)
+private val PanelAlt = Color(0xFF111A27)
+private val Stroke = Color(0xFF243143)
+private val Electric = Color(0xFF8B5CF6)
+private val Mint = Color(0xFF62DE67)
+private val Amber = Color(0xFFFFA31A)
+private val Danger = Color(0xFFFF5D69)
+private val Muted = Color(0xFF8E9BAB)
+private val TextPrimary = Color(0xFFF2F5F8)
 
 class MainActivity : ComponentActivity() {
     private lateinit var controller: BotController
@@ -124,6 +131,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.statusBarColor = android.graphics.Color.rgb(10, 19, 32)
+        window.navigationBarColor = android.graphics.Color.rgb(10, 19, 32)
         controller = BotController(applicationContext)
         settingsStore = AppSettingsStore(applicationContext)
         statusStore = BotStatusStore(applicationContext)
@@ -225,6 +234,12 @@ class MainActivity : ComponentActivity() {
                                 callback(controller.runSystemFeatureVerification(settings))
                             }
                         },
+                        onExportDiagnostics = { settings, customDiagnosticsDirectory, callback ->
+                            lifecycleScope.launch {
+                                settingsStore.saveDiagnosticsDirectoryPath(customDiagnosticsDirectory)
+                                callback(controller.exportFullDiagnosticsToFile(settings, customDiagnosticsDirectory))
+                            }
+                        },
                         onExportFullBackup = { settings, customBackupDirectory, callback ->
                             lifecycleScope.launch {
                                 settingsStore.saveBackupDirectoryPath(customBackupDirectory)
@@ -268,16 +283,22 @@ private fun CryptoTradeStationTheme(content: @Composable () -> Unit) {
             onPrimary = Color.White,
             onSecondary = Color(0xFF06130F)
         ),
+        shapes = androidx.compose.material3.Shapes(
+            small = RoundedCornerShape(5.dp),
+            medium = RoundedCornerShape(8.dp),
+            large = RoundedCornerShape(10.dp)
+        ),
         content = content
     )
 }
 
-private enum class AppTab(val label: String) {
+enum class AppTab(val label: String) {
     DASHBOARD("Dashboard"),
     STATUS("Live Status"),
     BOT("Bot"),
     AI("AI"),
     AI_SIGNALS("AI Signals"),
+    AI_SIGNAL_DETAIL("AI Signal"),
     NEWS("News Dashboard"),
     CHART("Chart"),
     CHART_MAIN("Live Chart"),
@@ -285,6 +306,7 @@ private enum class AppTab(val label: String) {
     REPLAY("Trade Replay"),
     TRADE_JOURNAL("Trade Journal"),
     STRATEGY("Strategy Lab"),
+    RESEARCH_SETTINGS("Research Intelligence"),
     SANDBOX("Strategy Sandbox"),
     BACKTEST("Backtest Lab"),
     REGIME("Regime"),
@@ -306,14 +328,16 @@ private enum class AppTab(val label: String) {
     RISK("Risk Center"),
     HISTORY("History"),
     SETTINGS("Settings"),
-    BASIC_SETTINGS("Basic Settings"),
+    BASIC_SETTINGS("Connection & Trading"),
     SYSTEM_TEST("System Test"),
     HEALTH("Build Health"),
     NOTIFICATIONS("Notifications"),
     NOTIFICATION_LOGS("Event Logs"),
     REMOTE_ALERTS("Remote Alerts"),
     BACKUP("Backup/Restore"),
-    ADVANCED_SETTINGS("Advanced Settings"),
+    CLOUDSHARE_SETTINGS("CloudShare"),
+    RECOVERY_TOOLS("Recovery Tools"),
+    ADVANCED_SETTINGS("Automation & Risk"),
     SYMBOLS("Symbol Scanner")
 }
 
@@ -340,6 +364,7 @@ private fun AdvancedBotApp(
     onLoadNewsHistory: (String, Int, (List<NewsArticleEntity>) -> Unit) -> Unit,
     onRunKrakenHealth: (BotSettings, (List<String>) -> Unit) -> Unit,
     onRunSystemTest: (BotSettings, (List<String>) -> Unit) -> Unit,
+    onExportDiagnostics: (BotSettings, String, (Pair<List<String>, String>) -> Unit) -> Unit,
     onExportFullBackup: (BotSettings, String, (String) -> Unit) -> Unit,
     onRestoreFullBackup: (String, Boolean, (String) -> Unit) -> Unit,
     onTestTelegram: (BotSettings, (Boolean) -> Unit) -> Unit,
@@ -351,6 +376,7 @@ private fun AdvancedBotApp(
     var statusLevel by remember { mutableStateOf(statusStore.latestLevel()) }
     var statusHistory by remember { mutableStateOf(statusStore.recentLines()) }
     var decisions by remember { mutableStateOf<List<AiDecision>>(emptyList()) }
+    var selectedAiDecision by remember { mutableStateOf<AiDecision?>(null) }
     var portfolioSnapshot by remember { mutableStateOf<PortfolioSnapshot?>(null) }
     var liveOrders by remember { mutableStateOf<List<LiveOrderInfo>>(emptyList()) }
     var lifecycleSnapshot by remember { mutableStateOf<LifecycleSnapshot?>(null) }
@@ -436,7 +462,7 @@ private fun AdvancedBotApp(
                 statusStore.write("News dashboard loaded. cachedArticles=${result.size}")
             }
         }
-        if (currentTab == AppTab.PORTFOLIO) {
+        if (currentTab == AppTab.PORTFOLIO || currentTab == AppTab.SETTINGS) {
             onLoadPortfolio(settings) { result ->
                 portfolioSnapshot = result
                 statusStore.write("Portfolio auto-refresh complete. Total≈€${result.totalValueEur}")
@@ -550,51 +576,59 @@ private fun AdvancedBotApp(
     var maxSpread by remember { mutableStateOf(settings.maxSpreadPercent.toPlainString()) }
 
     fun persistSettings(newSettings: BotSettings) {
-        settings = newSettings
-        store.save(newSettings)
-        status = "Settings saved"
+        val verified = store.save(newSettings)
+        val effective = store.load()
+        settings = effective
+        status = if (verified && effective == newSettings) "Settings saved and verified" else "Settings save verification failed — run System Test"
+        statusStore.write(status, if (verified && effective == newSettings) "INFO" else "ERROR")
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xFF09111F), SpaceBlack, Color(0xFF090B12))
-                )
+                Brush.verticalGradient(listOf(Color(0xFF0C1522), Color(0xFF0C1522)))
             )
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            HeaderBar(status = status, mode = settings.mode, level = statusLevel)
-            AppTabs(currentTab = currentTab, onTabSelected = { currentTab = it })
-
-            when (currentTab) {
-                AppTab.DASHBOARD -> DashboardScreen(
+            PreviewAppTopBar(
+                currentTab = currentTab,
+                detailSymbol = selectedAiDecision?.symbol,
+                onNavigate = { currentTab = it },
+                onBack = { currentTab = previewParentTab(currentTab) },
+                onAction = {
+                    when (currentTab) {
+                        AppTab.PORTFOLIO -> {
+                            onLoadPortfolio(settings) { portfolioSnapshot = it }
+                            onLoadLifecycle(settings) { lifecycleSnapshot = it }
+                        }
+                        AppTab.POSITIONS -> onLoadLifecycle(settings) { lifecycleSnapshot = it }
+                        AppTab.ORDERS -> onLoadOrders(settings) { liveOrders = it }
+                        AppTab.SYSTEM_TEST -> onRunSystemTest(settings) { systemTestLines = it }
+                        else -> Unit
+                    }
+                }
+            )
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                when (currentTab) {
+                AppTab.DASHBOARD -> PreviewDashboardScreen(
                     settings = settings,
                     status = status,
+                    portfolio = portfolioSnapshot,
+                    lifecycle = lifecycleSnapshot,
                     decisions = decisions,
-                    activePositionSymbols = activeChartSymbols,
+                    trades = tradeJournal,
                     onStart = { statusStore.write("Start button pressed from dashboard."); onStart(); status = "Foreground live scanner started" },
                     onStop = { statusStore.write("Stop button pressed from dashboard.", "WARN"); onStop(); status = "Bot stopped" },
                     onScan = {
                         status = "Scanning market + AI inputs..."
                         val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
-                        val scanSettings = settings.copy(symbolsCsv = scanSymbols.joinToString(","))
-                        onScan(scanSettings, false) { result ->
-                            decisions = result
-                            statusStore.write("Manual scan complete from dashboard. Symbols=${scanSymbols.size}, Decisions=${result.size}")
-                            status = "Scan complete"
-                        }
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), false) { result -> decisions = result; status = "Scan complete" }
                     },
                     onExecute = {
                         status = "Running guarded execution pass..."
                         val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
-                        val scanSettings = settings.copy(symbolsCsv = scanSymbols.joinToString(","))
-                        onScan(scanSettings, settings.mode == BotMode.PAPER || settings.mode == BotMode.LIVE_AUTO) { result ->
-                            decisions = result
-                            statusStore.write("Manual execution pass complete from dashboard. Symbols=${scanSymbols.size}, Decisions=${result.size}")
-                            status = "Execution pass complete"
-                        }
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), settings.mode == BotMode.PAPER || settings.mode == BotMode.LIVE_AUTO) { result -> decisions = result; status = "Execution pass complete" }
                     },
                     onOpenNews = { currentTab = AppTab.NEWS }
                 )
@@ -638,35 +672,39 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
-                AppTab.AI -> AiHubScreen(
+                AppTab.AI -> PreviewAiHubScreen(
                     decisions = decisions,
                     settings = settings,
                     performanceLabSnapshot = performanceLabSnapshot,
+                    trades = tradeJournal,
                     onOpen = { currentTab = it },
-                    onRefreshPerformance = {
-                        val perfSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
-                        onLoadPerformanceLab(settings.copy(symbolsCsv = perfSymbols.joinToString(","))) { result ->
-                            performanceLabSnapshot = result
-                            statusStore.write("${result.summaryLine}. Symbols=${perfSymbols.size}")
-                            status = "Performance Lab refreshed"
-                        }
+                    onSelectSignal = { decision ->
+                        selectedAiDecision = decision
+                        chartSymbol = decision.symbol.uppercase().replace("/", "").replace("-", "")
+                        onLoadChartCandles(settings, chartSymbol, Timeframe.M15, 180) { chartCandles = it }
+                        currentTab = AppTab.AI_SIGNAL_DETAIL
+                    },
+                    onScan = {
+                        val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), false) { result -> decisions = result; status = "AI Signals scan complete" }
                     }
                 )
-                AppTab.AI_SIGNALS -> AiSignalsScreen(
+                AppTab.AI_SIGNALS -> PreviewAiSignalsListScreen(
                     decisions = decisions,
                     settings = settings,
                     activePositionSymbols = activeChartSymbols,
                     onScan = {
                         val scanSymbols = (settings.symbols() + activeChartSymbols).map { it.uppercase().replace("/", "").replace("-", "") }.distinct()
-                        val scanSettings = settings.copy(symbolsCsv = scanSymbols.joinToString(","))
-                        status = "AI Signals scan running..."
-                        onScan(scanSettings, false) { result ->
-                            decisions = result
-                            statusStore.write("AI Signals scan complete. Symbols=${scanSymbols.size}, Decisions=${result.size}")
-                            status = "AI Signals scan complete"
-                        }
+                        onScan(settings.copy(symbolsCsv = scanSymbols.joinToString(",")), false) { result -> decisions = result; status = "AI Signals scan complete" }
+                    },
+                    onSelectSignal = { decision ->
+                        selectedAiDecision = decision
+                        chartSymbol = decision.symbol.uppercase().replace("/", "").replace("-", "")
+                        onLoadChartCandles(settings, chartSymbol, Timeframe.M15, 180) { chartCandles = it }
+                        currentTab = AppTab.AI_SIGNAL_DETAIL
                     }
                 )
+                AppTab.AI_SIGNAL_DETAIL -> PreviewAiSignalDetailScreen(selectedAiDecision, chartCandles)
                 AppTab.CHART -> ChartScreen(
                     settings = settings,
                     candles = chartCandles,
@@ -769,6 +807,7 @@ private fun AdvancedBotApp(
                     }
                 )
                 AppTab.STRATEGY -> StrategyScreen(settings = settings, onToggleStrategy = { persistSettings(settings.copy(recoveredScalpingStrategyEnabled = it)) })
+                AppTab.RESEARCH_SETTINGS -> V4ResearchPanel()
                 AppTab.SANDBOX -> StrategySandboxScreen(
                     settings = settings,
                     onRunHistoricalBacktest = onRunHistoricalBacktest
@@ -792,15 +831,11 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
-                AppTab.POSITIONS -> PositionsScreen(
+                AppTab.POSITIONS -> PreviewPositionsScreen(
                     settings = settings,
                     snapshot = lifecycleSnapshot,
                     onRefresh = {
-                        statusStore.write("Lifecycle refresh requested from UI.")
-                        onLoadLifecycle(settings) { result ->
-                            lifecycleSnapshot = result
-                            status = "Lifecycle loaded: ${result.positions.size} position(s)"
-                        }
+                        onLoadLifecycle(settings) { result -> lifecycleSnapshot = result; status = "Lifecycle loaded: ${result.positions.size} position(s)" }
                     }
                 )
                 AppTab.AUTONOMOUS -> AutonomousScreen(
@@ -896,27 +931,22 @@ private fun AdvancedBotApp(
                     onRunHistoricalBacktest = onRunHistoricalBacktest
                 )
                 AppTab.RELEASE_SAFETY -> ReleaseSafetyLockScreen(settings = settings, healthLines = krakenHealthLines)
-                AppTab.PORTFOLIO -> PortfolioScreen(
+                AppTab.PORTFOLIO -> PreviewPortfolioScreen(
                     settings = settings,
                     snapshot = portfolioSnapshot,
                     lifecycleSnapshot = lifecycleSnapshot,
+                    trades = tradeJournal,
                     onRefresh = {
-                        statusStore.write("Portfolio refresh requested from UI.")
-                        onLoadPortfolio(settings) { result ->
-                            portfolioSnapshot = result
-                            statusStore.write("Portfolio refresh complete. Total≈€${result.totalValueEur}")
-                            status = "Portfolio loaded: €${result.totalValueEur}"
-                        }
-                        onLoadLifecycle(settings) { result ->
-                            lifecycleSnapshot = result
-                            statusStore.write("Portfolio lifecycle guard refresh complete. positions=${result.positions.size}")
-                        }
+                        onLoadPortfolio(settings) { result -> portfolioSnapshot = result; status = "Portfolio loaded: €${result.totalValueEur}" }
+                        onLoadLifecycle(settings) { lifecycleSnapshot = it }
+                        onLoadTradeJournal(200) { tradeJournal = it }
                     }
                 )
-                AppTab.NEWS -> NewsScreen(
+                AppTab.NEWS -> PreviewNewsScreen(
                     settings = settings,
                     newsHistory = newsHistory,
                     activeSymbols = activeChartSymbols,
+                    decisions = decisions,
                     onToggleNews = { persistSettings(settings.copy(useNewsAi = it)) },
                     onRefreshHistory = { symbol ->
                         onLoadNewsHistory(symbol, 200) { result ->
@@ -983,60 +1013,40 @@ private fun AdvancedBotApp(
                         status = "Advanced settings saved"
                     }
                 )
-                AppTab.SETTINGS -> SettingsHubScreen(
+                AppTab.SETTINGS -> PreviewSettingsScreen(
                     settings = settings,
-                    systemTestLines = systemTestLines,
-                    onOpen = { currentTab = it },
-                    onModeChange = { mode ->
-                        persistSettings(settings.copy(
-                            mode = mode,
-                            manualExecutionMode = if (mode == BotMode.LIVE_AUTO) false else settings.manualExecutionMode
-                        ))
-                        statusStore.write("Trading mode changed to $mode from Settings hub.", "INFO")
-                        status = "Mode changed to $mode"
+                    portfolio = portfolioSnapshot,
+                    onPersist = { updated ->
+                        persistSettings(updated)
+                        maxPosition = updated.maxPositionEur.toPlainString()
+                        maxLoss = updated.maxDailyLossEur.toPlainString()
+                        maxTrades = updated.maxTradesPerDay.toString()
+                        maxSpread = updated.maxSpreadPercent.toPlainString()
                     },
-                    onLiveAckChange = { acknowledged ->
-                        persistSettings(settings.copy(liveTradingAcknowledged = acknowledged))
-                        statusStore.write("Live acknowledgement changed to $acknowledged from Settings hub.", if (acknowledged) "INFO" else "WARN")
-                        status = "Live acknowledgement ${if (acknowledged) "enabled" else "disabled"}"
-                    },
-                    onRunSystemTest = {
-                        onRunSystemTest(settings) { result ->
-                            systemTestLines = result
-                            statusStore.write("System test completed from Settings hub. rows=${result.size}", "INFO")
-                            status = "System test complete"
-                        }
-                    },
-                    onApplySafeDefaults = {
-                        val safe = settings.copy(
-                            exchangeProvider = ExchangeProvider.PAPER,
-                            mode = BotMode.PAPER,
-                            manualExecutionMode = false,
-                            allowedQuoteAssetsCsv = "EUR",
-                            autoSymbolQuoteAsset = "ALL",
-                            nonEurQuoteBuyEnabled = false,
-                            maxNewTradesPerScan = 1,
-                            maxTradesPerHour = 3,
-                            maxSimultaneousLivePositions = 3,
-                            minimumQuoteReservePercent = BigDecimal("20.0"),
-                            trueSelfLearningEnabled = true,
-                            spikeProfitTimingEnabled = true,
-                            enableBacktestGate = true,
-                            enableForwardTestGate = true
-                        )
-                        persistSettings(safe)
-                        statusStore.write("Clean Settings hub applied safe Belgium defaults.", "INFO")
-                        status = "Safe defaults applied"
-                    }
+                    onOpen = { currentTab = it }
                 )
-                AppTab.SYSTEM_TEST -> SystemTestScreen(
+                AppTab.SYSTEM_TEST -> PreviewSystemTestScreen(
                     settings = settings,
                     lines = systemTestLines,
+                    diagnosticsDirectoryPath = store.diagnosticsDirectoryPath(),
+                    onDiagnosticsDirectoryPathChanged = { store.saveDiagnosticsDirectoryPath(it) },
+                    onOpen = { currentTab = it },
                     onRun = {
                         onRunSystemTest(settings) { result ->
                             systemTestLines = result
                             statusStore.write("System test manually completed. rows=${result.size}", "INFO")
                             status = "System test complete"
+                        }
+                    },
+                    onRunAndSave = { directory, callback ->
+                        onExportDiagnostics(settings, directory) { result ->
+                            systemTestLines = result.first
+                            callback(result.second)
+                            statusStore.write(
+                                "Full diagnostics export completed. rows=${result.first.size}",
+                                if (result.second.contains("failed", true)) "ERROR" else "INFO"
+                            )
+                            status = if (result.second.contains("failed", true)) "Diagnostics export failed" else "Diagnostics saved"
                         }
                     }
                 )
@@ -1174,8 +1184,11 @@ private fun AdvancedBotApp(
                         }
                     }
                 )
-                AppTab.BACKUP -> BackupRestoreScreen(
+                AppTab.CLOUDSHARE_SETTINGS -> CloudShareScreen()
+                AppTab.RECOVERY_TOOLS -> V4RecoveryPanel()
+                AppTab.BACKUP -> PreviewBackupRecoveryScreen(
                     settings = settings,
+                    onOpen = { currentTab = it },
                     backupDirectoryPath = store.backupDirectoryPath(),
                     onBackupDirectoryPathChanged = { store.saveBackupDirectoryPath(it) },
                     onExportFullBackup = { customBackupDirectory, callback ->
@@ -1215,7 +1228,9 @@ private fun AdvancedBotApp(
                         status = "Safe defaults restored"
                     }
                 )
+                }
             }
+            PreviewBottomNavigation(currentTab = currentTab, onTabSelected = { currentTab = it })
         }
     }
 }
@@ -1238,7 +1253,7 @@ private fun HeaderBar(status: String, mode: BotMode, level: String) {
                 Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 StatusPill(level, levelColor(level))
                 Spacer(Modifier.width(8.dp))
-                Text("v3.2.5 CTS", color = Mint, fontWeight = FontWeight.Bold)
+                Text("v4.0.7 CTS", color = Mint, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1719,7 +1734,8 @@ private fun AiHubScreen(
     onRefreshPerformance: () -> Unit
 ) {
     val buySignals = decisions.count { it.finalAction == SignalAction.BUY || it.finalAction == SignalAction.SMALL_BUY }
-    val sellSignals = decisions.count { it.finalAction == SignalAction.SELL || it.finalAction == SignalAction.AVOID || it.finalAction == SignalAction.STRONG_AVOID }
+    val sellSignals = decisions.count { it.finalAction == SignalAction.SELL }
+    val avoidedEntries = decisions.count { it.finalAction == SignalAction.AVOID || it.finalAction == SignalAction.STRONG_AVOID }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
@@ -1730,12 +1746,14 @@ private fun AiHubScreen(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { MetricCard("AI decisions", decisions.size.toString(), "Latest scan", Electric) }
                 item { MetricCard("Buy pressure", buySignals.toString(), "BUY/SMALL_BUY", Mint) }
-                item { MetricCard("Exit pressure", sellSignals.toString(), "SELL/AVOID", Danger) }
+                item { MetricCard("Exit signals", sellSignals.toString(), "Explicit SELL only", Danger) }
+                item { MetricCard("Avoid entries", avoidedEntries.toString(), "AVOID / STRONG AVOID", Amber) }
                 item { MetricCard("Strategy", settings.strategyMode.name, "Selected mode", Amber) }
             }
         }
         item { HubActionCard("AI Signals", "Latest combined AI decisions and explanations.", "Open", { onOpen(AppTab.AI_SIGNALS) }) }
         item { HubActionCard("Strategy Lab", "Technical strategy, scoring logic and strategy controls.", "Open", { onOpen(AppTab.STRATEGY) }) }
+        item { HubActionCard("Research Intelligence", "Professional research, handoff truth, robustness and external-context controls.", "Open", { onOpen(AppTab.RESEARCH_SETTINGS) }) }
         item { HubActionCard("Backtest Lab", "Run Kraken OHLC backtests and forward tests.", "Open", { onOpen(AppTab.BACKTEST) }) }
         item { HubActionCard("Regime Detection", "Trend, volatility and market regime behavior.", "Open", { onOpen(AppTab.REGIME) }) }
         item { HubActionCard("Performance Lab", performanceLabSnapshot?.summaryLine ?: "Paper/live strategy promotion overview.", "Open", { onOpen(AppTab.PERFORMANCE) }) }
@@ -1960,7 +1978,7 @@ private fun SettingsHubScreen(
                 Text("Keep Kraken API withdrawal permission OFF. This acknowledgement only permits guarded trading logic; it does not bypass safety checks.", color = Amber)
             }
         }
-        item { HubActionCard("Basic Settings", "Provider, Kraken/API keys, symbols and main risk fields.", "Open", { onOpen(AppTab.BASIC_SETTINGS) }) }
+        item { HubActionCard("Connection & Trading", "Exchange, credentials, symbols and primary trading controls.", "Open", { onOpen(AppTab.BASIC_SETTINGS) }) }
         item {
             GlassCard {
                 val failures = systemTestLines.count { it.startsWith("FAIL") }
@@ -1979,9 +1997,11 @@ private fun SettingsHubScreen(
                 }
             }
         }
-        item { HubActionCard("Advanced Settings", "Clean unified automation controls: price caps, per-symbol rules, live guards, duplicate-position protection and risk limits.", "Open", { onOpen(AppTab.ADVANCED_SETTINGS) }) }
+        item { HubActionCard("Automation & Risk", "Automation policy, position sizing, execution guards, cooldowns and risk limits.", "Open", { onOpen(AppTab.ADVANCED_SETTINGS) }) }
         item { HubActionCard("Remote Alerts", "Telegram bot token, Telegram chat ID and Discord webhook.", "Open", { onOpen(AppTab.REMOTE_ALERTS) }) }
         item { HubActionCard("Backup / Restore", "Export safe text backup and restore safe defaults.", "Open", { onOpen(AppTab.BACKUP) }) }
+        item { HubActionCard("CloudShare Sync", "Optional collective-data sync. Local trading remains independent when disabled.", "Open", { onOpen(AppTab.CLOUDSHARE_SETTINGS) }) }
+        item { HubActionCard("Recovery Tools", "Supplemental v4 backup, redacted diagnostics and operational-data maintenance.", "Open", { onOpen(AppTab.RECOVERY_TOOLS) }) }
         item { HubActionCard("Build Health", "Pre-push status and app health checklist.", "Open", { onOpen(AppTab.HEALTH) }) }
         item {
             GlassCard {
@@ -3180,7 +3200,7 @@ private fun SmartExitV2Screen(settings: BotSettings, trades: List<TradeEntity>) 
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("Smart Exit Engine v2", "Partial scaling, spike-aware hold, profit-lock and trailing logic overview.") }
+        item { SectionTitle("Smart Exit Engine", "Partial scaling, spike-aware hold, profit-lock and trailing logic overview.") }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { MetricCard("TP", "${settings.takeProfitPercent}%", "Base target", Mint) }
@@ -3197,7 +3217,7 @@ private fun SmartExitV2Screen(settings: BotSettings, trades: List<TradeEntity>) 
                 ToggleInfo("Learned hold TP deferral", settings.learnedHoldAllowTakeProfitDeferral)
                 ToggleInfo("Learned hold trailing deferral", settings.learnedHoldAllowTrailingDeferral)
                 ToggleInfo("Smart profit lock", settings.smartProfitLockEnabled)
-                Text("v2 behavior: hold strong continuation candidates, scale/lock profits on exhaustion, and keep emergency exits above learned holds.", color = Muted)
+                Text("Exit behavior: hold strong continuation candidates, scale/lock profits on exhaustion, and keep emergency exits above learned holds.", color = Muted)
             }
         }
     }
@@ -3206,7 +3226,8 @@ private fun SmartExitV2Screen(settings: BotSettings, trades: List<TradeEntity>) 
 @Composable
 private fun PortfolioRotationEngineScreen(settings: BotSettings, decisions: List<AiDecision>, trades: List<TradeEntity>) {
     val symbols = settings.symbols()
-    val sellSignals = decisions.count { it.finalAction == SignalAction.SELL || it.finalAction == SignalAction.AVOID || it.finalAction == SignalAction.STRONG_AVOID }
+    val sellSignals = decisions.count { it.finalAction == SignalAction.SELL }
+    val avoidSignals = decisions.count { it.finalAction == SignalAction.AVOID || it.finalAction == SignalAction.STRONG_AVOID }
     val buySignals = decisions.count { it.finalAction == SignalAction.BUY || it.finalAction == SignalAction.SMALL_BUY }
     val recentSymbols = trades.map { it.symbol }.distinct().take(6)
 
@@ -3220,7 +3241,8 @@ private fun PortfolioRotationEngineScreen(settings: BotSettings, decisions: List
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { MetricCard("Universe", symbols.size.toString(), "Configured symbols", Electric) }
                 item { MetricCard("Buy signals", buySignals.toString(), "Current AI", Mint) }
-                item { MetricCard("Exit signals", sellSignals.toString(), "Current AI", Danger) }
+                item { MetricCard("Exit signals", sellSignals.toString(), "Explicit SELL", Danger) }
+                item { MetricCard("Avoid entries", avoidSignals.toString(), "Do not enter", Amber) }
                 item { MetricCard("Max positions", settings.maxSimultaneousLivePositions.toString(), "Risk cap", Amber) }
             }
         }
@@ -3229,7 +3251,7 @@ private fun PortfolioRotationEngineScreen(settings: BotSettings, decisions: List
                 SectionTitle("Rotation policy", "How the bot should think about capital allocation.")
                 Text("1. Keep EUR as primary cash for Belgium/Kraken deposits.", color = Muted)
                 Text("2. Prefer symbols with stronger AI score and approved Performance Lab status.", color = Muted)
-                Text("3. Reduce exposure when several holdings show SELL/AVOID.", color = Muted)
+                Text("3. Reduce exposure only on explicit exit/protection signals; AVOID only blocks new entries.", color = Muted)
                 Text("4. Avoid crypto-to-crypto buys unless explicitly enabled.", color = Muted)
                 Text("Recently traded: ${recentSymbols.joinToString(", ").ifBlank { "none" }}", color = Mint)
             }
@@ -3942,7 +3964,7 @@ private fun LiveBalanceRow(
         val actionText = when {
             asset.asset == "EUR" && asset.free >= BigDecimal("5.00") -> "Available for automatic BUY orders."
             asset.asset == "EUR" -> "Too low for BUY orders. Deposit/convert to free EUR if you want buys."
-            asset.free > BigDecimal.ZERO -> "Available for automatic SELL orders when the strategy turns bearish."
+            asset.free > BigDecimal.ZERO -> "Available for automatic SELL orders when an explicit exit or protection rule triggers."
             else -> "Not currently free for bot trading."
         }
         Text(actionText, color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -3988,17 +4010,18 @@ private fun NewsScreen(
         .distinct()
     val visibleNews = if (selectedSymbol.isBlank()) newsHistory else newsHistory.filter { it.symbol.equals(selectedSymbol, ignoreCase = true) }
     val grouped = newsHistory.groupBy { it.symbol }.toList().sortedByDescending { it.second.size }
+    val providerHealth = NewsProviderHealthRegistry.snapshot()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("News Dashboard", "Cached per-symbol articles from GDELT, RSS, Marketaux, NewsData.io, GNews, Guardian and NewsAPI.org, used by AI signal scoring.") }
+        item { SectionTitle("News Dashboard", "Cached per-symbol articles and provider health for GDELT, RSS, CryptoPanic, Marketaux, NewsData.io, GNews, Guardian and NewsAPI.org.") }
         item {
             GlassCard {
                 ToggleRow("Use news sentiment in AI decisions", settings.useNewsAi, onToggleNews)
-                Text("During scans, every symbol checks GDELT + RSS + Marketaux + NewsData.io + GNews + Guardian + NewsAPI.org, stores articles locally, and adds article titles into the AI decision explanation.", color = Muted)
+                Text("During scans, every symbol checks the enabled news ensemble, stores articles locally, applies provider cooldowns after failures, and feeds fresh article context into AI scoring.", color = Muted)
                 Spacer(Modifier.height(10.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item {
@@ -4037,6 +4060,27 @@ private fun NewsScreen(
                 item { MetricCard("Cached articles", newsHistory.size.toString(), "Local DB", Electric) }
                 item { MetricCard("Symbols", grouped.size.toString(), "With cached news", Mint) }
                 item { MetricCard("Visible", visibleNews.size.toString(), selectedSymbol.ifBlank { "All symbols" }, Amber) }
+            }
+        }
+        if (providerHealth.isNotEmpty()) {
+            item {
+                GlassCard {
+                    SectionTitle("Provider Health", "Runtime provider state for this app process. Cooldowns stop repeated calls to failing/quota-limited providers.")
+                    providerHealth.forEach { health ->
+                        val healthColor = when {
+                            health.coolingDown() -> Amber
+                            health.lastSuccessEpochMs > 0L && health.lastSuccessEpochMs >= health.lastFailureEpochMs -> Mint
+                            else -> Muted
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(health.provider, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            StatusPill(health.status, healthColor)
+                        }
+                        Text("articles=${health.lastArticleCount} • failures=${health.consecutiveFailures}${if (health.coolingDown()) " • cooldown active" else ""}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        if (health.lastError.isNotBlank()) Text(health.lastError, color = Amber, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
             }
         }
         if (grouped.isNotEmpty()) {
@@ -4158,7 +4202,7 @@ private fun AutonomousScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SectionTitle("v1.2 Autonomous Intelligence", "Self-selection, self-optimization, bad-symbol lockout, shadow paper comparison, trade replay, remote command parsing, tax export and Android watchdog controls.") }
+        item { SectionTitle("Autonomous Intelligence", "Self-selection, self-optimization, bad-symbol lockout, shadow paper comparison, trade replay, remote command parsing, tax export and Android watchdog controls.") }
         item {
             HeroCard(
                 title = "Autonomous Pack ${if (settings.selfOptimizationEnabled) "ON" else "OFF"}",
@@ -4913,11 +4957,12 @@ private fun SettingsScreen(
                 OutlinedTextField(value = apiKey, onValueChange = onApiKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = secretKey, onValueChange = onSecretKey, label = { Text("${settings.exchangeProvider.name.replace('_', ' ')} secret key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = newsKey, onValueChange = onNewsKey, label = { Text("NewsAPI.org key(s), comma-separated") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(value = cryptoPanicKey, onValueChange = onCryptoPanicKey, label = { Text("CryptoPanic API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = marketauxKey, onValueChange = onMarketauxKey, label = { Text("Marketaux API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = newsDataKey, onValueChange = onNewsDataKey, label = { Text("NewsData.io API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = gNewsKey, onValueChange = onGNewsKey, label = { Text("GNews API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = guardianKey, onValueChange = onGuardianKey, label = { Text("Guardian API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
-                Text("News stack: GDELT + RSS + Marketaux + NewsData.io + GNews + Guardian + NewsAPI.org.", color = Muted)
+                Text("News stack: GDELT + RSS + CryptoPanic + Marketaux + NewsData.io + GNews + Guardian + NewsAPI.org. GDELT/RSS need no API key.", color = Muted)
                 Button(onClick = onSaveKeys, modifier = Modifier.fillMaxWidth()) { Text("Save Secure Keys") }
             }
         }
@@ -4964,22 +5009,26 @@ private fun HeroCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        border = BorderStroke(1.dp, Color(0x664DA3FF))
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Panel),
+        border = BorderStroke(1.dp, Stroke)
     ) {
-        Box(
-            modifier = Modifier
-                .background(Brush.linearGradient(listOf(Color(0xFF14345F), Color(0xFF111827), Color(0xFF0A101D))))
-                .padding(18.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                Text(subtitle, color = Muted)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item { Button(onClick = onPrimary, colors = ButtonDefaults.buttonColors(containerColor = Electric)) { Text(primaryButton) } }
-                    item { OutlinedButton(onClick = onSecondary) { Text(secondaryButton) } }
-                }
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+            Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onPrimary,
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Electric),
+                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                ) { Text(primaryButton, style = MaterialTheme.typography.labelMedium) }
+                OutlinedButton(
+                    onClick = onSecondary,
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(1.dp, Electric.copy(alpha = 0.65f)),
+                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                ) { Text(secondaryButton, color = Electric, style = MaterialTheme.typography.labelMedium) }
             }
         }
     }
@@ -4989,27 +5038,26 @@ private fun HeroCard(
 private fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = Panel.copy(alpha = 0.92f)),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Panel),
         border = BorderStroke(1.dp, Stroke)
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        Column(modifier = Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(7.dp), content = content)
     }
 }
 
 @Composable
 private fun MetricCard(title: String, value: String, caption: String, accent: Color) {
     Card(
-        modifier = Modifier.width(178.dp),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = PanelAlt),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.45f))
+        modifier = Modifier.width(146.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Panel),
+        border = BorderStroke(1.dp, Stroke)
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatusDot(accent)
-            Text(title, color = Muted, style = MaterialTheme.typography.bodySmall)
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(caption, color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(value, color = accent, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(caption, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -5075,26 +5123,38 @@ private fun settingsTrailingArmedPlaceholder(position: com.ksp.cryptobot.core.Po
 @Composable
 private fun SectionTitle(title: String, subtitle: String) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-        Text(subtitle, color = Muted)
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = TextPrimary)
+        if (subtitle.isNotBlank()) Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
-        Text(label, modifier = Modifier.weight(1f))
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = TextPrimary)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.size(width = 42.dp, height = 24.dp),
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Mint,
+                uncheckedThumbColor = Muted,
+                uncheckedTrackColor = PanelAlt,
+                uncheckedBorderColor = Stroke
+            )
+        )
     }
 }
 
 @Composable
 private fun ToggleInfo(label: String, enabled: Boolean) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        StatusDot(if (enabled) Mint else Muted)
-        Spacer(Modifier.width(10.dp))
-        Text(label, modifier = Modifier.weight(1f))
-        StatusPill(if (enabled) "ON" else "OFF", if (enabled) Mint else Muted)
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f), color = TextPrimary, style = MaterialTheme.typography.bodySmall)
+        Text(if (enabled) "ENABLED" else "DISABLED", color = if (enabled) Mint else Muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -5110,18 +5170,18 @@ private fun TaxRow(label: String, enabled: Boolean) {
 private fun WarningCard(text: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF241B12)),
-        border = BorderStroke(1.dp, Amber.copy(alpha = 0.55f))
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF20191D)),
+        border = BorderStroke(1.dp, Danger.copy(alpha = 0.40f))
     ) {
-        Text(text, modifier = Modifier.padding(14.dp), color = Color(0xFFFFE2A5))
+        Text(text, modifier = Modifier.padding(11.dp), color = Color(0xFFF1C6CB), style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
 private fun StatusPill(text: String, color: Color) {
-    Surface(shape = RoundedCornerShape(50), color = color.copy(alpha = 0.15f), border = BorderStroke(1.dp, color.copy(alpha = 0.55f))) {
-        Text(text, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = color, fontWeight = FontWeight.Bold)
+    Surface(shape = RoundedCornerShape(5.dp), color = Color.Transparent) {
+        Text(text, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp), color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -5278,11 +5338,11 @@ private fun MetricBox(label: String, value: String, modifier: Modifier = Modifie
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = PanelAlt),
         border = BorderStroke(1.dp, Stroke),
-        shape = RoundedCornerShape(14.dp)
+        shape = RoundedCornerShape(7.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(label, color = Muted, style = MaterialTheme.typography.bodySmall)
-            Text(value, color = TextPrimary, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(value, color = TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

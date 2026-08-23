@@ -74,7 +74,9 @@ class KrakenSpotClient(
         val priceDecimals: Int,
         val quantityDecimals: Int,
         val tradable: Boolean,
-        val status: String
+        val status: String,
+        val minOrderCost: BigDecimal = BigDecimal.ZERO,
+        val tickSize: BigDecimal = BigDecimal.ZERO
     )
 
     @Volatile private var pairCache: Map<String, KrakenPairRule> = emptyMap()
@@ -93,7 +95,9 @@ class KrakenSpotClient(
             priceDecimals = rule.priceDecimals,
             quantityDecimals = rule.quantityDecimals,
             tradable = rule.tradable,
-            reason = if (rule.tradable) "Tradable on Kraken. status=${rule.status}" else "Not tradable on Kraken. status=${rule.status}"
+            reason = if (rule.tradable) "Tradable on Kraken. status=${rule.status}; ordermin=${rule.minOrderSize}; costmin=${rule.minOrderCost}; tick=${rule.tickSize}" else "Not tradable on Kraken. status=${rule.status}",
+            minOrderCost = rule.minOrderCost,
+            tickSize = rule.tickSize
         )
     }
 
@@ -115,7 +119,9 @@ class KrakenSpotClient(
                     quoteAsset = rule.quoteAsset,
                     tradable = rule.tradable,
                     minOrderSize = rule.minOrderSize,
-                    reason = "Discovered from Kraken AssetPairs. quote=${rule.quoteAsset}, status=${rule.status}, min=${rule.minOrderSize}, pair=${rule.exchangePair}"
+                    minOrderCost = rule.minOrderCost,
+                    tickSize = rule.tickSize,
+                    reason = "Discovered from Kraken AssetPairs. quote=${rule.quoteAsset}, status=${rule.status}, min=${rule.minOrderSize}, costmin=${rule.minOrderCost}, tick=${rule.tickSize}, pair=${rule.exchangePair}"
                 )
             }
     }
@@ -222,6 +228,31 @@ class KrakenSpotClient(
                 )
             }
         }
+    }
+
+    override suspend fun getTradingFeeSchedule(symbol: String): TradingFeeSchedule? = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) return@withContext null
+        val rule = resolvePairRule(symbol)
+        // Kraken Get Trade Volume returns the current account/pair fee tier. It requires Query Funds permission.
+        val root = privateJson("/0/private/TradeVolume", mapOf("pair" to rule.exchangePair))
+        val result = root.optJSONObject("result") ?: return@withContext null
+        fun feeRate(section: String): BigDecimal? {
+            val group = result.optJSONObject(section) ?: return null
+            val direct = group.optJSONObject(rule.exchangePair)
+                ?: group.optJSONObject(rule.altName)
+                ?: group.keys().asSequence().firstOrNull()?.let { group.optJSONObject(it) }
+                ?: return null
+            // Kraken returns fee as percentage units (e.g. 0.40), convert to decimal rate (0.0040).
+            return direct.optString("fee", "").toBigDecimalOrNull()?.divide(BigDecimal("100"), 12, RoundingMode.HALF_UP)
+        }
+        val taker = feeRate("fees") ?: return@withContext null
+        val maker = feeRate("fees_maker") ?: taker
+        TradingFeeSchedule(
+            makerRate = maker.max(BigDecimal.ZERO),
+            takerRate = taker.max(BigDecimal.ZERO),
+            rollingVolumeUsd = result.optString("volume", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO,
+            source = "KRAKEN_TRADE_VOLUME"
+        )
     }
 
     override suspend fun getAvailableBalances(): Map<String, BigDecimal> = withContext(Dispatchers.IO) {
@@ -451,9 +482,28 @@ class KrakenSpotClient(
             "userref" to userRefFromClientOrderId(request.clientOrderId).toString(),
             "validate" to "false"
         )
+        val orderPriceForMinimum = if (request.orderType == OrderType.MARKET) {
+            val liveTicker = getTicker(rule.canonicalSymbol)
+            if (request.side == OrderSide.BUY) liveTicker.ask else liveTicker.bid
+        } else request.limitPrice ?: error("Price/trigger price is required for Kraken ${request.orderType} orders.")
+        val estimatedOrderCost = cleanQuantity.multiply(orderPriceForMinimum)
+        if (rule.minOrderCost > BigDecimal.ZERO && estimatedOrderCost < rule.minOrderCost) {
+            error("Kraken order cost too small for ${rule.canonicalSymbol}. cost=$estimatedOrderCost minCost=${rule.minOrderCost}; the bot will not increase size above its risk ceiling to satisfy the exchange minimum.")
+        }
         if (request.orderType != OrderType.MARKET) {
-            val price = request.limitPrice ?: error("Price/trigger price is required for Kraken ${request.orderType} orders.")
-            form["price"] = price.setScale(rule.priceDecimals, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+            val rawPrice = request.limitPrice ?: error("Price/trigger price is required for Kraken ${request.orderType} orders.")
+            val price = roundKrakenPriceToTick(rawPrice, rule.tickSize, rule.priceDecimals, request.side, request.orderType)
+            form["price"] = price.stripTrailingZeros().toPlainString()
+        }
+        if (request.postOnly) {
+            if (request.orderType != OrderType.LIMIT) error("Kraken post-only is valid only for ordinary LIMIT orders; conditional stop/take-profit orders cannot silently use maker-only semantics.")
+            form["oflags"] = "post"
+        }
+        request.protectiveStopPrice?.takeIf { request.side == OrderSide.BUY && it > BigDecimal.ZERO }?.let { rawStop ->
+            val stop = roundKrakenPriceToTick(rawStop, rule.tickSize, rule.priceDecimals, OrderSide.SELL, OrderType.STOP_LOSS)
+            if (stop >= orderPriceForMinimum) error("Protective stop must be below the BUY entry reference. stop=$stop entryRef=$orderPriceForMinimum")
+            form["close[ordertype]"] = "stop-loss"
+            form["close[price]"] = stop.stripTrailingZeros().toPlainString()
         }
         val encoded = encodeForm(form)
         val signature = krakenSignature(path, nonce, encoded, secretKey)
@@ -482,6 +532,18 @@ class KrakenSpotClient(
                 paper = false
             )
         }
+    }
+
+
+    private fun roundKrakenPriceToTick(value: BigDecimal, tick: BigDecimal, decimals: Int, side: OrderSide, type: OrderType): BigDecimal {
+        if (tick <= BigDecimal.ZERO) return value.setScale(decimals, RoundingMode.HALF_UP)
+        val rounding = when (type) {
+            OrderType.LIMIT -> if (side == OrderSide.BUY) RoundingMode.DOWN else RoundingMode.UP
+            OrderType.STOP_LOSS -> if (side == OrderSide.BUY) RoundingMode.UP else RoundingMode.DOWN
+            OrderType.TAKE_PROFIT -> if (side == OrderSide.BUY) RoundingMode.DOWN else RoundingMode.UP
+            OrderType.MARKET -> RoundingMode.HALF_UP
+        }
+        return value.divide(tick, 0, rounding).multiply(tick).setScale(decimals, RoundingMode.HALF_UP)
     }
 
     private fun queryOrderFill(txid: String, rule: KrakenPairRule, request: OrderRequest): OrderResult {
@@ -627,7 +689,9 @@ class KrakenSpotClient(
                     priceDecimals = item.optInt("pair_decimals", 8),
                     quantityDecimals = item.optInt("lot_decimals", 8),
                     tradable = status.equals("online", ignoreCase = true) || status.isBlank(),
-                    status = status
+                    status = status,
+                    minOrderCost = item.optString("costmin", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                    tickSize = item.optString("tick_size", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
                 )
                 loaded[canonical] = rule
                 loaded[pairId.uppercase().replace("XBT", "BTC")] = rule

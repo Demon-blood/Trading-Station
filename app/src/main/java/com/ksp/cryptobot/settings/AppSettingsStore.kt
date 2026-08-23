@@ -9,6 +9,13 @@ import com.ksp.cryptobot.core.OrderManagementMode
 import com.ksp.cryptobot.security.SecureSettingsStore
 import java.math.BigDecimal
 
+data class SettingsSaveVerification(
+    val committed: Boolean,
+    val exactMatch: Boolean,
+    val timestampEpochMs: Long,
+    val effectiveMode: String
+)
+
 class AppSettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("bot_settings", Context.MODE_PRIVATE)
     private val secure = SecureSettingsStore(context)
@@ -215,8 +222,8 @@ class AppSettingsStore(context: Context) {
         )
     }
 
-    fun save(settings: BotSettings) {
-        prefs.edit()
+    fun save(settings: BotSettings): Boolean {
+        val committed = prefs.edit()
             .putString("mode", settings.mode.name)
             .putString("max_position_eur", settings.maxPositionEur.toPlainString())
             .putString("max_daily_loss_eur", settings.maxDailyLossEur.toPlainString())
@@ -415,7 +422,24 @@ class AppSettingsStore(context: Context) {
             .putString("spike_timing_max_dynamic_trail_percent", settings.spikeTimingMaxDynamicTrailPercent.toPlainString())
             .putInt("tax_export_year", settings.taxExportYear)
             .commit()
+        val effective = runCatching { load() }.getOrNull()
+        val exactMatch = committed && effective == settings
+        val saveEpochMs = System.currentTimeMillis()
+        prefs.edit()
+            .putBoolean("_last_settings_save_committed", committed)
+            .putBoolean("_last_settings_save_matches", exactMatch)
+            .putLong("_last_settings_save_epoch_ms", saveEpochMs)
+            .putString("_last_settings_save_effective_mode", effective?.mode?.name ?: "LOAD_FAILED")
+            .commit()
+        return exactMatch
     }
+
+    fun lastSaveVerification(): SettingsSaveVerification = SettingsSaveVerification(
+        committed = prefs.getBoolean("_last_settings_save_committed", false),
+        exactMatch = prefs.getBoolean("_last_settings_save_matches", false),
+        timestampEpochMs = prefs.getLong("_last_settings_save_epoch_ms", 0L),
+        effectiveMode = prefs.getString("_last_settings_save_effective_mode", "UNKNOWN") ?: "UNKNOWN"
+    )
 
     fun saveBinanceKeys(apiKey: String, secretKey: String) {
         saveExchangeKeys(ExchangeProvider.BINANCE_READ_ONLY, apiKey, secretKey)
@@ -529,6 +553,11 @@ class AppSettingsStore(context: Context) {
     fun backupDirectoryPath(): String = prefs.getString("backup_directory_path", "") ?: ""
     fun saveBackupDirectoryPath(path: String) {
         prefs.edit().putString("backup_directory_path", path.trim()).apply()
+    }
+
+    fun diagnosticsDirectoryPath(): String = prefs.getString("diagnostics_directory_path", "") ?: ""
+    fun saveDiagnosticsDirectoryPath(path: String) {
+        prefs.edit().putString("diagnostics_directory_path", path.trim()).apply()
     }
 
     fun newsApiKey(): String? = secure.readEncryptedString("news_api_key")?.takeIf { it.isNotBlank() }
