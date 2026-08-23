@@ -16,6 +16,13 @@ data class SettingsSaveVerification(
     val effectiveMode: String
 )
 
+data class CloudAiConfig(
+    val enabled: Boolean = false,
+    val monthlyBudgetUsd: BigDecimal = BigDecimal("2.00"),
+    val solEnabled: Boolean = true,
+    val maxSolCallsPerDay: Int = 3
+)
+
 class AppSettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("bot_settings", Context.MODE_PRIVATE)
     private val secure = SecureSettingsStore(context)
@@ -441,6 +448,40 @@ class AppSettingsStore(context: Context) {
         effectiveMode = prefs.getString("_last_settings_save_effective_mode", "UNKNOWN") ?: "UNKNOWN"
     )
 
+    fun saveOpenAiApiKey(apiKey: String) {
+        secure.saveEncryptedString("openai_api_key", apiKey.trim())
+    }
+
+    fun openAiApiKey(): String? =
+        secure.readEncryptedString("openai_api_key")?.takeIf { it.isNotBlank() }
+
+    fun cloudAiConfig(): CloudAiConfig = CloudAiConfig(
+        enabled = prefs.getBoolean("cloud_ai_enabled", false),
+        monthlyBudgetUsd = prefs.getString("cloud_ai_monthly_budget_usd", "2.00")
+            ?.toBigDecimalOrNull()
+            ?.coerceIn(BigDecimal.ZERO, BigDecimal("100.00"))
+            ?: BigDecimal("2.00"),
+        solEnabled = prefs.getBoolean("cloud_ai_sol_enabled", true),
+        maxSolCallsPerDay = prefs.getInt("cloud_ai_max_sol_calls_per_day", 3).coerceIn(0, 50)
+    )
+
+    fun saveCloudAiConfig(
+        enabled: Boolean,
+        monthlyBudgetUsd: BigDecimal,
+        solEnabled: Boolean,
+        maxSolCallsPerDay: Int
+    ) {
+        prefs.edit()
+            .putBoolean("cloud_ai_enabled", enabled)
+            .putString(
+                "cloud_ai_monthly_budget_usd",
+                monthlyBudgetUsd.coerceIn(BigDecimal.ZERO, BigDecimal("100.00")).toPlainString()
+            )
+            .putBoolean("cloud_ai_sol_enabled", solEnabled)
+            .putInt("cloud_ai_max_sol_calls_per_day", maxSolCallsPerDay.coerceIn(0, 50))
+            .apply()
+    }
+
     fun saveBinanceKeys(apiKey: String, secretKey: String) {
         saveExchangeKeys(ExchangeProvider.BINANCE_READ_ONLY, apiKey, secretKey)
     }
@@ -508,6 +549,7 @@ class AppSettingsStore(context: Context) {
         newsDataApiKey()?.let { out["newsdata_api_key"] = it }
         gNewsApiKey()?.let { out["gnews_api_key"] = it }
         guardianApiKey()?.let { out["guardian_api_key"] = it }
+        openAiApiKey()?.let { out["openai_api_key"] = it }
         telegramBotToken()?.let { out["telegram_bot_token"] = it }
         telegramChatId()?.let { out["telegram_chat_id"] = it }
         discordWebhookUrl()?.let { out["discord_webhook_url"] = it }
@@ -529,6 +571,7 @@ class AppSettingsStore(context: Context) {
         values["newsdata_api_key"]?.let { saveNewsDataApiKey(it) }
         values["gnews_api_key"]?.let { saveGNewsApiKey(it) }
         values["guardian_api_key"]?.let { saveGuardianApiKey(it) }
+        values["openai_api_key"]?.let { saveOpenAiApiKey(it) }
         if (values.containsKey("telegram_bot_token") || values.containsKey("telegram_chat_id")) {
             saveTelegramConfig(values["telegram_bot_token"].orEmpty(), values["telegram_chat_id"].orEmpty())
         }
@@ -566,4 +609,10 @@ class AppSettingsStore(context: Context) {
     fun newsDataApiKey(): String? = secure.readEncryptedString("newsdata_api_key")?.takeIf { it.isNotBlank() }
     fun gNewsApiKey(): String? = secure.readEncryptedString("gnews_api_key")?.takeIf { it.isNotBlank() }
     fun guardianApiKey(): String? = secure.readEncryptedString("guardian_api_key")?.takeIf { it.isNotBlank() }
+
+    private fun BigDecimal.coerceIn(lo: BigDecimal, hi: BigDecimal): BigDecimal = when {
+        this < lo -> lo
+        this > hi -> hi
+        else -> this
+    }
 }

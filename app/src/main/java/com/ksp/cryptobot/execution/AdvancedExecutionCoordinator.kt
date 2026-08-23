@@ -5,6 +5,7 @@ import com.ksp.cryptobot.data.*
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
 import com.ksp.cryptobot.exchange.TradingFeeSchedule
 import com.ksp.cryptobot.governance.ProductionIntelligenceRuntime
+import com.ksp.cryptobot.intelligence.CloudAiRuntime
 import com.ksp.cryptobot.research.HandoffSideIntent
 import com.ksp.cryptobot.research.ResearchExecutionRuntime
 import java.math.BigDecimal
@@ -74,6 +75,31 @@ class AdvancedExecutionCoordinator(
             "", liquidity.reasonCategory, liquidity.requestedSizeBand, "", "normal", false, liquidity.reason, if (liquidity.finalQuote < allocation.finalQuote) "WARN" else "INFO")
 
         var finalQuote = liquidity.finalQuote
+        val cloudReview = CloudAiRuntime.snapshotFor(decision)
+        if (cloudReview != null) {
+            val cloudMultiplier = cloudReview.riskMultiplier.coerceIn(BigDecimal.ZERO, BigDecimal.ONE)
+            val beforeCloud = finalQuote
+            finalQuote = finalQuote.multiply(cloudMultiplier).setScale(2, RoundingMode.DOWN)
+            if (cloudMultiplier < BigDecimal.ONE || cloudReview.totalCostQuote > BigDecimal.ZERO) {
+                record(
+                    "cloud_ai_cap",
+                    decision.symbol,
+                    settings,
+                    mode,
+                    beforeCloud,
+                    finalQuote,
+                    cloudMultiplier,
+                    "",
+                    cloudReview.modelPath,
+                    sizeBand(beforeCloud),
+                    "",
+                    if (finalQuote < beforeCloud) "reduced" else "normal",
+                    false,
+                    "Selective cloud AI ${cloudReview.verdict}; risk×${cloudMultiplier}; API cost reserve=${cloudReview.totalCostQuote}; ${cloudReview.reason}",
+                    if (finalQuote < beforeCloud) "WARN" else "INFO"
+                )
+            }
+        }
         // Economic minimum from desktop v1.0.50, made fail-safe for Android:
         // never raise a size after governance/liquidity reduced it. If a normal-size live
         // request is pushed below the economic floor, skip instead of undoing the safety reduction.
@@ -153,7 +179,7 @@ class AdvancedExecutionCoordinator(
                 recentTrades = trades,
                 feeSchedule = feeSchedule ?: directiveFeeSchedule,
                 publishRuntime = true,
-                externalDecisionCostQuote = BigDecimal.ZERO,
+                externalDecisionCostQuote = cloudReview?.totalCostQuote ?: BigDecimal.ZERO,
                 safetyMarginRate = BigDecimal("0.0025")
             )
         )
