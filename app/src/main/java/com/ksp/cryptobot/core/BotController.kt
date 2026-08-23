@@ -11,6 +11,7 @@ import com.ksp.cryptobot.exchange.CoinbaseAdvancedClient
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
 import com.ksp.cryptobot.exchange.ExchangeCapabilityChecker
 import com.ksp.cryptobot.exchange.KrakenSpotClient
+import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
 import com.ksp.cryptobot.exchange.ManualExecutionClient
 import com.ksp.cryptobot.exchange.PaperExchangeClient
 import com.ksp.cryptobot.execution.ExecutionGuard
@@ -1645,9 +1646,11 @@ Crypto TradeStation remote commands:
             .let { list -> if (settings.tradeOnlyBtcEth) list.filter { it.startsWith("BTC") || it.startsWith("ETH") } else list }
             .take(settings.autoSymbolActiveLimit.coerceAtLeast(1))
         if (selected.isEmpty()) {
+            KrakenRealtimeMarketDataRegistry.setActiveSymbols(fallback)
             updateStatus("Auto symbol discovery produced no tradable/balance-usable candidates. Falling back to configured symbols: ${fallback.joinToString(",")}", "WARN")
             return fallback
         }
+        KrakenRealtimeMarketDataRegistry.setActiveSymbols(selected)
         updateStatus("Auto symbol rotation active: ${selected.size} symbols selected from full Kraken universe: ${selected.joinToString(",")}", "LIVE")
         return selected
     }

@@ -18,6 +18,7 @@ import com.ksp.cryptobot.core.BotMode
 import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.data.AppDatabase
 import com.ksp.cryptobot.governance.ProductionIntelligenceServiceMonitor
+import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import kotlinx.coroutines.*
@@ -108,6 +109,7 @@ class BotForegroundService : Service() {
 
             val startSettings = settingsStore.load()
             if (!awaitUsableNetwork("startup")) return@launch
+            configureRealtimeMarketData(startSettings, connectivity.snapshot.usable)
 
             if (startSettings.mode == BotMode.LIVE_AUTO) {
                 updateNotification("LIVE_AUTO startup verification…")
@@ -136,6 +138,7 @@ class BotForegroundService : Service() {
                 productionMonitor.heartbeat()
 
                 val network = connectivity.refresh()
+                KrakenRealtimeMarketDataRegistry.onNetworkAvailable(network.usable)
                 if (!network.usable) {
                     lastNetworkUsable = false
                     hostStore.recovery("PAUSED_NETWORK")
@@ -158,6 +161,7 @@ class BotForegroundService : Service() {
                 }
 
                 val current = settingsStore.load()
+                configureRealtimeMarketData(current, network.usable)
                 val cycleStart = System.currentTimeMillis()
                 try {
                     val cloud = cloudShareSync.syncIfDue()
@@ -187,8 +191,9 @@ class BotForegroundService : Service() {
                     }.coerceAtLeast(15L)
 
                     val modeText = "${afterCommands.mode}/${afterCommands.exchangeProvider}"
+                    val wsHealth = KrakenRealtimeMarketDataRegistry.health()
                     updateNotification(
-                        "RUNNING $modeText • net=${network.transports} • next=${selectedDelay}s • signals=${decisions.size}"
+                        "RUNNING $modeText • net=${network.transports} • ws=${wsHealth.state}/${wsHealth.systemStatus} • next=${selectedDelay}s • signals=${decisions.size}"
                     )
                 } catch (error: Exception) {
                     productionMonitor.recordLoopError(error.message ?: error.javaClass.simpleName)
@@ -220,6 +225,26 @@ class BotForegroundService : Service() {
                 stopSelf()
             }
         }
+    }
+
+    private fun configureRealtimeMarketData(
+        settings: com.ksp.cryptobot.core.BotSettings,
+        networkUsable: Boolean
+    ) {
+        val shouldRun = settings.enableKrakenWebSocketFeed &&
+            settings.exchangeProvider == ExchangeProvider.KRAKEN
+        if (!shouldRun) {
+            KrakenRealtimeMarketDataRegistry.stop()
+            return
+        }
+        KrakenRealtimeMarketDataRegistry.start()
+        KrakenRealtimeMarketDataRegistry.onNetworkAvailable(networkUsable)
+        KrakenRealtimeMarketDataRegistry.setActiveSymbols(settings.symbols())
+        val health = KrakenRealtimeMarketDataRegistry.health()
+        statusStore.write(
+            "Kraken WS v2 market-data host: ${health.summary()}",
+            if (health.lastError.isBlank()) "INFO" else "WARN"
+        )
     }
 
     private suspend fun awaitUsableNetwork(reason: String): Boolean {
@@ -281,6 +306,7 @@ class BotForegroundService : Service() {
 
     private fun stopBot() {
         statusStore.write("Stop requested. Trading host shutting down.", "WARN")
+        KrakenRealtimeMarketDataRegistry.stop()
         controller.stop()
         loopJob?.cancel()
         loopJob = null
@@ -367,6 +393,7 @@ class BotForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        KrakenRealtimeMarketDataRegistry.stop()
         connectivity.stop()
         loopJob?.cancel()
         scope.cancel()

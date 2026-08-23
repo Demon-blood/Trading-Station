@@ -129,6 +129,8 @@ class KrakenSpotClient(
     override suspend fun getTicker(symbol: String): MarketTicker = withContext(Dispatchers.IO) {
         val rule = resolvePairRule(symbol)
         if (!rule.tradable) error("Kraken pair not tradable: ${rule.canonicalSymbol}. ${rule.status}")
+        KrakenRealtimeMarketDataRegistry.ensureTicker(rule.canonicalSymbol)
+        KrakenRealtimeMarketDataRegistry.freshTicker(rule.canonicalSymbol)?.let { return@withContext it }
         val req = Request.Builder()
             .url("https://api.kraken.com/0/public/Ticker?pair=${rule.exchangePair}")
             .get()
@@ -199,6 +201,7 @@ class KrakenSpotClient(
     override suspend fun getCandles(symbol: String, timeframe: Timeframe, limit: Int): List<Candle> = withContext(Dispatchers.IO) {
         val rule = resolvePairRule(symbol)
         if (!rule.tradable) error("Kraken pair not tradable: ${rule.canonicalSymbol}. ${rule.status}")
+        KrakenRealtimeMarketDataRegistry.ensureOhlc(rule.canonicalSymbol, timeframe)
         val interval = toKrakenIntervalMinutes(timeframe)
         val req = Request.Builder()
             .url("https://api.kraken.com/0/public/OHLC?pair=${rule.exchangePair}&interval=$interval")
@@ -214,7 +217,7 @@ class KrakenSpotClient(
             val firstKey = result.keys().asSequence().firstOrNull { it != "last" } ?: error("Kraken OHLC missing result")
             val arr = result.getJSONArray(firstKey)
             val from = kotlin.math.max(0, arr.length() - limit)
-            (from until arr.length()).map { idx ->
+            val restCandles = (from until arr.length()).map { idx ->
                 val row = arr.getJSONArray(idx)
                 Candle(
                     symbol = rule.canonicalSymbol,
@@ -227,6 +230,12 @@ class KrakenSpotClient(
                     volume = row.getString(6).toBigDecimal()
                 )
             }
+            KrakenRealtimeMarketDataRegistry.mergeLatestCandle(
+                canonicalSymbol = rule.canonicalSymbol,
+                timeframe = timeframe,
+                restCandles = restCandles,
+                limit = limit
+            )
         }
     }
 
