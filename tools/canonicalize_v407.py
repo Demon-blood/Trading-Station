@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-Crypto TradeStation v4.0.7 canonical source materializer.
+Crypto TradeStation v4.0.7 canonical source materializer — v2.
 
-This script is designed to run ONLY inside the one-time GitHub Actions
-canonicalization workflow. It reproduces the repository's current source-
-mutation chain in the same order, freezes the resulting Android source into
-app/, restores .cts-v4-migration to its checked-in historical state, and writes
-a canonical-source marker.
+Fixes the v1 GitHub Actions failure caused by Python bytecode/cache files
+being generated inside .cts-v4-migration and then tripping the clean-archive
+validation.
 
-It does not intentionally alter strategy/risk/execution semantics beyond what
-the current canonical v4 workflow already generates.
+Designed for the one-time GitHub Actions canonicalization workflow.
 """
 from __future__ import annotations
 
@@ -43,9 +40,18 @@ def fail(message: str) -> "None":
     raise SystemExit("ERROR | " + message)
 
 
-def run(cmd: list[str], cwd: Path, label: str) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[str],
+    cwd: Path,
+    label: str,
+    *,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     print(f"\n=== {label} ===")
     print("$ " + " ".join(cmd))
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
     result = subprocess.run(
         cmd,
         cwd=str(cwd),
@@ -53,6 +59,7 @@ def run(cmd: list[str], cwd: Path, label: str) -> subprocess.CompletedProcess[st
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
+        env=merged_env,
     )
     print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
     if result.returncode != 0:
@@ -113,19 +120,43 @@ def ensure_clean_inputs(root: Path) -> None:
         )
 
 
+def syntax_check_script(script: Path) -> None:
+    # In-memory compile: validates syntax without creating __pycache__/ or .pyc.
+    source = script.read_text(encoding="utf-8")
+    try:
+        compile(source, str(script), "exec")
+    except SyntaxError as exc:
+        fail(
+            f"Syntax check failed for {script}: "
+            f"{exc.msg} at line {exc.lineno}, column {exc.offset}"
+        )
+    print(f"PASS | syntax | {script}")
+
+
 def execute_chain(root: Path) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
+    no_bytecode = {"PYTHONDONTWRITEBYTECODE": "1"}
+
     for rel in MUTATION_CHAIN:
         script = root / rel
         if not script.exists():
             fail(f"Current v4 transformation is missing: {rel}")
-        run([sys.executable, "-m", "py_compile", str(script)], root, f"syntax {rel}")
+
+        syntax_check_script(script)
         before = sha256(script)
-        run([sys.executable, str(script), str(root)], root, f"apply {rel}")
-        records.append({
-            "script": rel,
-            "script_sha256_before_apply": before,
-        })
+
+        run(
+            [sys.executable, "-B", str(script), str(root)],
+            root,
+            f"apply {rel}",
+            env=no_bytecode,
+        )
+        records.append(
+            {
+                "script": rel,
+                "script_sha256_before_apply": before,
+            }
+        )
     return records
 
 
@@ -187,14 +218,19 @@ def patch_ui_label(root: Path, version_name: str) -> None:
 
 
 def restore_migration_archive(root: Path) -> None:
-    # Some of the old CI scripts intentionally patched their own migration
-    # overlay. The generated app/ result is already materialized at this point.
-    # Restore the migration directory so it remains a historical/audit payload,
-    # not another mutable source of truth in the canonical commit.
+    # Restore every tracked migration file exactly to HEAD.
     run(
         ["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", ".cts-v4-migration"],
         root,
-        "restore historical migration payload",
+        "restore tracked migration payload",
+    )
+
+    # Remove ONLY untracked files created after checkout under this directory.
+    # ensure_clean_inputs() proved the directory was clean before we started.
+    run(
+        ["git", "clean", "-fd", "--", ".cts-v4-migration"],
+        root,
+        "remove generated migration cache/temp files",
     )
 
 
@@ -215,6 +251,7 @@ def write_marker(
         "workflow_run_number": os.environ.get("GITHUB_RUN_NUMBER", "unknown"),
         "mutation_chain": chain_records,
         "migration_payload_role": "historical_only_after_materialization",
+        "canonicalizer_revision": "v2-no-bytecode",
     }
     marker.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -244,7 +281,7 @@ def validate_materialized_shape(root: Path, version_name: str, version_code: int
         fail("JUnit dependency was not frozen into Gradle")
 
     migration_status = subprocess.run(
-        ["git", "status", "--porcelain", "--", ".cts-v4-migration"],
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", ".cts-v4-migration"],
         cwd=str(root),
         text=True,
         stdout=subprocess.PIPE,
@@ -252,9 +289,12 @@ def validate_materialized_shape(root: Path, version_name: str, version_code: int
         check=False,
     )
     if migration_status.returncode != 0:
-        fail("Could not verify migration archive status")
+        fail("Could not verify migration archive status: " + migration_status.stderr.strip())
     if migration_status.stdout.strip():
-        fail(".cts-v4-migration is still modified after restoration")
+        fail(
+            ".cts-v4-migration is still modified after restoration:\n"
+            + migration_status.stdout
+        )
 
 
 def emit_diff_summary(root: Path) -> None:
@@ -285,6 +325,7 @@ def main() -> None:
 
     print(f"Canonicalizing Crypto TradeStation {version_name} ({version_code})")
     print("Source commit: " + os.environ.get("GITHUB_SHA", "unknown"))
+    print("Canonicalizer: v2-no-bytecode")
 
     chain_records = execute_chain(root)
     patch_gradle(root, version_name, version_code)
@@ -296,9 +337,8 @@ def main() -> None:
     emit_diff_summary(root)
 
     print("\nPASS | v4.0.7 effective CI source is materialized into app/.")
-    print("PASS | .cts-v4-migration restored and demoted to historical/audit payload.")
+    print("PASS | migration archive restored with no generated bytecode/temp files.")
     print("PASS | version identity frozen at 4.0.7 / 112.")
-    print("Trading behavior intentionally follows the existing generated v4.0.7 source.")
 
 
 if __name__ == "__main__":
