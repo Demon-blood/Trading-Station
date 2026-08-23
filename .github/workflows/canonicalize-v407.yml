@@ -53,10 +53,7 @@ jobs:
             exit 1
           fi
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          "$SDKMANAGER" --install             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
       - name: Set up Gradle 8.9
@@ -64,11 +61,35 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Restore audited legacy workflow context
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUDITED_BASELINE="9081c5aa5ed73be8f9f3a72f7e7981901af9233b"
+          git cat-file -e "${AUDITED_BASELINE}^{commit}"
+          git show "${AUDITED_BASELINE}:.github/workflows/android-v4-build.yml" > .github/workflows/android-v4-build.yml
+          grep -q 'com.ksp.cryptobot' .github/workflows/android-v4-build.yml
+          grep -q 'apply_milestone6.py' .github/workflows/android-v4-build.yml
+          echo "PASS | restored audited legacy workflow context from $AUDITED_BASELINE"
+
       - name: Materialize current effective v4.0.7 source
         shell: bash
         run: |
           set -euo pipefail
           python3 tools/canonicalize_v407.py "$GITHUB_WORKSPACE" | tee canonicalize.log
+
+      - name: Restore GitHub-native workflow context
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git restore --source=HEAD --staged --worktree -- .github/workflows/android-v4-build.yml
+          if git status --porcelain -- .github/workflows/android-v4-build.yml | grep -q .; then
+            echo "android-v4-build.yml did not restore cleanly" >&2
+            git status --short -- .github/workflows/android-v4-build.yml
+            exit 1
+          fi
+          echo "PASS | restored current GitHub-native android-v4-build.yml"
 
       - name: Verify committed-source contracts
         shell: bash
@@ -115,8 +136,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
 
-          # Only app/ should contain generated source changes.
-          # The tools/workflows were already committed in the bootstrap commit.
           git add app
           if git diff --cached --quiet; then
             echo "No canonical source changes were produced." >&2
@@ -135,11 +154,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh pr create \
-            --base "$GITHUB_REF_NAME" \
-            --head "$BRANCH_NAME" \
-            --title "Canonicalize Crypto TradeStation v4.0.7 source" \
-            --body-file - <<'EOF'
+          gh pr create             --base "$GITHUB_REF_NAME"             --head "$BRANCH_NAME"             --title "Canonicalize Crypto TradeStation v4.0.7 source"             --body-file - <<'EOF'
           ## Crypto TradeStation v4.0.7 canonical source migration
 
           This PR freezes the effective Android source that the previous canonical

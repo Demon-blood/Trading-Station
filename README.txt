@@ -1,10 +1,12 @@
-Crypto TradeStation v4 - GitHub Actions KSP Fix 2
+Replace this one file in the repository:
 
-Replace this exact repository file:
-.cts-v4-migration/app/src/main/java/com/ksp/cryptobot/data/CloudShareDao.kt
+.github/workflows/canonicalize-v407.yml
 
-Cause fixed:
-Room/KSP treats ACTION as a SQL keyword. The two CloudShare aggregate queries now quote
-`action` as an identifier in SELECT/GROUP BY/ORDER BY while keeping the projection column name action.
+Then commit to main and rerun:
+Actions -> Canonicalize Crypto TradeStation v4.0.7 -> Run workflow
 
-After committing this file to main, the Crypto TradeStation v4 Build workflow will run automatically.
+Why:
+The diagnostics migration guard requires the original audited android-v4-build.yml
+shape. This workflow temporarily restores that exact file from commit
+9081c5aa5ed73be8f9f3a72f7e7981901af9233b, runs materialization, then restores
+the current GitHub-native workflow before verification/branch creation.
