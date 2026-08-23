@@ -49,7 +49,7 @@ def main():
         "UI monthly budget": '"Monthly OpenAI API budget (USD)"' in main_ui,
         "UI Sol escalation toggle": 'ToggleRow("Allow rare GPT-5.6 Sol escalation"' in main_ui,
         "controller routes after production intelligence": "val deterministicDecision = productionResult.first" in controller and "cloudAiRouter.reviewIfUseful(" in controller,
-        "system verifier makes no paid call": '"This check makes no paid API call."' in controller,
+        "system verifier makes no paid call": "This check makes no paid API call." in controller,
         "cloud AI not a LIVE startup dependency": "Selective Cloud AI Router" in controller and "cloudKeyConfigured" in controller,
         "M6 runtime size cap": "CloudAiRuntime.snapshotFor(decision)" in advanced and "cloudMultiplier" in advanced,
         "AI cannot increase final quote": "cloudReview.riskMultiplier.coerceIn(BigDecimal.ZERO, BigDecimal.ONE)" in advanced,
