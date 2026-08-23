@@ -1,6 +1,7 @@
 package com.ksp.cryptobot.learning
 
 import com.ksp.cryptobot.core.AiDecision
+import com.ksp.cryptobot.core.BotMode
 import com.ksp.cryptobot.core.BotSettings
 import com.ksp.cryptobot.core.MarketTicker
 import com.ksp.cryptobot.core.OrderSide
@@ -27,6 +28,15 @@ import kotlin.math.min
  * minimum-score pressure and sizing hints. It never bypasses risk, balance, quote, exchange or
  * legal restrictions; it only changes scoring and recommendations inside configured limits.
  */
+internal fun learningHistoryForMode(trades: List<TradeEntity>, settings: BotSettings): List<TradeEntity> {
+    if (!settings.selfLearningPaperAndLiveSeparated) return trades
+    val paperMode = settings.mode == BotMode.PAPER
+    return trades.filter { it.paper == paperMode }
+}
+
+internal fun completedOutcomeTradesForLearning(trades: List<TradeEntity>, settings: BotSettings): List<TradeEntity> =
+    learningHistoryForMode(trades, settings).filter { it.side.equals(OrderSide.SELL.name, ignoreCase = true) }
+
 class TrueSelfLearningEngine {
     data class LearningSummary(
         val enabled: Boolean,
@@ -70,20 +80,22 @@ class TrueSelfLearningEngine {
             return LearningSummary(false, emptyList(), emptyList(), emptyList(), "True self-learning disabled.")
         }
 
-        val trades = dao.allTradesSnapshot().take(settings.selfLearningLookbackTrades.coerceAtLeast(20))
+        val allTrades = dao.allTradesSnapshot().take(settings.selfLearningLookbackTrades.coerceAtLeast(20))
+        val learningHistory = learningHistoryForMode(allTrades, settings)
+        val completedOutcomes = completedOutcomeTradesForLearning(allTrades, settings)
         val now = System.currentTimeMillis()
-        val symbolProfiles = trades.groupBy { it.symbol.uppercase() }.map { (symbol, rows) ->
+        val symbolProfiles = completedOutcomes.groupBy { it.symbol.uppercase() }.map { (symbol, rows) ->
             buildSymbolProfile(symbol, rows, settings, now).also { profile ->
                 dao.upsertLearnedSymbolProfile(profile)
                 dao.insertSelfLearningAudit(SelfLearningAuditEntity(timestampEpochMs = now, eventType = "PROFILE_UPDATE", symbol = symbol, message = profile.explanation))
             }
         }
 
-        val strategyProfiles = trades.groupBy { strategyKeyFromTrade(it) }.map { (strategy, rows) ->
+        val strategyProfiles = completedOutcomes.groupBy { strategyKeyFromTrade(it) }.map { (strategy, rows) ->
             buildStrategyProfile(strategy, rows, settings, now).also { profile -> dao.upsertLearnedStrategyProfile(profile) }
         }
 
-        val holdProfiles = trades.groupBy { it.symbol.uppercase() }.map { (symbol, rows) ->
+        val holdProfiles = learningHistory.groupBy { it.symbol.uppercase() }.map { (symbol, rows) ->
             buildHoldProfile(symbol, rows, settings, now).also { profile ->
                 dao.upsertLearnedHoldProfile(profile)
                 dao.insertSelfLearningAudit(SelfLearningAuditEntity(timestampEpochMs = now, eventType = "HOLD_PROFILE_UPDATE", symbol = symbol, message = profile.explanation))
@@ -91,9 +103,10 @@ class TrueSelfLearningEngine {
         }
 
         val audit = dao.selfLearningAudit(40)
-        val liveCount = trades.count { !it.paper }
-        val paperCount = trades.count { it.paper }
-        val summary = "Learning refreshed: symbols=${symbolProfiles.size}, strategies=${strategyProfiles.size}, holdProfiles=${holdProfiles.size}, trades=${trades.size}, live=$liveCount, paper=$paperCount. Min sample=${settings.selfLearningMinSamples}."
+        val liveCount = completedOutcomes.count { !it.paper }
+        val paperCount = completedOutcomes.count { it.paper }
+        val separation = if (settings.selfLearningPaperAndLiveSeparated) "separated:${if (settings.mode == BotMode.PAPER) "PAPER" else "LIVE"}" else "combined"
+        val summary = "Learning refreshed: symbols=${symbolProfiles.size}, strategies=${strategyProfiles.size}, holdProfiles=${holdProfiles.size}, completedOutcomes=${completedOutcomes.size}, historyRows=${learningHistory.size}, liveOutcomes=$liveCount, paperOutcomes=$paperCount, mode=$separation. Min sample=${settings.selfLearningMinSamples}."
         return LearningSummary(true, symbolProfiles.sortedByDescending { it.updatedAtEpochMs }, strategyProfiles, audit, summary, holdProfiles.sortedByDescending { it.updatedAtEpochMs })
     }
 

@@ -11,6 +11,15 @@ import com.ksp.cryptobot.core.LiveOrderInfo
 import com.ksp.cryptobot.core.ClosedOrderInfo
 import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
 
+data class TradingFeeSchedule(
+    /** Decimal rate, e.g. 0.0040 = 0.40%. */
+    val makerRate: java.math.BigDecimal,
+    /** Decimal rate, e.g. 0.0080 = 0.80%. */
+    val takerRate: java.math.BigDecimal,
+    val rollingVolumeUsd: java.math.BigDecimal = java.math.BigDecimal.ZERO,
+    val source: String = "EXCHANGE"
+)
+
 interface CryptoExchangeClient {
     suspend fun getTicker(symbol: String): MarketTicker
     suspend fun getCandles(symbol: String, timeframe: Timeframe, limit: Int = 120): List<Candle>
@@ -64,6 +73,12 @@ interface CryptoExchangeClient {
 
     /** Closed orders/trades as reported by the exchange. Used by lifecycle sync. */
     suspend fun getClosedOrders(limit: Int = 50): List<ClosedOrderInfo> = emptyList()
+
+    /**
+     * Account/pair-specific maker/taker fees when the connector can retrieve them.
+     * Null means the caller must use a conservative fallback; it never means zero fees.
+     */
+    suspend fun getTradingFeeSchedule(symbol: String): TradingFeeSchedule? = null
 
     /**
      * Full portfolio balances, preferably using total + free + held amounts.

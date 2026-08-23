@@ -14,6 +14,7 @@ import com.ksp.cryptobot.exchange.KrakenSpotClient
 import com.ksp.cryptobot.exchange.ManualExecutionClient
 import com.ksp.cryptobot.exchange.PaperExchangeClient
 import com.ksp.cryptobot.execution.ExecutionGuard
+import com.ksp.cryptobot.execution.ExchangeMinimumOrderPolicy
 import com.ksp.cryptobot.execution.AdvancedRiskManager
 import com.ksp.cryptobot.intelligence.AiDecisionEngine
 import com.ksp.cryptobot.news.NewsApiClient
@@ -28,6 +29,7 @@ import com.ksp.cryptobot.news.GuardianNewsClient
 import com.ksp.cryptobot.news.CoinGeckoNewsClient
 import com.ksp.cryptobot.news.NewsClient
 import com.ksp.cryptobot.news.NoopNewsClient
+import com.ksp.cryptobot.news.NewsProviderHealthRegistry
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import com.ksp.cryptobot.lifecycle.TradeLifecycleManager
@@ -42,6 +44,14 @@ import com.ksp.cryptobot.completion.LiveVerificationEngine
 import com.ksp.cryptobot.completion.LiveVerificationResult
 import com.ksp.cryptobot.learning.TrueSelfLearningEngine
 import com.ksp.cryptobot.performance.PerformanceLabEngine
+import com.ksp.cryptobot.governance.ProductionIntelligenceEngine
+import com.ksp.cryptobot.research.ResearchCoordinator
+import com.ksp.cryptobot.release.V4SystemVerifier
+import com.ksp.cryptobot.execution.AdvancedExecutionCoordinator
+import com.ksp.cryptobot.execution.ProtectiveStopManager
+import com.ksp.cryptobot.research.ResearchExecutionRuntime
+import com.ksp.cryptobot.research.HandoffPositionPlan
+import com.ksp.cryptobot.research.HandoffPositionPlanCodec
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.math.BigDecimal
@@ -61,11 +71,15 @@ class BotController(
     private val guard = ExecutionGuard(dao)
     private val advancedRiskManager = AdvancedRiskManager(dao)
     private val advancedAutomationEngine = AdvancedAutomationEngine()
-    private val lifecycleManager = TradeLifecycleManager(dao, statusStore)
+    private val lifecycleManager = TradeLifecycleManager(dao, statusStore, AppDatabase.get(appContext).governanceDao())
     private val proAutomationSuite = ProAutomationSuite(appContext)
     private val autonomousPack = AutonomousIntelligencePack(appContext)
     private val liveVerificationEngine = LiveVerificationEngine()
     private val selfLearningEngine = TrueSelfLearningEngine()
+    private val productionIntelligence = ProductionIntelligenceEngine(AppDatabase.get(appContext).governanceDao())
+    private val researchIntelligence = ResearchCoordinator(appContext, AppDatabase.get(appContext).researchDao())
+    private val advancedExecution = AdvancedExecutionCoordinator(dao, AppDatabase.get(appContext).governanceDao())
+    private val protectiveStops = ProtectiveStopManager(dao, AppDatabase.get(appContext).governanceDao())
     private val remoteAlertClient = RemoteAlertClient()
     private val remoteCommandClient = RemoteCommandClient()
     private val _status = MutableStateFlow("Stopped")
@@ -184,6 +198,15 @@ class BotController(
 
         add("PASS", "Settings Store", "Loaded provider=${settings.exchangeProvider}, mode=${settings.mode}, symbols=${settings.symbolsCsv}")
         add("PASS", "Secure Exchange Key Store", "Encrypted key store is reachable. Keys are not exposed in diagnostics.")
+
+        try {
+            V4SystemVerifier(appContext).verify(settings).forEach { check ->
+                add(check.status, "V4 ${check.name}", check.detail)
+            }
+            add("PASS", "V4 migrated systems", "Final Stage 6 verifier completed for CloudShare, governance, execution, research, recovery and signing/integrity.")
+        } catch (error: Exception) {
+            add("WARN", "V4 migrated systems", "V4 verifier failed to complete: ${error.message}")
+        }
 
         val primarySymbol = settings.symbols().firstOrNull()?.uppercase()?.replace("/", "")?.replace("-", "") ?: "BTCEUR"
         val publicKraken = KrakenSpotClient(apiKey = "", secretKey = "")
@@ -888,6 +911,220 @@ class BotController(
         }
     }
 
+    /**
+     * Runs the app-level verification suite and exports a privacy-safe runtime
+     * diagnostics report. Exchange/API secrets, bot tokens, webhook secrets and
+     * remote command PINs are explicitly redacted from every text section.
+     */
+    suspend fun exportFullDiagnosticsToFile(
+        settings: BotSettings = settingsStore.load(),
+        customDirectoryPath: String = settingsStore.diagnosticsDirectoryPath()
+    ): Pair<List<String>, String> {
+        val verification = runCatching { runSystemFeatureVerification(settings) }
+            .getOrElse { error ->
+                listOf("FAIL | Full Diagnostics | System verification aborted: ${error.message}")
+            }
+
+        return try {
+            val portfolio = runCatching { loadPortfolioSnapshot(settings) }.getOrNull()
+            val lifecycle = runCatching { loadLifecycleSnapshot(settings) }.getOrNull()
+            val openOrders = runCatching { loadOpenOrdersSnapshot(settings) }.getOrDefault(emptyList())
+            val trades = runCatching { loadTradeJournal(250) }.getOrDefault(emptyList())
+            val recentStatus = statusStore.recentLines(500)
+            val providerHealth = runCatching {
+                com.ksp.cryptobot.news.NewsProviderHealthRegistry.snapshot().map { it.toString() }
+            }.getOrDefault(emptyList())
+
+            val secretValues = listOfNotNull(
+                settingsStore.exchangeApiKey(ExchangeProvider.KRAKEN),
+                settingsStore.exchangeSecretKey(ExchangeProvider.KRAKEN),
+                settingsStore.telegramBotToken(),
+                settingsStore.discordWebhookUrl(),
+                settingsStore.discordBotToken(),
+                settingsStore.remoteCommandPin(),
+                settingsStore.newsApiKey(),
+                settingsStore.cryptoPanicApiKey(),
+                settingsStore.marketauxApiKey(),
+                settingsStore.newsDataApiKey(),
+                settingsStore.gNewsApiKey(),
+                settingsStore.guardianApiKey()
+            ).filter { it.length >= 4 }.distinct()
+
+            fun sanitize(raw: String): String {
+                return secretValues.fold(raw) { safe, secret ->
+                    safe.replace(secret, "[REDACTED]", ignoreCase = false)
+                }
+            }
+
+            val packageInfo = runCatching {
+                appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+            }.getOrNull()
+
+            val report = buildString {
+                appendLine("CRYPTO TRADESTATION — FULL APP DIAGNOSTICS")
+                appendLine("generatedAt=${java.time.Instant.now()}")
+                appendLine("package=${appContext.packageName}")
+                appendLine("versionName=${packageInfo?.versionName ?: "unknown"}")
+                appendLine("androidSdk=${android.os.Build.VERSION.SDK_INT}")
+                appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                appendLine("mode=${settings.mode}")
+                appendLine("exchangeProvider=${settings.exchangeProvider}")
+                appendLine("symbols=${settings.symbolsCsv}")
+                appendLine("allowedQuoteAssets=${settings.allowedQuoteAssetsCsv}")
+                appendLine("liveTradingAcknowledged=${settings.liveTradingAcknowledged}")
+                appendLine("ultimateAutomationEnabled=${settings.ultimateAutomationEnabled}")
+                appendLine("liveLifecycleManagerEnabled=${settings.liveLifecycleManagerEnabled}")
+                appendLine("autoExitManagerEnabled=${settings.autoExitManagerEnabled}")
+                appendLine("autoStopLossEnabled=${settings.autoStopLossEnabled}")
+                appendLine("autoTakeProfitEnabled=${settings.autoTakeProfitEnabled}")
+                appendLine("trueSelfLearningEnabled=${settings.trueSelfLearningEnabled}")
+                appendLine("maxPositionEur=${settings.maxPositionEur}")
+                appendLine("maxDailyLossEur=${settings.maxDailyLossEur}")
+                appendLine("maxTradesPerDay=${settings.maxTradesPerDay}")
+                appendLine("maxTradesPerHour=${settings.maxTradesPerHour}")
+                appendLine("maxSimultaneousLivePositions=${settings.maxSimultaneousLivePositions}")
+                appendLine("secrets=EXCLUDED_AND_REDACTED")
+                appendLine()
+
+                appendLine("[SYSTEM_VERIFICATION]")
+                verification.forEach { appendLine(sanitize(it)) }
+                appendLine()
+
+                appendLine("[PORTFOLIO]")
+                if (portfolio == null) {
+                    appendLine("unavailable")
+                } else {
+                    appendLine("provider=${portfolio.provider}")
+                    appendLine("totalValueEur=${portfolio.totalValueEur}")
+                    appendLine("freeEur=${portfolio.freeEur}")
+                    if (portfolio.warning.isNotBlank()) appendLine("warning=${sanitize(portfolio.warning)}")
+                    portfolio.assets.take(80).forEach { asset ->
+                        appendLine("${asset.asset}|total=${asset.total}|free=${asset.free}|eurValue=${asset.eurValue}")
+                    }
+                }
+                appendLine()
+
+                appendLine("[LIFECYCLE_POSITIONS]")
+                if (lifecycle == null) {
+                    appendLine("unavailable")
+                } else {
+                    appendLine("positions=${lifecycle.positions.size}")
+                    lifecycle.positions.take(80).forEach { position ->
+                        appendLine(
+                            "${position.symbol}|qty=${position.quantity}|entry=${position.entryPrice}|" +
+                                "current=${position.currentPrice}|pnlEur=${position.unrealizedPnlEur}|" +
+                                "pnlPct=${position.unrealizedPnlPercent}|managed=${position.managed}"
+                        )
+                    }
+                    lifecycle.messages.take(80).forEach { appendLine("message=${sanitize(it)}") }
+                }
+                appendLine()
+
+                appendLine("[OPEN_ORDERS]")
+                appendLine("count=${openOrders.size}")
+                openOrders.take(100).forEach { order ->
+                    appendLine(
+                        "${order.side}|${order.symbol}|${order.orderType}|price=${order.price}|" +
+                            "quantity=${order.quantity}|executed=${order.executedQuantity}|" +
+                            "remaining=${order.remainingQuantity}|status=${order.status}"
+                    )
+                }
+                appendLine()
+
+                appendLine("[NEWS_PROVIDER_HEALTH]")
+                if (providerHealth.isEmpty()) appendLine("no provider health snapshot")
+                else providerHealth.take(100).forEach { appendLine(sanitize(it)) }
+                appendLine()
+
+                appendLine("[RECENT_TRADES]")
+                appendLine("count=${trades.size}")
+                trades.take(250).forEach { trade ->
+                    appendLine(
+                        "${trade.timestampEpochMs}|${trade.symbol}|${trade.side}|" +
+                            "qty=${trade.quantity}|price=${trade.priceEur}|fee=${trade.feeEur}|" +
+                            "realizedPnl=${trade.realizedPnlEur}|paper=${trade.paper}|" +
+                            "score=${trade.aiScore}|reason=${sanitize(trade.aiReason)}"
+                    )
+                }
+                appendLine()
+
+                appendLine("[RECENT_STATUS_LOG]")
+                recentStatus.take(500).forEach { appendLine(sanitize(it)) }
+                appendLine()
+
+                appendLine("[PRIVACY]")
+                appendLine("API keys, exchange secrets, Telegram tokens, Discord tokens/webhooks, news API keys and remote-command PINs are never intentionally exported.")
+            }
+
+            val requested = customDirectoryPath.trim()
+            val filename = "cts_full_diagnostics_${System.currentTimeMillis()}.txt"
+
+            val result = if (requested.startsWith("content://")) {
+                val treeUri = Uri.parse(requested)
+                val resolver = appContext.contentResolver
+                val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri,
+                    DocumentsContract.getTreeDocumentId(treeUri)
+                )
+                val documentUri = DocumentsContract.createDocument(
+                    resolver,
+                    parentDocumentUri,
+                    "text/plain",
+                    filename
+                ) ?: error("Android folder picker did not return a writable diagnostics document URI.")
+
+                resolver.openOutputStream(documentUri, "w")?.use { stream ->
+                    stream.write(report.toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                } ?: error("Could not open the selected diagnostics folder for writing.")
+
+                buildString {
+                    appendLine("DIAGNOSTICS SAVED SUCCESSFULLY")
+                    appendLine("fileUri=$documentUri")
+                    appendLine("directoryUri=$treeUri")
+                    appendLine("checks=${verification.size}")
+                    appendLine("failures=${verification.count { it.startsWith("FAIL") }}")
+                    appendLine("warnings=${verification.count { it.startsWith("WARN") }}")
+                    appendLine("sizeBytes=${report.toByteArray(Charsets.UTF_8).size}")
+                }.trim()
+            } else {
+                val defaultDiagnosticsDir = java.io.File(appContext.getExternalFilesDir(null), "diagnostics")
+                val requestedDir = if (requested.isNotBlank()) java.io.File(requested) else defaultDiagnosticsDir
+                if (!requestedDir.exists()) requestedDir.mkdirs()
+                if (!requestedDir.exists() || !requestedDir.isDirectory || !requestedDir.canWrite()) {
+                    defaultDiagnosticsDir.mkdirs()
+                    updateStatus(
+                        "Custom diagnostics directory is not writable. Falling back to ${defaultDiagnosticsDir.absolutePath}",
+                        "WARN"
+                    )
+                }
+                val finalDir = if (requestedDir.exists() && requestedDir.isDirectory && requestedDir.canWrite()) {
+                    requestedDir
+                } else {
+                    defaultDiagnosticsDir
+                }
+                val file = java.io.File(finalDir, filename)
+                file.writeText(report)
+                buildString {
+                    appendLine("DIAGNOSTICS SAVED SUCCESSFULLY")
+                    appendLine("file=${file.absolutePath}")
+                    appendLine("directory=${file.parentFile?.absolutePath ?: ""}")
+                    appendLine("checks=${verification.size}")
+                    appendLine("failures=${verification.count { it.startsWith("FAIL") }}")
+                    appendLine("warnings=${verification.count { it.startsWith("WARN") }}")
+                    appendLine("sizeBytes=${file.length()}")
+                }.trim()
+            }
+
+            updateStatus("Full app diagnostics saved: $filename", "INFO")
+            verification to result
+        } catch (error: Exception) {
+            val message = "Diagnostics export failed: ${error.message}"
+            updateStatus(message, "ERROR")
+            verification to message
+        }
+    }
+
 
     suspend fun processRemoteCommands(settings: BotSettings = settingsStore.load()): List<String> {
         if (!settings.remoteCommandCenterEnabled) return emptyList()
@@ -1161,6 +1398,12 @@ Crypto TradeStation remote commands:
         if (liveAutoExecution) {
             manageExistingLiveOrders(settings, exchange)
             lifecycleManager.runPreScanMaintenance(settings, exchange)
+            val reconciliation = advancedExecution.reconcileLive(settings, exchange)
+            reconciliation.messages.take(8).forEach { updateStatus("Advanced reconciliation: $it", if (reconciliation.removed > 0) "WARN" else "INFO") }
+        }
+        if (settings.mode == BotMode.PAPER && settings.liveLifecycleManagerEnabled) {
+            lifecycleManager.runPreScanMaintenance(settings, exchange)
+            updateStatus("Paper lifecycle pre-scan truth: pending fills and persisted source plans refreshed against the fake wallet.", "INFO")
         }
         val liveBalances = if (liveAutoExecution || paperExecution) {
             runCatching { exchange.getAvailableBalances() }
@@ -1182,6 +1425,8 @@ Crypto TradeStation remote commands:
         } else emptyMap()
         val reservedByQuoteThisScan = mutableMapOf<String, BigDecimal>()
         var submittedOrdersThisScan = 0
+        val enteredSymbolsThisScan = mutableSetOf<String>()
+        val exitedSymbolsThisScan = mutableSetOf<String>()
         val newsClient = createNewsClient(settings)
         if (settings.useNewsAi) {
             val newsApiKeyCount = settingsStore.newsApiKey()
@@ -1189,11 +1434,12 @@ Crypto TradeStation remote commands:
                 ?.map { it.trim() }
                 ?.count { it.isNotBlank() }
                 ?: 0
+            val cryptoPanicKey = !settingsStore.cryptoPanicApiKey().isNullOrBlank()
             val marketauxKey = !settingsStore.marketauxApiKey().isNullOrBlank()
             val newsDataKey = !settingsStore.newsDataApiKey().isNullOrBlank()
             val gNewsKey = !settingsStore.gNewsApiKey().isNullOrBlank()
             val guardianKey = !settingsStore.guardianApiKey().isNullOrBlank()
-            updateStatus("News AI enabled: GDELT + RSS + ${if (marketauxKey) "Marketaux" else "Marketaux(no key)"} + ${if (newsDataKey) "NewsData.io" else "NewsData.io(no key)"} + ${if (gNewsKey) "GNews" else "GNews(no key)"} + ${if (guardianKey) "Guardian" else "Guardian(no key)"} + $newsApiKeyCount NewsAPI key(s).", "INFO")
+            updateStatus("News AI enabled: GDELT + RSS + ${if (cryptoPanicKey) "CryptoPanic" else "CryptoPanic(no key)"} + ${if (marketauxKey) "Marketaux" else "Marketaux(no key)"} + ${if (newsDataKey) "NewsData.io" else "NewsData.io(no key)"} + ${if (gNewsKey) "GNews" else "GNews(no key)"} + ${if (guardianKey) "Guardian" else "Guardian(no key)"} + $newsApiKeyCount NewsAPI key(s).", "INFO")
         }
         val recentTrades = dao.recentTradesSnapshot(settings.selfLearningLookbackTrades.coerceAtLeast(100))
         if (settings.trueSelfLearningEnabled) {
@@ -1227,6 +1473,10 @@ Crypto TradeStation remote commands:
                     ?.normalizedSymbol
             } else rawSymbol
         }.distinct()
+        val researchBroadContext = runCatching { researchIntelligence.loadBroadContext(exchange) }
+            .onFailure { updateStatus("Research broad context unavailable: ${it.message}", "WARN") }
+            .getOrDefault(com.ksp.cryptobot.research.BroadMarketContext())
+        updateStatus("Research broad context: BTC=${"%.2f".format(researchBroadContext.btcMomentumPct)}%, ETH=${"%.2f".format(researchBroadContext.ethMomentumPct)}%, broad=${"%.2f".format(researchBroadContext.broadMomentumPct)}%", "INFO")
         val decisions = symbols.mapNotNull { symbol ->
             runCatching {
                 updateStatus("[$symbol] Fetching ticker from ${settings.exchangeProvider}...")
@@ -1269,8 +1519,21 @@ Crypto TradeStation remote commands:
                 val autonomousAssessment = autonomousPack.assessSymbol(symbol, recentTrades, settings)
                 val autonomousDecision = autonomousPack.enrichDecision(rawDecision, ticker, settings, autonomousAssessment)
                 val learningResult = selfLearningEngine.adjustDecision(dao, autonomousDecision, ticker, settings)
-                val decision = learningResult.decision
+                val learnedDecision = learningResult.decision
                 if (settings.trueSelfLearningEnabled) updateStatus("[$symbol] ${learningResult.explanation.take(220)}", "INFO")
+                val researchResult = researchIntelligence.evaluateDecision(
+                    settings = settings, decision = learnedDecision, ticker = ticker, candlesByTimeframe = candlesByTimeframe,
+                    recentTrades = recentTrades, news = news, exchange = exchange, broad = researchBroadContext
+                )
+                val researchedDecision = researchResult.first
+                val research = researchResult.second
+                updateStatus("[$symbol] Research intelligence: strategy=${research.selectedStrategy}, adj=${research.scoreAdjustment}, regime=${research.regime.regime}, WF=${"%.1f".format(research.walkForward.score)}, MC=${"%.1f".format(research.monteCarlo.score)}, seq=${research.sequence.adjustment}, RL=${research.rlSandbox.adjustment}, promoted=${research.promotedFromResearch}. ${research.explanation.take(260)}", if (research.allowed) "INFO" else "WARN")
+                val productionResult = productionIntelligence.evaluateDecision(
+                    researchedDecision, ticker, candlesByTimeframe[Timeframe.M15].orEmpty(), recentTrades, settings
+                )
+                val decision = productionResult.first
+                val production = productionResult.second
+                updateStatus("[$symbol] Production intelligence: blocked=${production.blocked}, adj=${production.scoreAdjustment}, size×${"%.2f".format(production.sizeMultiplier)}, safe=${production.safeMode.level}, anomaly=${production.anomaly.severity}, kill=${production.killSwitch.severity}. ${production.reason.take(240)}", if (production.blocked) "WARN" else "INFO")
                 val replay = autonomousPack.buildTradeReplay(decision, ticker, settings)
                 val netCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
                 val whyLine = proAutomationSuite.explainTrade(ticker, decision, symbolRank, netCheck)
@@ -1289,6 +1552,12 @@ Crypto TradeStation remote commands:
                         if (result.submitted) {
                             submittedOrdersThisScan += 1
                             tradedThisSymbol = true
+                            val normalizedExecutionSymbol = symbol.uppercase().replace("/", "").replace("-", "")
+                            when (decision.finalAction) {
+                                SignalAction.BUY, SignalAction.SMALL_BUY -> enteredSymbolsThisScan += normalizedExecutionSymbol
+                                SignalAction.SELL -> exitedSymbolsThisScan += normalizedExecutionSymbol
+                                else -> Unit
+                            }
                         }
                         if (result.reservedAmount > BigDecimal.ZERO) {
                             val current = reservedByQuoteThisScan[result.quoteAsset] ?: BigDecimal.ZERO
@@ -1314,8 +1583,8 @@ Crypto TradeStation remote commands:
                 )
             }
         }
-        if (liveAutoExecution && settings.liveLifecycleManagerEnabled) {
-            val lifecycle = lifecycleManager.runPostDecisionManagement(settings, exchange, decisions)
+        if ((liveAutoExecution || settings.mode == BotMode.PAPER) && settings.liveLifecycleManagerEnabled) {
+            val lifecycle = lifecycleManager.runPostDecisionManagement(settings, exchange, decisions, enteredSymbolsThisScan, exitedSymbolsThisScan)
             lifecycle.messages.take(10).forEach { updateStatus(it, if (it.contains("submitted", ignoreCase = true)) "LIVE" else "INFO") }
             updateStatus("Lifecycle manager complete: positions=${lifecycle.positions.size}, openOrders=${lifecycle.openOrders.size}, trades=${lifecycle.performance.totalTrades}", "INFO")
         }
@@ -1490,12 +1759,14 @@ Crypto TradeStation remote commands:
         }
         val allowed = guard.canExecute(settings, decision)
         if (!allowed.first) {
+            productionIntelligence.recordWhyNotTrade(decision, settings, allowed.second)
             updateStatus("Trade blocked: ${allowed.second}", "WARN")
             return ExecutionAttemptResult(false)
         }
         val proNetCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
         updateStatus("[${ticker.symbol}] v1.1 fee/spread net-profit check: ${proNetCheck.reason}", if (proNetCheck.allowed) "INFO" else "WARN")
         if (!proNetCheck.allowed) {
+            productionIntelligence.recordWhyNotTrade(decision, settings, proNetCheck.reason)
             return ExecutionAttemptResult(false)
         }
         if (settings.mode == BotMode.LIVE_CONFIRM) {
@@ -1600,7 +1871,7 @@ Crypto TradeStation remote commands:
                 }
             }
         }
-        val price = if (side == OrderSide.BUY) ticker.ask else ticker.bid
+        var price = if (side == OrderSide.BUY) ticker.ask else ticker.bid
         if (side == OrderSide.BUY && settings.multiTimeframeConsensusEnabled) {
             val consensus = multiTimeframeConsensusAllowsBuy(settings, exchange, ticker.symbol)
             updateStatus("[${ticker.symbol}] ${consensus.second}", if (consensus.first) "INFO" else "WARN")
@@ -1621,7 +1892,7 @@ Crypto TradeStation remote commands:
 
         val adaptivePositionCap = if (settings.ultimateAutomationEnabled) adaptivePositionCapFor(settings, ticker.symbol) else settings.maxPositionEur
         val perOrderCap = if (useMarketOrder) adaptivePositionCap.min(settings.maxMarketOrderEur) else adaptivePositionCap
-        val targetNotional = if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) {
+        var targetNotional = if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) {
             val freeQuote = availableQuote ?: BigDecimal.ZERO
             val spendableAfterReserve = freeQuote
                 .subtract(quoteReserve)
@@ -1640,7 +1911,98 @@ Crypto TradeStation remote commands:
             perOrderCap
         }
 
+        // Exchange minimum preflight. Kraken exposes ordermin and costmin; use both
+        // before the research/risk planner so a safely fundable minimum-sized order
+        // can be considered. This never exceeds perOrderCap or the post-reserve quote budget.
+        val maxSpendableForExchangeMinimum = if (side == OrderSide.BUY) {
+            if (settings.mode == BotMode.PAPER) {
+                perOrderCap
+            } else {
+                val freeQuoteForMinimum = availableQuote ?: BigDecimal.ZERO
+                val afterReserveForMinimum = freeQuoteForMinimum
+                    .subtract(quoteReserve)
+                    .subtract(quoteReservedThisScan)
+                    .max(BigDecimal.ZERO)
+                    .divide(feeReserveMultiplier, 8, RoundingMode.DOWN)
+                val quoteBudgetForMinimum = when {
+                    quoteAsset in setOf("EUR", "USD", "USDT", "USDC") -> afterReserveForMinimum
+                    settings.nonEurQuoteBuyEnabled -> {
+                        val cryptoQuoteCapForMinimum = freeQuoteForMinimum
+                            .multiply(settings.maxNonEurQuoteSpendPercent)
+                            .divide(BigDecimal("100"), 8, RoundingMode.DOWN)
+                        afterReserveForMinimum.min(cryptoQuoteCapForMinimum)
+                    }
+                    else -> BigDecimal.ZERO
+                }
+                perOrderCap.min(quoteBudgetForMinimum)
+            }
+        } else BigDecimal.ZERO
+
+        if (side == OrderSide.BUY && pairInfo != null) {
+            val exchangeMinimumPreflight = ExchangeMinimumOrderPolicy.evaluate(
+                targetNotional = targetNotional,
+                price = price,
+                quantityDecimals = pairInfo.quantityDecimals,
+                minOrderSize = pairInfo.minOrderSize,
+                minOrderCost = pairInfo.minOrderCost,
+                hardCapNotional = perOrderCap,
+                maxSpendableNotional = maxSpendableForExchangeMinimum,
+                allowUpsizeToMinimum = true
+            )
+            if (!exchangeMinimumPreflight.allowed) {
+                val minimumReason = "[${ticker.symbol}] BUY skipped before submission: ${exchangeMinimumPreflight.reason}"
+                updateStatus(minimumReason, "WARN")
+                productionIntelligence.recordWhyNotTrade(decision, settings, minimumReason)
+                return ExecutionAttemptResult(false)
+            }
+            if (exchangeMinimumPreflight.adjustedToMinimum) {
+                targetNotional = exchangeMinimumPreflight.targetNotional
+                updateStatus(
+                    "[${ticker.symbol}] Exchange minimum BUY budget adjusted safely: " +
+                        "qty=${exchangeMinimumPreflight.quantity.stripTrailingZeros().toPlainString()}, " +
+                        "notional≈${exchangeMinimumPreflight.targetNotional.setScale(2, RoundingMode.UP)} $quoteAsset. " +
+                        "Kraken ordermin=${pairInfo.minOrderSize}, costmin=${pairInfo.minOrderCost}.",
+                    "INFO"
+                )
+            }
+        }
+
+        var plannedEntryOrderType: OrderType? = null
+        var plannedEntryPostOnly = false
         if (side == OrderSide.BUY) {
+            val advancedOrderBook = runCatching { exchange.getOrderBook(ticker.symbol, 40) }.getOrNull()
+            val advancedPlan = advancedExecution.prepareEntry(
+                settings = settings, ticker = ticker, decision = decision, requestedQuote = targetNotional,
+                orderBook = advancedOrderBook, mode = if (settings.mode == BotMode.PAPER) "PAPER" else "LIVE", currentUseMarket = useMarketOrder
+            )
+            updateStatus("[${ticker.symbol}] Advanced execution plan: allowed=${advancedPlan.allowed}, final=${advancedPlan.finalQuote.setScale(2, RoundingMode.DOWN)}, order=${advancedPlan.orderType}, protection=${advancedPlan.protectionLevel}, size×${advancedPlan.combinedMultiplier}. ${advancedPlan.reason.take(260)}", if (advancedPlan.allowed) "INFO" else "WARN")
+            if (!advancedPlan.allowed) {
+                productionIntelligence.recordWhyNotTrade(decision, settings, advancedPlan.reason)
+                return ExecutionAttemptResult(false)
+            }
+            targetNotional = advancedPlan.finalQuote
+            if (pairInfo != null) {
+                val exchangeMinimumAfterRisk = ExchangeMinimumOrderPolicy.evaluate(
+                    targetNotional = targetNotional,
+                    price = price,
+                    quantityDecimals = pairInfo.quantityDecimals,
+                    minOrderSize = pairInfo.minOrderSize,
+                    minOrderCost = pairInfo.minOrderCost,
+                    hardCapNotional = perOrderCap,
+                    maxSpendableNotional = maxSpendableForExchangeMinimum,
+                    allowUpsizeToMinimum = false
+                )
+                if (!exchangeMinimumAfterRisk.allowed) {
+                    val minimumReason = "[${ticker.symbol}] BUY skipped after AI/research risk sizing: ${exchangeMinimumAfterRisk.reason}"
+                    updateStatus(minimumReason, "WARN")
+                    productionIntelligence.recordWhyNotTrade(decision, settings, minimumReason)
+                    return ExecutionAttemptResult(false)
+                }
+            }
+            plannedEntryOrderType = advancedPlan.orderType
+            plannedEntryPostOnly = advancedPlan.postOnly
+            if (advancedPlan.orderType != OrderType.MARKET) useMarketOrder = false
+            if (!useMarketOrder && advancedPlan.limitPrice != null && advancedPlan.limitPrice > BigDecimal.ZERO) price = advancedPlan.limitPrice
             val orderBookCheck = orderBookDepthAllowsExecution(settings, exchange, ticker.symbol, side, targetNotional, price)
             updateStatus("[${ticker.symbol}] ${orderBookCheck.second}", if (orderBookCheck.first) "INFO" else "WARN")
             if (!orderBookCheck.first) {
@@ -1677,7 +2039,26 @@ Crypto TradeStation remote commands:
             }
             chosen
         } else {
-            targetNotional.divide(price, 8, RoundingMode.DOWN)
+            val finalExchangeMinimumCheck = if (pairInfo != null) {
+                ExchangeMinimumOrderPolicy.evaluate(
+                    targetNotional = targetNotional,
+                    price = price,
+                    quantityDecimals = pairInfo.quantityDecimals,
+                    minOrderSize = pairInfo.minOrderSize,
+                    minOrderCost = pairInfo.minOrderCost,
+                    hardCapNotional = perOrderCap,
+                    maxSpendableNotional = maxSpendableForExchangeMinimum,
+                    allowUpsizeToMinimum = false
+                )
+            } else null
+            if (finalExchangeMinimumCheck != null && !finalExchangeMinimumCheck.allowed) {
+                val minimumReason = "[${ticker.symbol}] BUY skipped at final quantity preflight: ${finalExchangeMinimumCheck.reason}"
+                updateStatus(minimumReason, "WARN")
+                productionIntelligence.recordWhyNotTrade(decision, settings, minimumReason)
+                return ExecutionAttemptResult(false)
+            }
+            finalExchangeMinimumCheck?.quantity
+                ?: targetNotional.divide(price, 8, RoundingMode.DOWN)
         }
         if (quantity <= BigDecimal.ZERO) {
             updateStatus("Trade blocked: calculated quantity is zero.", "ERROR")
@@ -1688,15 +2069,29 @@ Crypto TradeStation remote commands:
             side = side,
             quantity = quantity,
             limitPrice = if (useMarketOrder) null else price,
-            orderType = if (useMarketOrder) OrderType.MARKET else OrderType.LIMIT,
-            clientOrderId = "ksp-${ticker.symbol.lowercase()}-${System.currentTimeMillis()}"
+            orderType = plannedEntryOrderType ?: if (useMarketOrder) OrderType.MARKET else OrderType.LIMIT,
+            clientOrderId = "ksp-${ticker.symbol.lowercase()}-${System.currentTimeMillis()}",
+            purpose = if (side == OrderSide.BUY && plannedEntryOrderType != null) "RESEARCH/HANDOFF strategy=${ResearchExecutionRuntime.snapshot(ticker.symbol)?.strategyId ?: "GENERIC"} order=${plannedEntryOrderType}" else "ENTRY",
+            postOnly = plannedEntryPostOnly,
+            protectiveStopPrice = if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) ResearchExecutionRuntime.snapshot(ticker.symbol)?.stopPrice?.takeIf { it > BigDecimal.ZERO && it < price } else null
         )
-        val orderModeLabel = if (useMarketOrder) "MARKET" else "LIMIT"
+        val orderModeLabel = request.orderType.name
         val submittedNotionalEstimate = request.quantity.multiply(price).setScale(8, RoundingMode.HALF_UP)
         updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${submittedNotionalEstimate.setScale(2, RoundingMode.DOWN)} $quoteAsset, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
             updateStatus("Order submit failed: ${error.message}", "ERROR")
-            sendRemoteAlert(settings, "Order submit failed", "${request.side} ${request.symbol}: ${error.message}")
+            val deterministicMinimumRejection =
+                error.message?.contains("order size too small", ignoreCase = true) == true ||
+                    error.message?.contains("order cost too small", ignoreCase = true) == true
+            if (deterministicMinimumRejection) {
+                updateStatus(
+                    "Exchange minimum rejection escaped local preflight for ${request.symbol}; remote-alert spam suppressed. " +
+                        "The next scan will re-read pair metadata and skip unless it can satisfy the new minimum.",
+                    "WARN"
+                )
+            } else {
+                sendRemoteAlert(settings, "Order submit failed", "${request.side} ${request.symbol}: ${error.message}")
+            }
             if (settings.ultimateAutomationEnabled && settings.autoPauseAfterOrderFailuresEnabled && settings.mode == BotMode.LIVE_AUTO) {
                 val recentFailures = statusStore.recentLines(80).count { it.contains("Order submit failed", ignoreCase = true) || it.contains("Service cycle failed", ignoreCase = true) }
                 if (recentFailures + 1 >= settings.autoPauseFailureThreshold.coerceAtLeast(1)) {
@@ -1708,39 +2103,111 @@ Crypto TradeStation remote commands:
             }
             throw error
         }
-        val executedQtyForRecord = result.executedQuantity.takeIf { it > BigDecimal.ZERO } ?: quantity
+        val fillConfirmed = result.executedQuantity > BigDecimal.ZERO && result.averagePrice > BigDecimal.ZERO
+        val executedQtyForRecord = result.executedQuantity.max(BigDecimal.ZERO)
         val averagePriceForRecord = result.averagePrice.takeIf { it > BigDecimal.ZERO } ?: price
-        val feeForRecord = result.fee.takeIf { it > BigDecimal.ZERO }
-            ?: averagePriceForRecord.multiply(executedQtyForRecord).multiply(BigDecimal("0.001")).setScale(8, RoundingMode.HALF_UP)
+        val feeForRecord = if (fillConfirmed) {
+            result.fee.takeIf { it > BigDecimal.ZERO }
+                ?: averagePriceForRecord.multiply(executedQtyForRecord).multiply(BigDecimal("0.001")).setScale(8, RoundingMode.HALF_UP)
+        } else BigDecimal.ZERO
         val notionalForRecord = averagePriceForRecord.multiply(executedQtyForRecord).setScale(8, RoundingMode.HALF_UP)
-        dao.insertTrade(
-            TradeEntity(
-                symbol = result.symbol,
-                side = result.side.name,
-                quantity = executedQtyForRecord.toPlainString(),
-                priceEur = averagePriceForRecord.toPlainString(),
-                feeEur = feeForRecord.toPlainString(),
-                paper = result.paper,
-                aiScore = decision.finalScore,
-                aiReason = decision.explanation,
-                clientOrderId = request.clientOrderId,
-                exchangeOrderId = result.exchangeOrderId,
-                timestampEpochMs = result.timestamp.toEpochMilli()
+        val realizedPnlForRecord = if (fillConfirmed && result.side == OrderSide.SELL) {
+            if (result.realizedPnlQuote != BigDecimal.ZERO) result.realizedPnlQuote else {
+                val tracked = dao.positionForSymbol(result.symbol)
+                val entry = tracked?.entryPriceEur?.toBigDecimalOrNull()
+                    ?: dao.recentTradesSnapshot(200).firstOrNull { it.symbol.equals(result.symbol, true) && it.side == OrderSide.BUY.name }?.priceEur?.toBigDecimalOrNull()
+                    ?: BigDecimal.ZERO
+                if (entry > BigDecimal.ZERO) averagePriceForRecord.subtract(entry).multiply(executedQtyForRecord).subtract(feeForRecord) else BigDecimal.ZERO
+            }
+        } else result.realizedPnlQuote
+        if (fillConfirmed) {
+            dao.insertTrade(
+                TradeEntity(
+                    symbol = result.symbol,
+                    side = result.side.name,
+                    quantity = executedQtyForRecord.toPlainString(),
+                    priceEur = averagePriceForRecord.toPlainString(),
+                    feeEur = feeForRecord.toPlainString(),
+                    paper = result.paper,
+                    realizedPnlEur = realizedPnlForRecord.toPlainString(),
+                    aiScore = decision.finalScore,
+                    aiReason = decision.explanation,
+                    clientOrderId = request.clientOrderId,
+                    exchangeOrderId = result.exchangeOrderId,
+                    timestampEpochMs = result.timestamp.toEpochMilli()
+                )
             )
-        )
-        updateStatus("Order placed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. qty=${executedQtyForRecord.stripTrailingZeros().toPlainString()} avg=${averagePriceForRecord.stripTrailingZeros().toPlainString()} fee=${feeForRecord.stripTrailingZeros().toPlainString()} orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
+            if (result.side == OrderSide.BUY) {
+                val handoff = ResearchExecutionRuntime.snapshot(ticker.symbol)
+                if (handoff != null && handoff.strategyId != "HANDOFF_FILTERS" && (handoff.stopPrice != null || handoff.targets.isNotEmpty())) {
+                    val sourceStop = handoff.stopPrice?.takeIf { it > BigDecimal.ZERO && it < averagePriceForRecord }
+                        ?: averagePriceForRecord.multiply(BigDecimal.ONE.subtract(settings.stopLossPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
+                    val sourceTargets = handoff.targets.filter { it > averagePriceForRecord }.sorted()
+                    val firstTarget = sourceTargets.firstOrNull() ?: averagePriceForRecord.multiply(BigDecimal.ONE.add(settings.takeProfitPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
+                    val now = System.currentTimeMillis()
+                    dao.upsertPosition(PositionEntity(
+                        symbol = result.symbol, baseAsset = baseAsset, quantity = executedQtyForRecord.toPlainString(),
+                        entryPriceEur = averagePriceForRecord.toPlainString(), highestPriceEur = averagePriceForRecord.toPlainString(),
+                        stopPriceEur = sourceStop.toPlainString(), takeProfitPriceEur = firstTarget.toPlainString(), trailingStopPriceEur = "0",
+                        openedAtEpochMs = now, updatedAtEpochMs = now, status = "OPEN",
+                        source = HandoffPositionPlanCodec.encode(HandoffPositionPlan(handoff.strategyId, sourceStop, sourceTargets, handoff.fidelity, handoff.liveTruthGate, result.exchangeOrderId))
+                    ))
+                    updateStatus("[${result.symbol}] Persisted handoff plan: strategy=${handoff.strategyId}, stop=${sourceStop.stripTrailingZeros().toPlainString()}, targets=${sourceTargets.joinToString(",") { it.stripTrailingZeros().toPlainString() }}.", "LIVE")
+                    val protection = protectiveStops.protectOrFlatten(
+                        settings = settings, exchange = exchange, symbol = result.symbol,
+                        quantity = executedQtyForRecord, entryPrice = averagePriceForRecord,
+                        stopPrice = sourceStop, strategyId = handoff.strategyId, paper = result.paper
+                    )
+                    updateStatus("[${result.symbol}] Exchange protective stop state: protected=${protection.protected}, flattened=${protection.flattened}, pendingEmergency=${protection.pendingEmergencyExit}. ${protection.reason}", if (protection.protected) "LIVE" else "ERROR")
+                }
+            }
+            productionIntelligence.observeExecution(
+                symbol = result.symbol,
+                side = result.side,
+                mode = if (result.paper) "PAPER" else "LIVE",
+                orderType = request.orderType,
+                expectedPrice = price,
+                actualPrice = averagePriceForRecord,
+                quantity = executedQtyForRecord,
+                clientOrderId = request.clientOrderId,
+                exchangeOrderId = result.exchangeOrderId
+            )
+            updateStatus("Order fill confirmed: ${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}. qty=${executedQtyForRecord.stripTrailingZeros().toPlainString()} avg=${averagePriceForRecord.stripTrailingZeros().toPlainString()} fee=${feeForRecord.stripTrailingZeros().toPlainString()} orderId=${result.exchangeOrderId}", if (result.paper) "INFO" else "LIVE")
+        } else {
+            if (result.side == OrderSide.BUY) {
+                val handoff = ResearchExecutionRuntime.snapshot(ticker.symbol)
+                if (handoff != null && handoff.strategyId != "HANDOFF_FILTERS" && (handoff.stopPrice != null || handoff.targets.isNotEmpty())) {
+                    val plannedEntry = price
+                    val sourceStop = handoff.stopPrice?.takeIf { it > BigDecimal.ZERO && it < plannedEntry }
+                        ?: plannedEntry.multiply(BigDecimal.ONE.subtract(settings.stopLossPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
+                    val sourceTargets = handoff.targets.filter { it > plannedEntry }.sorted()
+                    val firstTarget = sourceTargets.firstOrNull() ?: plannedEntry.multiply(BigDecimal.ONE.add(settings.takeProfitPercent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)))
+                    val now = System.currentTimeMillis()
+                    dao.upsertPosition(PositionEntity(
+                        symbol = result.symbol, baseAsset = baseAsset, quantity = "0",
+                        entryPriceEur = plannedEntry.toPlainString(), highestPriceEur = plannedEntry.toPlainString(),
+                        stopPriceEur = sourceStop.toPlainString(), takeProfitPriceEur = firstTarget.toPlainString(), trailingStopPriceEur = "0",
+                        openedAtEpochMs = now, updatedAtEpochMs = now, status = "PENDING_ENTRY",
+                        source = HandoffPositionPlanCodec.encode(HandoffPositionPlan(handoff.strategyId, sourceStop, sourceTargets, handoff.fidelity, handoff.liveTruthGate, result.exchangeOrderId))
+                    ))
+                    updateStatus("[${result.symbol}] Persisted pending handoff plan for unfilled order ${result.exchangeOrderId}; no exposure is recorded until a fill is confirmed.", "LIVE")
+                }
+            }
+            updateStatus("Order accepted but fill not confirmed: ${result.side} ${result.symbol} type=${request.orderType}, submittedQty=${quantity.stripTrailingZeros().toPlainString()}, orderId=${result.exchangeOrderId}. No trade/PnL row is created until exchange fill evidence arrives.", "LIVE")
+        }
         sendRemoteAlert(
             settings,
             "Order placed",
             buildString {
                 appendLine("${result.side} ${result.symbol} ${if (result.paper) "PAPER" else "LIVE"}")
                 appendLine("orderType=$orderModeLabel")
-                appendLine("amount=${executedQtyForRecord.stripTrailingZeros().toPlainString()}")
+                appendLine("fillConfirmed=$fillConfirmed")
+                appendLine("amount=${if (fillConfirmed) executedQtyForRecord.stripTrailingZeros().toPlainString() else quantity.stripTrailingZeros().toPlainString()}")
                 appendLine("price=${averagePriceForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")
-                appendLine("notional≈${notionalForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")
-                appendLine("fee=${feeForRecord.stripTrailingZeros().toPlainString()} $quoteAsset")
+                appendLine("notional≈${if (fillConfirmed) notionalForRecord.stripTrailingZeros().toPlainString() else submittedNotionalEstimate.stripTrailingZeros().toPlainString()} $quoteAsset")
+                appendLine("fee=${if (fillConfirmed) feeForRecord.stripTrailingZeros().toPlainString() else "pending"} $quoteAsset")
                 appendLine("orderId=${result.exchangeOrderId}")
-                if (result.executedQuantity <= BigDecimal.ZERO) appendLine("note=Kraken did not report a fill yet; showing submitted quantity/price estimate.")
+                if (!fillConfirmed) appendLine("note=Order accepted without confirmed fill; actual fill will be synchronized from exchange history.")
             }
         )
         val reservedAmount = if (side == OrderSide.BUY) targetNotional.multiply(feeReserveMultiplier).setScale(2, RoundingMode.UP) else BigDecimal.ZERO
@@ -1929,6 +2396,10 @@ Crypto TradeStation remote commands:
         providers += "GDELT" to GdeltNewsClient()
         providers += "RSS" to RssFeedNewsClient()
 
+        settingsStore.cryptoPanicApiKey()?.trim()?.takeIf { it.isNotBlank() }?.let {
+            providers += "CryptoPanic" to CryptoPanicNewsClient(it)
+        } ?: updateStatus("[$symbol] CryptoPanic skipped: no API key saved.", "WARN")
+
         settingsStore.marketauxApiKey()?.trim()?.takeIf { it.isNotBlank() }?.let {
             providers += "Marketaux" to MarketauxNewsClient(it)
         } ?: updateStatus("[$symbol] Marketaux skipped: no API key saved.", "WARN")
@@ -1960,13 +2431,22 @@ Crypto TradeStation remote commands:
 
         val all = mutableListOf<NewsArticle>()
         providers.forEach { (name, provider) ->
+            if (!NewsProviderHealthRegistry.shouldAttempt(name)) {
+                val health = NewsProviderHealthRegistry.healthFor(name)
+                updateStatus("[$symbol] $name skipped during local retry cooldown until ${health?.cooldownUntilEpochMs ?: 0L}. Last error=${health?.lastError.orEmpty().take(120)}", "WARN")
+                return@forEach
+            }
+            NewsProviderHealthRegistry.recordAttempt(name)
             runCatching { provider.latestCryptoNews(symbol) }
                 .onSuccess { articles ->
+                    NewsProviderHealthRegistry.recordSuccess(name, articles.size)
                     all += articles
                     updateStatus("[$symbol] $name API call complete: articles=${articles.size}.", if (articles.isEmpty()) "WARN" else "INFO")
                 }
                 .onFailure { error ->
-                    updateStatus("[$symbol] $name API call failed: ${error.message}", "WARN")
+                    NewsProviderHealthRegistry.recordFailure(name, error)
+                    val health = NewsProviderHealthRegistry.healthFor(name)
+                    updateStatus("[$symbol] $name API call failed: ${error.message}. Local retry cooldownUntil=${health?.cooldownUntilEpochMs ?: 0L}.", "WARN")
                 }
         }
 
@@ -2016,6 +2496,7 @@ Crypto TradeStation remote commands:
             GdeltNewsClient(),
             RssFeedNewsClient()
         )
+        settingsStore.cryptoPanicApiKey()?.takeIf { it.isNotBlank() }?.let { providers += CryptoPanicNewsClient(it) }
         settingsStore.marketauxApiKey()?.takeIf { it.isNotBlank() }?.let { providers += MarketauxNewsClient(it) }
         settingsStore.newsDataApiKey()?.takeIf { it.isNotBlank() }?.let { providers += NewsDataNewsClient(it) }
         settingsStore.gNewsApiKey()?.takeIf { it.isNotBlank() }?.let { providers += GNewsNewsClient(it) }

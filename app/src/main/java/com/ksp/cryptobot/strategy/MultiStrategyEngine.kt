@@ -1,6 +1,7 @@
 package com.ksp.cryptobot.strategy
 
 import com.ksp.cryptobot.core.*
+import com.ksp.cryptobot.cloudshare.CloudShareCollectiveCache
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
@@ -34,7 +35,12 @@ class MultiStrategyEngine(
         if (enabled(StrategyMode.MOMENTUM_SPIKE_CONTINUATION)) candidates += momentumSpikeContinuationCandidate(ticker, candlesByTimeframe, regime)
         if (enabled(StrategyMode.VOLUME_ANOMALY_WHALE_MOVE)) candidates += volumeAnomalyWhaleMoveCandidate(ticker, candlesByTimeframe, regime)
 
-        return candidates.maxByOrNull { it.score } ?: StrategyCandidate(StrategyMode.AUTO, 0, SignalAction.WAIT, "No strategy candidate available.", BigDecimal.ZERO, BigDecimal.ZERO)
+        val selected = candidates.maxByOrNull { candidate ->
+            val collectiveTieBreak = CloudShareCollectiveCache.score(ticker.symbol, candidate.mode.name, regime.regime.name, "15m").adjustment.coerceIn(-2, 2)
+            candidate.score + collectiveTieBreak
+        } ?: return StrategyCandidate(StrategyMode.AUTO, 0, SignalAction.WAIT, "No strategy candidate available.", BigDecimal.ZERO, BigDecimal.ZERO)
+        val collectiveHint = CloudShareCollectiveCache.score(ticker.symbol, selected.mode.name, regime.regime.name, "15m")
+        return if (CloudShareCollectiveCache.snapshot().enabled && collectiveHint.ready) selected.copy(reason = selected.reason + " | Collective vote hint: " + collectiveHint.reason) else selected
     }
 
     private fun baseCandles(candles: Map<Timeframe, List<Candle>>): List<Candle> =

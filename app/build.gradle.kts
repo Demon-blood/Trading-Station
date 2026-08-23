@@ -45,8 +45,8 @@ android {
         applicationId = "com.ksp.cryptobot"
         minSdk = 26
         targetSdk = 35
-        versionCode = 97
-        versionName = "3.2.5"
+        versionCode = 112
+        versionName = "4.0.7"
     }
 
     signingConfigs {
@@ -93,11 +93,13 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
@@ -112,4 +114,15 @@ dependencies {
     implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
     implementation("com.squareup.moshi:moshi-adapters:1.15.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+}
+
+// v4 final hardening: never silently produce an unsigned release package.
+tasks.configureEach {
+    if (name in setOf("assembleRelease", "bundleRelease", "packageRelease")) {
+        doFirst {
+            if (!signingPropertiesFile.exists()) {
+                throw GradleException("Release signing.properties is required for v4 release packaging. Debug builds continue to use the stable CTS debug update key.")
+            }
+        }
+    }
 }

@@ -1,0 +1,49 @@
+{
+  "canonical_source": true,
+  "version_name": "4.0.7",
+  "version_code": 112,
+  "materialized_utc": "2026-08-23T19:08:55.862210+00:00",
+  "source_commit": "78b0155acd4aae90ab11879796fd1a8439043503",
+  "workflow_run_id": "32660292283",
+  "workflow_run_number": "4",
+  "mutation_chain": [
+    {
+      "script": ".cts-v4-migration/apply_diagnostics_integration_fix.py",
+      "script_sha256_before_apply": "ea0a16d31ca53c498034bd384e7955865711e314eee2b8bab18e561c5941e41b"
+    },
+    {
+      "script": ".cts-v4-migration/apply_milestone6.py",
+      "script_sha256_before_apply": "3fc793485bbaa7042e41c551c516d51adfed9870d859493fb982444bf70aca45"
+    },
+    {
+      "script": ".cts-v4-migration/apply_full_integration_cleanup.py",
+      "script_sha256_before_apply": "1ed1eda87964032aff875bb6f913adc2dbaaa3f987cf2fec8f4c3991ec349be3"
+    },
+    {
+      "script": ".cts-v4-migration/apply_exchange_minimum_order_fix.py",
+      "script_sha256_before_apply": "f0cb25b530fd0a6818f253bfc2f2bf2b912b95794dc9ecb450fcf896dee5ecc8"
+    },
+    {
+      "script": ".cts-v4-migration/apply_exact_preview_ui.py",
+      "script_sha256_before_apply": "3a182c0558462b884a9c008bcb8bdfa77a9cbb5b41bffe2251edf9030d3a24e6"
+    },
+    {
+      "script": ".cts-v4-migration/apply_system_diagnostics_ui.py",
+      "script_sha256_before_apply": "ccb936ce4376c05df48627a800a1708934a0ea7a301b1e95982d57d9acd8d1f0"
+    },
+    {
+      "script": ".cts-v4-migration/apply_gdelt_rate_limit_fix.py",
+      "script_sha256_before_apply": "03c0d5b3faf9ef067f11c63fe506300f41b76e40ff90d70664ad0c890524e2fb"
+    },
+    {
+      "script": ".cts-v4-migration/apply_cloudshare_setup_wizard.py",
+      "script_sha256_before_apply": "db037ebb8ca27ff28f158f6c869ec53f0e6df8c392247bbe866db5e54d35406c"
+    },
+    {
+      "script": ".cts-v4-migration/apply_cloudshare_guided_assistant.py",
+      "script_sha256_before_apply": "fb44527b1e24422c6a38a4f7eb2acb8f8b914cf2a19caa86f0f1d5c2a1f5002a"
+    }
+  ],
+  "migration_payload_role": "historical_only_after_materialization",
+  "canonicalizer_revision": "v2-no-bytecode"
+}
