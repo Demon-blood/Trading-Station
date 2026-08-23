@@ -1,0 +1,179 @@
+name: M5 Net Expected-Value Trade Economics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cts-m5-trade-economics
+  cancel-in-progress: false
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  CTS_VERSION_NAME: 4.0.7
+  CTS_VERSION_CODE: 112
+
+jobs:
+  m5:
+    name: Patch, verify, compile, test and branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | head -n 1 || true)"
+          fi
+          [ -x "$SDKMANAGER" ] || { echo "sdkmanager missing" >&2; exit 1; }
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply M5 trade economics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_m5_trade_economics.py "$GITHUB_WORKSPACE" | tee m5-apply.log
+
+      - name: Verify M5 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m5_trade_economics.py "$GITHUB_WORKSPACE" | tee m5-verify.log
+
+      - name: Verify M4 execution-state contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m4_execution_hardening.py "$GITHUB_WORKSPACE" | tee m4-verify.log
+
+      - name: Verify M3.2 market-data contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m32_kraken_websocket.py "$GITHUB_WORKSPACE" | tee m32-verify.log
+
+      - name: Verify M3 Android host contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m3_runtime_host.py "$GITHUB_WORKSPACE" | tee m3-verify.log
+
+      - name: Verify canonical v4.0.7 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_canonical_v407.py "$GITHUB_WORKSPACE" | tee canonical-verify.log
+
+      - name: Compile debug Kotlin
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:compileDebugKotlin 2>&1 | tee compile-debug.log
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee unit-tests.log
+
+      - name: Assemble verification APK
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug 2>&1 | tee apk-build.log
+
+      - name: Show controlled M5 diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git diff --stat
+          {
+            git diff --name-only -- app
+            git ls-files --others --exclude-standard -- app
+          } | sort -u | tee m5-files.txt
+
+      - name: Create M5 branch
+        id: branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="milestone/m5-trade-economics-${GITHUB_RUN_NUMBER}"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add app
+          git diff --cached --quiet && { echo "No M5 app changes to commit" >&2; exit 1; }
+          git commit -m "M5 centralize net expected-value trade economics"
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Create pull request
+        id: pr
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        shell: bash
+        run: |
+          gh pr create \
+            --base "$GITHUB_REF_NAME" \
+            --head "$BRANCH_NAME" \
+            --title "M5: centralize net expected-value trade economics" \
+            --body "Replaces duplicated target-vs-cost gates with one probability-weighted TradeEconomicsEngine. Every entry models realized-outcome P(win), win/loss magnitude, maker/taker fees, spread, depth slippage, safety reserve, and a future AI-cost hook before requiring positive net EV. Also closes the M4 research/handoff BUY purpose-string bypass so all spot BUYs use the private execution-state and duplicate-order gates."
+
+      - name: PR fallback
+        if: steps.pr.outcome != 'success'
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          echo "::warning::M5 branch pushed but PR creation was blocked. Open a PR from $BRANCH_NAME into $GITHUB_REF_NAME."
+
+      - name: Upload M5 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CTS-M5-trade-economics-${{ github.run_number }}
+          path: |
+            m5-apply.log
+            m5-verify.log
+            m4-verify.log
+            m32-verify.log
+            m3-verify.log
+            canonical-verify.log
+            compile-debug.log
+            unit-tests.log
+            apk-build.log
+            m5-files.txt
+            app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 30
