@@ -6,11 +6,15 @@ import com.ksp.cryptobot.core.OrderBookSnapshot
 import com.ksp.cryptobot.core.OrderSide
 import com.ksp.cryptobot.data.TradeEntity
 import com.ksp.cryptobot.exchange.TradingFeeSchedule
+import com.ksp.cryptobot.execution.TradeEconomicsEngine
+import com.ksp.cryptobot.execution.TradeEconomicsInput
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
 
 class ResearchHandoffCostRiskEngine {
+    private val tradeEconomics = TradeEconomicsEngine()
+
     companion object {
         private val MAKER_FALLBACK = BigDecimal("0.0040")
         private val TAKER_FALLBACK = BigDecimal("0.0080")
@@ -29,44 +33,73 @@ class ResearchHandoffCostRiskEngine {
     ): HandoffCostAssessment {
         val rawEntry = candidate.entryPlan.intendedPrice ?: candidate.entryPlan.triggerPrice ?: ticker.ask
         val rawTarget = candidate.targets.firstOrNull()?.price
+        val rawStop = candidate.invalidation.stopPrice
+
         val entry = normalizeEntryPrice(candidate, rawEntry, symbolInfo)
         val target = rawTarget?.let { normalizeTargetPrice(it, symbolInfo) }
-        if (candidate.sideIntent != HandoffSideIntent.LONG_ENTRY || entry <= BigDecimal.ZERO || target == null || target <= entry) {
-            return HandoffCostAssessment(false, TAKER_FALLBACK, TAKER_FALLBACK, spreadPct(ticker), BigDecimal.ZERO, BigDecimal.ZERO,
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
-                "Cost gate cannot approve a positive entry without a defined entry and target above entry.")
+        val stop = rawStop?.let { normalizeStopPrice(it, symbolInfo) }
+
+        if (candidate.sideIntent != HandoffSideIntent.LONG_ENTRY ||
+            entry <= BigDecimal.ZERO ||
+            target == null || target <= entry ||
+            stop == null || stop <= BigDecimal.ZERO || stop >= entry
+        ) {
+            return HandoffCostAssessment(
+                false,
+                TAKER_FALLBACK,
+                TAKER_FALLBACK,
+                spreadPct(ticker),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                "M5 economics requires LONG_ENTRY with entry, target above entry, and protective stop below entry."
+            )
         }
-        val observed = observedFeeRate(recentTrades)
-        // A resting STOP is conditional, not maker-only. Treat STOP/market-confirmation entries as taker
-        // unless the strategy explicitly specifies a true post-only LIMIT/RETEST order.
-        // A LIMIT is not automatically maker: a marketable limit can execute as taker.
-        // Only an explicit post-only LIMIT can be costed at the maker tier before the fill is known.
-        val makerLike = candidate.entryPlan.postOnlyPreferred && candidate.entryPlan.preferredOrderType == com.ksp.cryptobot.core.OrderType.LIMIT
-        // If Kraken returns the account/pair fee schedule, it is the source of truth.
-        // Otherwise remain conservative using the handoff freeze fallback and observed realized fees.
-        val entryFeeRate = feeSchedule?.let { if (makerLike) it.makerRate else it.takerRate }
-            ?: maxBd(if (makerLike) MAKER_FALLBACK else TAKER_FALLBACK, observed ?: BigDecimal.ZERO)
-        // Protective/unknown exits are modeled taker unless an explicit source rule proves otherwise.
-        val exitFeeRate = feeSchedule?.takerRate ?: maxBd(TAKER_FALLBACK, observed ?: BigDecimal.ZERO)
+
+        val orderType = candidate.entryPlan.preferredOrderType
+            ?: com.ksp.cryptobot.core.OrderType.LIMIT
+        val postOnly = candidate.entryPlan.postOnlyPreferred &&
+            orderType == com.ksp.cryptobot.core.OrderType.LIMIT
         val probe = probeNotionalQuote.coerceAtLeast(PRACTICAL_EUR_COST_MIN)
-        val quantity = probe.divide(entry, 16, RoundingMode.DOWN)
-        val bookEntrySlip = bookSlippagePerUnit(orderBook, OrderSide.BUY, quantity, ticker.ask)
-        val bookExitSlip = bookSlippagePerUnit(orderBook, OrderSide.SELL, quantity, ticker.bid)
-        val entrySlipQuote = bookEntrySlip.multiply(quantity).abs()
-        val exitSlipQuote = bookExitSlip.multiply(quantity).abs()
-        val spreadPercent = spreadPct(ticker)
-        val spreadQuote = if (orderBook == null) probe.multiply(spreadPercent).divide(BigDecimal("100"), 12, RoundingMode.HALF_UP) else BigDecimal.ZERO
-        val entryFee = probe.multiply(entryFeeRate)
-        val expectedExitNotional = quantity.multiply(target)
-        val exitFee = expectedExitNotional.multiply(exitFeeRate)
-        val gross = quantity.multiply(target.subtract(entry))
-        val safety = probe.multiply(safetyMarginPct).divide(BigDecimal("100"), 12, RoundingMode.HALF_UP)
-        val total = entryFee + exitFee + entrySlipQuote + exitSlipQuote + spreadQuote
-        val net = gross - total - safety
-        val allowed = net > BigDecimal.ZERO && gross > total + safety
+        val safetyRate = safetyMarginPct
+            .divide(BigDecimal("100"), 12, RoundingMode.HALF_UP)
+            .coerceIn(BigDecimal.ZERO, BigDecimal("0.05"))
+
+        val economics = tradeEconomics.evaluate(
+            TradeEconomicsInput(
+                symbol = candidate.symbol,
+                strategyId = candidate.strategyId,
+                notionalQuote = probe,
+                entryPrice = entry,
+                targetPrice = target,
+                stopPrice = stop,
+                orderType = orderType,
+                postOnly = postOnly,
+                ticker = ticker,
+                orderBook = orderBook,
+                recentTrades = recentTrades,
+                feeSchedule = feeSchedule,
+                publishRuntime = false,
+                externalDecisionCostQuote = BigDecimal.ZERO,
+                safetyMarginRate = safetyRate
+            )
+        )
+
         return HandoffCostAssessment(
-            allowed, entryFeeRate, exitFeeRate, spreadPercent, entrySlipQuote, exitSlipQuote, gross, total, safety, net,
-            "probe=${probe.s2()} feeSource=${feeSchedule?.source ?: "fallback/observed"} entryFee=${pct(entryFeeRate)} exitFee=${pct(exitFeeRate)} spread=${spreadPercent.s4()}% entrySlip=${entrySlipQuote.s4()} exitSlip=${exitSlipQuote.s4()} gross=${gross.s4()} costs=${total.s4()} safety=${safety.s4()} net=${net.s4()} => ${if (allowed) "PASS" else "BLOCK_FEES_VS_EXPECTED_MOVE"}"
+            allowed = economics.allowed,
+            entryFeeRate = economics.entryFeeRate,
+            exitFeeRate = economics.exitFeeRate,
+            spreadPct = economics.spreadRate.multiply(BigDecimal("100")),
+            entrySlippageQuote = economics.entrySlippageQuote,
+            exitSlippageQuote = economics.expectedExitSlippageQuote,
+            expectedGrossProfitQuote = economics.expectedWinQuote,
+            expectedTotalCostQuote = economics.totalExpectedCostQuote,
+            safetyMarginQuote = economics.safetyReserveQuote,
+            expectedNetProfitQuote = economics.netExpectedValueQuote,
+            reason = economics.reason
         )
     }
 

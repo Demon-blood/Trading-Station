@@ -3,6 +3,7 @@ package com.ksp.cryptobot.execution
 import com.ksp.cryptobot.core.*
 import com.ksp.cryptobot.data.*
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
+import com.ksp.cryptobot.exchange.TradingFeeSchedule
 import com.ksp.cryptobot.governance.ProductionIntelligenceRuntime
 import com.ksp.cryptobot.research.HandoffSideIntent
 import com.ksp.cryptobot.research.ResearchExecutionRuntime
@@ -18,6 +19,7 @@ class AdvancedExecutionCoordinator(
     private val portfolioAllocation = PortfolioAllocationEngine()
     private val liquiditySizer = LiquidityAwareSizer()
     private val orderTypeOptimizer = OrderTypeOptimizer()
+    private val tradeEconomics = TradeEconomicsEngine()
 
     suspend fun prepareEntry(
         settings: BotSettings,
@@ -26,7 +28,8 @@ class AdvancedExecutionCoordinator(
         requestedQuote: BigDecimal,
         orderBook: OrderBookSnapshot?,
         mode: String,
-        currentUseMarket: Boolean
+        currentUseMarket: Boolean,
+        feeSchedule: TradingFeeSchedule? = null
     ): AdvancedEntryPlan {
         if (requestedQuote <= BigDecimal.ZERO) return AdvancedEntryPlan(false, BigDecimal.ZERO, OrderType.LIMIT, ticker.ask, BigDecimal.ZERO, 0, "requested quote is zero")
         val directive = ResearchExecutionRuntime.snapshot(decision.symbol)
@@ -110,19 +113,78 @@ class AdvancedExecutionCoordinator(
         if (finalOrderType == OrderType.MARKET) finalQuote = finalQuote.min(settings.maxMarketOrderEur)
 
         val finalPostOnly = directive?.postOnlyPreferred == true && finalOrderType == OrderType.LIMIT
-        val costGate = roundTripCostGate(settings, ticker, trades, orderBook, finalQuote, finalOrderType, finalLimitOrTrigger, directive?.targets.orEmpty(), directive?.makerFeeRate, directive?.takerFeeRate, directive?.feeSource, finalPostOnly)
-        if (!costGate.first) {
-            val reason = "advanced execution cost gate blocked entry: ${costGate.second}"
-            record("entry_cost_gate", decision.symbol, settings, mode, requestedQuote, finalQuote, BigDecimal.ZERO, finalOrderType.name, "round_trip_cost", sizeBand(requestedQuote), "", "blocked", true, reason, "WARN")
+        val entryReference = (finalLimitOrTrigger ?: ticker.ask).takeIf { it > BigDecimal.ZERO } ?: ticker.lastPrice
+        val targetPrice = directive?.targets
+            ?.firstOrNull { it > entryReference }
+            ?: entryReference.multiply(
+                BigDecimal.ONE.add(settings.takeProfitPercent.divide(BigDecimal("100"), 12, RoundingMode.HALF_UP))
+            )
+        val stopPrice = directive?.stopPrice
+            ?.takeIf { it > BigDecimal.ZERO && it < entryReference }
+            ?: entryReference.multiply(
+                BigDecimal.ONE.subtract(settings.stopLossPercent.divide(BigDecimal("100"), 12, RoundingMode.HALF_UP))
+            )
+
+        val directiveFeeSchedule = directive?.let { d ->
+            val maker = d.makerFeeRate
+            val taker = d.takerFeeRate
+            if (maker != null && taker != null) {
+                TradingFeeSchedule(
+                    makerRate = maker,
+                    takerRate = taker,
+                    source = d.feeSource.ifBlank { "RESEARCH_HANDOFF" }
+                )
+            } else null
+        }
+        val economics = tradeEconomics.evaluate(
+            TradeEconomicsInput(
+                symbol = decision.symbol,
+                strategyId = directive?.strategyId
+                    ?.takeUnless { it.equals("HANDOFF_FILTERS", ignoreCase = true) }
+                    ?: settings.strategyMode.name,
+                notionalQuote = finalQuote,
+                entryPrice = entryReference,
+                targetPrice = targetPrice,
+                stopPrice = stopPrice,
+                orderType = finalOrderType,
+                postOnly = finalPostOnly,
+                ticker = ticker,
+                orderBook = orderBook,
+                recentTrades = trades,
+                feeSchedule = feeSchedule ?: directiveFeeSchedule,
+                publishRuntime = true,
+                externalDecisionCostQuote = BigDecimal.ZERO,
+                safetyMarginRate = BigDecimal("0.0025")
+            )
+        )
+        record(
+            "entry_economics",
+            decision.symbol,
+            settings,
+            mode,
+            requestedQuote,
+            finalQuote,
+            economics.netExpectedValueRate,
+            finalOrderType.name,
+            if (economics.allowed) "positive_net_ev" else "non_positive_net_ev",
+            sizeBand(requestedQuote),
+            "",
+            if (economics.allowed) "normal" else "blocked",
+            !economics.allowed,
+            economics.reason,
+            if (economics.allowed) "INFO" else "WARN"
+        )
+        if (!economics.allowed) {
+            val reason = "M5 trade economics blocked entry: ${economics.reason}"
             return AdvancedEntryPlan(false, finalQuote, finalOrderType, finalLimitOrTrigger, BigDecimal.ZERO, protection.level, reason)
         }
 
         val combined = finalQuote.divide(requestedQuote, 6, RoundingMode.HALF_UP).coerceIn(BigDecimal.ZERO, BigDecimal.ONE)
         record("order_type", decision.symbol, settings, mode, requestedQuote, finalQuote, combined,
-            finalOrderType.name, if (directive?.preferredOrderType != null) "handoff_source_order" else optimizedOrder.reasonCategory, sizeBand(requestedQuote), "", "normal", false, optimizedOrder.reason + " | " + costGate.second, "INFO")
+            finalOrderType.name, if (directive?.preferredOrderType != null) "handoff_source_order" else optimizedOrder.reasonCategory, sizeBand(requestedQuote), "", "normal", false, optimizedOrder.reason + " | " + economics.reason, "INFO")
         val postOnly = finalPostOnly
         val handoff = directive?.let { " | handoff=${it.strategyId}/${it.fidelity}/truth=${it.liveTruthGate}/fee=${it.feeSource}/postOnly=$postOnly" }.orEmpty()
-        val reason = "advanced entry plan: requested=${requestedQuote.s2()}, researchCap=${researchCappedQuote.s2()}, final=${finalQuote.s2()}, combined×${combined.setScale(3, RoundingMode.HALF_UP)}, protection=${protection.level}, order=$finalOrderType.$handoff ${allocation.reason} | ${liquidity.reason} | ${optimizedOrder.reason} | ${costGate.second}"
+        val reason = "advanced entry plan: requested=${requestedQuote.s2()}, researchCap=${researchCappedQuote.s2()}, final=${finalQuote.s2()}, combined×${combined.setScale(3, RoundingMode.HALF_UP)}, protection=${protection.level}, order=$finalOrderType.$handoff ${allocation.reason} | ${liquidity.reason} | ${optimizedOrder.reason} | ${economics.reason}"
         record("entry_plan", decision.symbol, settings, mode, requestedQuote, finalQuote, combined,
             finalOrderType.name, "final_plan", sizeBand(requestedQuote), "", "normal", false, reason, "INFO")
         return AdvancedEntryPlan(true, finalQuote, finalOrderType, finalLimitOrTrigger, combined, protection.level, reason, postOnly = postOnly)
@@ -161,53 +223,6 @@ class AdvancedExecutionCoordinator(
             "", if (removed > 0) "position_removed" else if (adjusted > 0) "quantity_adjusted" else "matched", "n/a", "", "normal", false,
             "adjusted=$adjusted removed=$removed openOrders=${openOrders.size}; ${messages.joinToString(" | ").take(2400)}", severity)
         return ReconciliationSummary(adjusted, removed, openOrders.size, messages)
-    }
-
-    private fun roundTripCostGate(
-        settings: BotSettings, ticker: MarketTicker, trades: List<TradeEntity>, orderBook: OrderBookSnapshot?,
-        notional: BigDecimal, orderType: OrderType, entryPrice: BigDecimal?, sourceTargets: List<BigDecimal>,
-        actualMakerFeeRate: BigDecimal?, actualTakerFeeRate: BigDecimal?, feeSource: String?, postOnly: Boolean
-    ): Pair<Boolean, String> {
-        if (notional <= BigDecimal.ZERO) return false to "notional is zero"
-        val ref = (entryPrice ?: ticker.ask).takeIf { it > BigDecimal.ZERO } ?: ticker.lastPrice
-        val observed = trades.asSequence().mapNotNull { row ->
-            val qty = row.quantity.toBigDecimalOrNull()?.abs() ?: return@mapNotNull null
-            val px = row.priceEur.toBigDecimalOrNull()?.abs() ?: return@mapNotNull null
-            val fee = row.feeEur.toBigDecimalOrNull()?.abs() ?: return@mapNotNull null
-            val n = qty.multiply(px)
-            if (n <= BigDecimal.ZERO || fee <= BigDecimal.ZERO) null else fee.divide(n, 12, RoundingMode.HALF_UP)
-        }.sorted().toList()
-        val observedMedian = if (observed.isEmpty()) BigDecimal.ZERO else observed[observed.size / 2]
-        val entryFallback = if (postOnly && orderType == OrderType.LIMIT) BigDecimal("0.0040") else BigDecimal("0.0080")
-        val exitFallback = BigDecimal("0.0080")
-        val entryFee = actualMakerFeeRate?.takeIf { postOnly && orderType == OrderType.LIMIT }
-            ?: actualTakerFeeRate
-            ?: observedMedian.max(entryFallback)
-        val exitFee = actualTakerFeeRate ?: observedMedian.max(exitFallback)
-        val spreadRate = if (ticker.lastPrice > BigDecimal.ZERO) ticker.ask.subtract(ticker.bid).abs().divide(ticker.lastPrice, 12, RoundingMode.HALF_UP) else BigDecimal.ZERO
-        val slippageRate = if (orderType == OrderType.MARKET && orderBook != null) depthSlippageRate(orderBook, notional, ticker.ask) else BigDecimal.ZERO
-        val safetyRate = BigDecimal("0.0025")
-        val target = sourceTargets.firstOrNull { it > ref }
-        val expectedEdgeRate = if (target != null && ref > BigDecimal.ZERO) target.subtract(ref).divide(ref, 12, RoundingMode.HALF_UP)
-            else settings.takeProfitPercent.divide(BigDecimal("100"), 12, RoundingMode.HALF_UP)
-        val required = entryFee.add(exitFee).add(spreadRate).add(slippageRate).add(safetyRate)
-        val allowed = expectedEdgeRate > required
-        return allowed to "expectedEdge=${expectedEdgeRate.multiply(BigDecimal("100")).setScale(3,RoundingMode.HALF_UP)}% vs modeledRoundTrip=${required.multiply(BigDecimal("100")).setScale(3,RoundingMode.HALF_UP)}% (entryFee=${entryFee.multiply(BigDecimal("100")).setScale(3,RoundingMode.HALF_UP)}%, exitFee=${exitFee.multiply(BigDecimal("100")).setScale(3,RoundingMode.HALF_UP)}%, spread=${spreadRate.multiply(BigDecimal("100")).setScale(3,RoundingMode.HALF_UP)}%, slippage=${slippageRate.multiply(BigDecimal("100")).setScale(3,RoundingMode.HALF_UP)}%, safety=0.250%, feeSource=${feeSource ?: "fallback/observed"})"
-    }
-
-    private fun depthSlippageRate(book: OrderBookSnapshot, targetQuote: BigDecimal, reference: BigDecimal): BigDecimal {
-        if (targetQuote <= BigDecimal.ZERO || reference <= BigDecimal.ZERO) return BigDecimal.ZERO
-        var remaining = targetQuote; var spent = BigDecimal.ZERO; var qty = BigDecimal.ZERO
-        for (level in book.asks) {
-            if (remaining <= BigDecimal.ZERO) break
-            val capacity = level.price.multiply(level.quantity)
-            val used = remaining.min(capacity)
-            if (level.price > BigDecimal.ZERO) { qty = qty.add(used.divide(level.price, 16, RoundingMode.DOWN)); spent = spent.add(used) }
-            remaining = remaining.subtract(used)
-        }
-        if (remaining > BigDecimal.ZERO || qty <= BigDecimal.ZERO) return BigDecimal("1.0")
-        val avg = spent.divide(qty, 16, RoundingMode.HALF_UP)
-        return avg.subtract(reference).max(BigDecimal.ZERO).divide(reference, 12, RoundingMode.HALF_UP)
     }
 
     suspend fun diagnostics(limit: Int = 100): List<AdvancedExecutionEventEntity> = governanceDao.recentAdvancedExecution(limit)
