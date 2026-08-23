@@ -1,12 +1,17 @@
-Replace this one file in the repository:
+CTS M2 v4 verifier hotfix
 
-.github/workflows/canonicalize-v407.yml
+Replace:
+tools/verify_canonical_v407.py
 
-Then commit to main and rerun:
+Then commit to main and start a NEW:
 Actions -> Canonicalize Crypto TradeStation v4.0.7 -> Run workflow
 
-Why:
-The diagnostics migration guard requires the original audited android-v4-build.yml
-shape. This workflow temporarily restores that exact file from commit
-9081c5aa5ed73be8f9f3a72f7e7981901af9233b, runs materialization, then restores
-the current GitHub-native workflow before verification/branch creation.
+Do not re-run the old failed run.
+
+This only updates three stale CloudShare verification assertions.
+It does not change app/, trading logic, CloudShare runtime behavior, or migration code.
+
+The new checks validate:
+- actual sequential CreateStep flow + Create My CloudShare + provisioner.provision()
+- actual sequential JoinStep flow + Worker URL + Register & Verify
+- temporary Cloudflare token is passed to provisioning and cleared after provision() returns

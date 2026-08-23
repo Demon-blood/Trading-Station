@@ -145,15 +145,51 @@ def main() -> None:
     audit.check("GDELT stale fallback", "STALE_CACHE_MAX_AGE_MS" in gdelt)
 
     # CloudShare setup/guided assistant contracts.
-    audit.check("CloudShare create wizard", "Provision CloudShare Automatically" in cloud_screen)
-    audit.check("CloudShare join wizard", "Register This Device" in cloud_screen)
+    # The final guided-assistant migration intentionally replaces the older
+    # tabbed/button-label UI. Verify workflow semantics, not obsolete labels.
+    audit.check(
+        "CloudShare create wizard",
+        all(
+            marker in cloud_screen
+            for marker in [
+                "CreateStep.WELCOME",
+                "CreateStep.TOKEN",
+                "CreateStep.ACCOUNT",
+                "CreateStep.REVIEW",
+                "CreateStep.PROVISIONING",
+                "CreateStep.COMPLETE",
+            ]
+        )
+        and "Create My CloudShare" in cloud_screen
+        and "provisioner.provision(" in cloud_screen,
+    )
+    audit.check(
+        "CloudShare join wizard",
+        all(
+            marker in cloud_screen
+            for marker in [
+                "JoinStep.WORKER",
+                "JoinStep.INVITE",
+                "JoinStep.OPTIONS",
+                "JoinStep.COMPLETE",
+            ]
+        )
+        and "CloudShare Worker HTTPS URL" in cloud_screen
+        and "Register & Verify" in cloud_screen,
+    )
     audit.check("CloudShare repair wizard", "Run Full CloudShare Test" in cloud_screen)
     audit.check("CloudShare manage wizard", "Create Invitation" in cloud_screen)
+
+    provision_call = cloud_screen.find("val result = provisioner.provision(")
+    token_clear_after_provision = (
+        provision_call >= 0
+        and cloud_screen.find('cloudflareToken = ""', provision_call) > provision_call
+    )
     audit.check(
         "Cloudflare token cleared",
-        "tokenForAttempt" in cloud_screen
-        and "finally" in cloud_screen
-        and 'cloudflareToken = ""' in cloud_screen,
+        "apiToken = cloudflareToken" in cloud_screen
+        and token_clear_after_provision
+        and "tokenVerified = false" in cloud_screen,
     )
     audit.check(
         "Cloudflare token not persisted",
