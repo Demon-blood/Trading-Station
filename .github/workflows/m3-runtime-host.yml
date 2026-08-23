@@ -1,0 +1,153 @@
+name: M3 Android 24-7 Runtime Host
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cts-m3-runtime-host
+  cancel-in-progress: false
+
+jobs:
+  m3:
+    name: Patch, verify, compile, test and branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | head -n 1 || true)"
+          fi
+          [ -x "$SDKMANAGER" ] || { echo "sdkmanager missing" >&2; exit 1; }
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply M3 host patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_m3_runtime_host.py "$GITHUB_WORKSPACE" | tee m3-apply.log
+
+      - name: Verify M3 host contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m3_runtime_host.py "$GITHUB_WORKSPACE" | tee m3-verify.log
+
+      - name: Verify canonical v4 contracts still hold
+        shell: bash
+        run: |
+          set -euo pipefail
+          CTS_VERSION_NAME=4.0.7 CTS_VERSION_CODE=112 \
+            python3 tools/verify_canonical_v407.py "$GITHUB_WORKSPACE" | tee canonical-verify.log
+
+      - name: Compile debug Kotlin
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:compileDebugKotlin 2>&1 | tee compile-debug.log
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee unit-tests.log
+
+      - name: Assemble verification APK
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug 2>&1 | tee apk-build.log
+
+      - name: Show controlled M3 diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git diff --stat
+          {
+            git diff --name-only -- app
+            git ls-files --others --exclude-standard -- app
+          } | sort -u | tee m3-files.txt
+
+      - name: Create M3 branch
+        id: branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="milestone/m3-runtime-host-${GITHUB_RUN_NUMBER}"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add app
+          git diff --cached --quiet && { echo "No M3 app changes to commit" >&2; exit 1; }
+          git commit -m "M3 harden Android 24-7 runtime host"
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Create pull request
+        id: pr
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        shell: bash
+        run: |
+          gh pr create \
+            --base "$GITHUB_REF_NAME" \
+            --head "$BRANCH_NAME" \
+            --title "M3: harden Android 24/7 runtime host" \
+            --body "Replaces dataSync FGS with truthful specialUse host classification; adds durable user run intent, safe sticky/boot recovery, validated-network gating, exchange refresh before post-recovery execution, runtime host health checks, and persistent notification controls. Trading strategies/risk/order logic and Room schema are intentionally unchanged."
+
+      - name: PR fallback
+        if: steps.pr.outcome != 'success'
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          echo "::warning::M3 branch pushed but PR creation was blocked. Open a PR from $BRANCH_NAME into $GITHUB_REF_NAME."
+
+      - name: Upload M3 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CTS-M3-runtime-host-${{ github.run_number }}
+          path: |
+            m3-apply.log
+            m3-verify.log
+            canonical-verify.log
+            compile-debug.log
+            unit-tests.log
+            apk-build.log
+            m3-files.txt
+            app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 30
