@@ -485,7 +485,7 @@ class KrakenSpotClient(
         val nonce = KrakenNonceSequencer.next()
         val krakenClientOrderId = KrakenClientOrderId.normalize(request.clientOrderId)
 
-        if (request.side == OrderSide.BUY && request.purpose.equals("ENTRY", ignoreCase = true)) {
+        if (request.side == OrderSide.BUY) {
             val existingBuy = getOpenOrders().firstOrNull {
                 it.symbol.equals(rule.canonicalSymbol, ignoreCase = true) && it.side == OrderSide.BUY
             }

@@ -1978,9 +1978,16 @@ Crypto TradeStation remote commands:
         var plannedEntryPostOnly = false
         if (side == OrderSide.BUY) {
             val advancedOrderBook = runCatching { exchange.getOrderBook(ticker.symbol, 40) }.getOrNull()
+            val advancedFeeSchedule = runCatching { exchange.getTradingFeeSchedule(ticker.symbol) }.getOrNull()
             val advancedPlan = advancedExecution.prepareEntry(
-                settings = settings, ticker = ticker, decision = decision, requestedQuote = targetNotional,
-                orderBook = advancedOrderBook, mode = if (settings.mode == BotMode.PAPER) "PAPER" else "LIVE", currentUseMarket = useMarketOrder
+                settings = settings,
+                ticker = ticker,
+                decision = decision,
+                requestedQuote = targetNotional,
+                orderBook = advancedOrderBook,
+                mode = if (settings.mode == BotMode.PAPER) "PAPER" else "LIVE",
+                currentUseMarket = useMarketOrder,
+                feeSchedule = advancedFeeSchedule
             )
             updateStatus("[${ticker.symbol}] Advanced execution plan: allowed=${advancedPlan.allowed}, final=${advancedPlan.finalQuote.setScale(2, RoundingMode.DOWN)}, order=${advancedPlan.orderType}, protection=${advancedPlan.protectionLevel}, size×${advancedPlan.combinedMultiplier}. ${advancedPlan.reason.take(260)}", if (advancedPlan.allowed) "INFO" else "WARN")
             if (!advancedPlan.allowed) {
@@ -2087,8 +2094,7 @@ Crypto TradeStation remote commands:
 
         if (settings.mode == BotMode.LIVE_AUTO &&
             settings.exchangeProvider == ExchangeProvider.KRAKEN &&
-            request.side == OrderSide.BUY &&
-            request.purpose.equals("ENTRY", ignoreCase = true)
+            request.side == OrderSide.BUY
         ) {
             val executionTruth = KrakenPrivateExecutionRegistry.canSubmitNewEntry(request.symbol, request.side)
             if (!executionTruth.first) {
