@@ -97,7 +97,25 @@ def main() -> None:
         and f"VERSION_CODE = {version_code}" in release,
     )
     audit.check("JUnit 4 dependency committed", 'testImplementation("junit:junit:4.13.2")' in gradle)
-    audit.check("Room schema 11", "version = 11" in database)
+    room_match = re.search(r"version\s*=\s*(\d+)", database)
+    room_version = int(room_match.group(1)) if room_match else -1
+    audit.check(
+        "Room schema >= 11",
+        room_version >= 11,
+        f"version={room_version}" if room_version >= 0 else "unparsed",
+    )
+    room_migration_ok = (
+        room_version < 12
+        or (
+            "MIGRATION_11_12 = object : Migration(11, 12)" in database
+            and "MIGRATION_10_11, MIGRATION_11_12" in database
+        )
+    )
+    audit.check(
+        "Room migration chain current",
+        room_migration_ok,
+        "11->12 required" if room_version >= 12 else "schema 11 baseline",
+    )
     audit.check(
         "non-destructive Room",
         re.search(r"(?m)^\s*\.fallbackToDestructiveMigration\s*\(", database) is None,

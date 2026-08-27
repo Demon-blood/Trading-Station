@@ -62,6 +62,8 @@ data class CloudAiReview(
      * until the dedicated FX utility lands, so AI cost is never understated.
      */
     val totalCostQuote: BigDecimal,
+    val lunaVerdict: CloudAiVerdict = CloudAiVerdict.SKIPPED,
+    val lunaRiskMultiplier: BigDecimal = BigDecimal.ONE,
     val lunaUsage: CloudAiCallUsage? = null,
     val solUsage: CloudAiCallUsage? = null,
     val createdAtEpochMs: Long = System.currentTimeMillis()
@@ -424,6 +426,8 @@ class OpenAiDecisionRouter(
             totalCostUsd = totalCostUsd,
             // Conservative until a dedicated USD/EUR FX utility is connected.
             totalCostQuote = totalCostUsd,
+            lunaVerdict = luna.payload.verdict,
+            lunaRiskMultiplier = luna.payload.riskMultiplier.coerceIn(BigDecimal.ZERO, BigDecimal.ONE),
             lunaUsage = luna.usage,
             solUsage = solUsage
         )
