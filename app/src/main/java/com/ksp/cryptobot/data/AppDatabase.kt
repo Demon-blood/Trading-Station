@@ -37,11 +37,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ExecutionQualityEntity::class,
         ProductionIntelligenceStateEntity::class,
         AdvancedExecutionEventEntity::class,
+        AiValueAttributionEntity::class,
         ResearchEventEntity::class,
         ResearchStrategyProfileEntity::class,
         ResearchStateEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -266,13 +267,59 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS ai_value_attribution(
+                        fingerprint TEXT NOT NULL PRIMARY KEY,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        updatedAtEpochMs INTEGER NOT NULL,
+                        resolvedAtEpochMs INTEGER NOT NULL,
+                        symbol TEXT NOT NULL,
+                        strategy TEXT NOT NULL,
+                        regime TEXT NOT NULL,
+                        modelPath TEXT NOT NULL,
+                        deterministicAction TEXT NOT NULL,
+                        deterministicNotionalQuote TEXT NOT NULL,
+                        lunaVerdict TEXT NOT NULL,
+                        lunaRiskMultiplier TEXT NOT NULL,
+                        finalVerdict TEXT NOT NULL,
+                        finalRiskMultiplier TEXT NOT NULL,
+                        entryPrice TEXT NOT NULL,
+                        targetPrice TEXT NOT NULL,
+                        stopPrice TEXT NOT NULL,
+                        horizonMinutes INTEGER NOT NULL,
+                        estimatedRoundTripCostRate TEXT NOT NULL,
+                        lunaCostQuote TEXT NOT NULL,
+                        solCostQuote TEXT NOT NULL,
+                        totalAiCostQuote TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        resolution TEXT NOT NULL,
+                        exitPrice TEXT NOT NULL,
+                        deterministicNetPnlQuote TEXT NOT NULL,
+                        lunaNetPnlQuote TEXT NOT NULL,
+                        finalNetPnlQuote TEXT NOT NULL,
+                        lunaValueAddedQuote TEXT NOT NULL,
+                        solIncrementalValueQuote TEXT NOT NULL,
+                        aiValueAddedQuote TEXT NOT NULL,
+                        avoidedLossQuote TEXT NOT NULL,
+                        missedProfitQuote TEXT NOT NULL,
+                        aiGeneratedProfitQuote TEXT NOT NULL
+                    )""".trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_ai_value_status_created ON ai_value_attribution(status,createdAtEpochMs)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_ai_value_symbol_created ON ai_value_attribution(symbol,createdAtEpochMs)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_ai_value_model_resolved ON ai_value_attribution(modelPath,resolvedAtEpochMs)")
+            }
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "ksp_crypto_bot.db"
             )
-                .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build()
                 .also { INSTANCE = it }
         }

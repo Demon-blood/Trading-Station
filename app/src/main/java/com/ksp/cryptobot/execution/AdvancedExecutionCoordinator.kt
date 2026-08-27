@@ -6,6 +6,7 @@ import com.ksp.cryptobot.exchange.CryptoExchangeClient
 import com.ksp.cryptobot.exchange.TradingFeeSchedule
 import com.ksp.cryptobot.governance.ProductionIntelligenceRuntime
 import com.ksp.cryptobot.intelligence.CloudAiRuntime
+import com.ksp.cryptobot.intelligence.AiValueAttributionEngine
 import com.ksp.cryptobot.research.HandoffSideIntent
 import com.ksp.cryptobot.research.ResearchExecutionRuntime
 import java.math.BigDecimal
@@ -21,6 +22,7 @@ class AdvancedExecutionCoordinator(
     private val liquiditySizer = LiquidityAwareSizer()
     private val orderTypeOptimizer = OrderTypeOptimizer()
     private val tradeEconomics = TradeEconomicsEngine()
+    private val aiValueAttribution = AiValueAttributionEngine(governanceDao)
 
     suspend fun prepareEntry(
         settings: BotSettings,
@@ -75,6 +77,7 @@ class AdvancedExecutionCoordinator(
             "", liquidity.reasonCategory, liquidity.requestedSizeBand, "", "normal", false, liquidity.reason, if (liquidity.finalQuote < allocation.finalQuote) "WARN" else "INFO")
 
         var finalQuote = liquidity.finalQuote
+        val deterministicQuoteBeforeCloud = finalQuote
         val cloudReview = CloudAiRuntime.snapshotFor(decision)
         if (cloudReview != null) {
             val cloudMultiplier = cloudReview.riskMultiplier.coerceIn(BigDecimal.ZERO, BigDecimal.ONE)
@@ -183,6 +186,23 @@ class AdvancedExecutionCoordinator(
                 safetyMarginRate = BigDecimal("0.0025")
             )
         )
+        if (cloudReview?.lunaUsage != null) {
+            runCatching {
+                val effectiveCloudMultiplier = cloudReview.riskMultiplier.coerceIn(BigDecimal.ZERO, BigDecimal.ONE)
+                val comparableDeterministicQuote = if (effectiveCloudMultiplier > BigDecimal.ZERO) {
+                    economics.notionalQuote
+                        .divide(effectiveCloudMultiplier, 8, RoundingMode.HALF_UP)
+                        .min(deterministicQuoteBeforeCloud)
+                } else {
+                    deterministicQuoteBeforeCloud
+                }
+                aiValueAttribution.linkExecutionEconomics(
+                    fingerprint = cloudReview.fingerprint,
+                    deterministicNotionalQuote = comparableDeterministicQuote,
+                    assessment = economics
+                )
+            }
+        }
         record(
             "entry_economics",
             decision.symbol,

@@ -11,6 +11,7 @@ interface GovernanceDao {
     @Insert suspend fun insertExecutionQuality(event: ExecutionQualityEntity): Long
     @Insert suspend fun insertAdvancedExecution(event: AdvancedExecutionEventEntity): Long
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putState(state: ProductionIntelligenceStateEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertAiAttribution(row: AiValueAttributionEntity)
 
     @Query("SELECT value FROM production_intelligence_state WHERE `key`=:key LIMIT 1")
     suspend fun stateValue(key: String): String?
@@ -38,6 +39,22 @@ interface GovernanceDao {
 
     @Query("SELECT * FROM advanced_execution_events WHERE eventType=:eventType ORDER BY timestampEpochMs DESC LIMIT :limit")
     suspend fun advancedExecutionByType(eventType: String, limit: Int = 500): List<AdvancedExecutionEventEntity>
+
+    @Query("SELECT * FROM ai_value_attribution WHERE fingerprint=:fingerprint LIMIT 1")
+    suspend fun aiAttributionByFingerprint(fingerprint: String): AiValueAttributionEntity?
+
+    @Query("SELECT * FROM ai_value_attribution WHERE status='OPEN' AND symbol=:symbol ORDER BY createdAtEpochMs ASC")
+    suspend fun openAiAttributionForSymbol(symbol: String): List<AiValueAttributionEntity>
+
+    @Query("SELECT COUNT(*) FROM ai_value_attribution WHERE status='OPEN'")
+    suspend fun openAiAttributionCount(): Int
+
+    @Query("SELECT * FROM ai_value_attribution WHERE status='RESOLVED' ORDER BY resolvedAtEpochMs DESC LIMIT :limit")
+    suspend fun resolvedAiAttributions(limit: Int = 5000): List<AiValueAttributionEntity>
+
+    @Query("SELECT * FROM ai_value_attribution ORDER BY createdAtEpochMs DESC LIMIT :limit")
+    suspend fun recentAiAttributions(limit: Int = 200): List<AiValueAttributionEntity>
+
     @Query("SELECT * FROM production_intelligence_state ORDER BY updatedAtEpochMs ASC")
     suspend fun allProductionState(): List<ProductionIntelligenceStateEntity>
 
@@ -50,6 +67,9 @@ interface GovernanceDao {
     @Query("DELETE FROM advanced_execution_events")
     suspend fun clearAdvancedExecution()
 
+    @Query("DELETE FROM ai_value_attribution")
+    suspend fun clearAiAttribution()
+
     @Query("DELETE FROM production_intelligence_state")
     suspend fun clearProductionState()
 
@@ -61,5 +81,8 @@ interface GovernanceDao {
 
     @Query("DELETE FROM advanced_execution_events WHERE timestampEpochMs < :beforeEpochMs")
     suspend fun pruneAdvancedExecution(beforeEpochMs: Long): Int
+
+    @Query("DELETE FROM ai_value_attribution WHERE status='RESOLVED' AND resolvedAtEpochMs < :beforeEpochMs")
+    suspend fun pruneAiAttribution(beforeEpochMs: Long): Int
 
 }

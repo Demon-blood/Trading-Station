@@ -20,6 +20,8 @@ import com.ksp.cryptobot.execution.ExchangeMinimumOrderPolicy
 import com.ksp.cryptobot.execution.AdvancedRiskManager
 import com.ksp.cryptobot.intelligence.AiDecisionEngine
 import com.ksp.cryptobot.intelligence.OpenAiDecisionRouter
+import com.ksp.cryptobot.intelligence.AiValueAttributionEngine
+import com.ksp.cryptobot.intelligence.AiValueAttributionSummary
 import com.ksp.cryptobot.news.NewsApiClient
 import com.ksp.cryptobot.news.CompositeNewsClient
 import com.ksp.cryptobot.news.CryptoPanicNewsClient
@@ -84,6 +86,7 @@ class BotController(
     private val advancedExecution = AdvancedExecutionCoordinator(dao, AppDatabase.get(appContext).governanceDao())
     private val protectiveStops = ProtectiveStopManager(dao, AppDatabase.get(appContext).governanceDao())
     private val cloudAiRouter = OpenAiDecisionRouter(appContext, settingsStore)
+    private val aiValueAttribution = AiValueAttributionEngine(AppDatabase.get(appContext).governanceDao())
     private val remoteAlertClient = RemoteAlertClient()
     private val remoteCommandClient = RemoteCommandClient()
     private val _status = MutableStateFlow("Stopped")
@@ -98,6 +101,12 @@ class BotController(
     @Volatile var running: Boolean = false
         private set
 
+
+    suspend fun loadAiValueAttributionSummary(): AiValueAttributionSummary =
+        aiValueAttribution.summary()
+
+    suspend fun loadAiValueAttributionRows(limit: Int = 100): List<AiValueAttributionEntity> =
+        aiValueAttribution.recent(limit)
 
     suspend fun sendTelegramTestAlert(settings: BotSettings = settingsStore.load()): Boolean {
         val ok = remoteAlertClient.sendTelegram(
@@ -218,6 +227,17 @@ class BotController(
                     "Enabled; key stored securely; budget=${cloudBudget.spentUsd.setScale(4, RoundingMode.HALF_UP)}/${cloudBudget.monthlyBudgetUsd.setScale(2, RoundingMode.HALF_UP)} USD; Sol=${cloudConfig.solEnabled}; SolToday=${cloudBudget.solCallsToday}/${cloudConfig.maxSolCallsPerDay}. This check makes no paid API call."
                 )
             }
+        }
+
+        val attribution = runCatching { aiValueAttribution.summary() }.getOrNull()
+        if (attribution == null) {
+            add("WARN", "AI Value Attribution", "Unable to read M7 attribution state.")
+        } else {
+            add(
+                "PASS",
+                "AI Value Attribution",
+                "open=${attribution.openCounterfactuals}, resolved=${attribution.resolvedCounterfactuals}, AI_COST=${attribution.totalAiCostQuote.setScale(4, RoundingMode.HALF_UP)}, AI_VALUE_ADDED=${attribution.aiValueAddedQuote.setScale(4, RoundingMode.HALF_UP)}, AI_AVOIDED_LOSS=${attribution.avoidedLossQuote.setScale(4, RoundingMode.HALF_UP)}, AI_MISSED_PROFIT=${attribution.missedProfitQuote.setScale(4, RoundingMode.HALF_UP)}, AI_GENERATED_PROFIT=${attribution.aiGeneratedProfitQuote.setScale(4, RoundingMode.HALF_UP)}, AI_ROI=${attribution.aiRoi?.setScale(3, RoundingMode.HALF_UP) ?: "n/a"}, verdict=${attribution.verdict}. No paid AI call is made by this verifier."
+            )
         }
 
         try {
@@ -1506,6 +1526,16 @@ Crypto TradeStation remote commands:
                 updateStatus("[$symbol] Fetching ticker from ${settings.exchangeProvider}...")
                 val ticker = exchange.getTicker(symbol)
                 updateStatus("[$symbol] Ticker OK. Bid=${ticker.bid}, Ask=${ticker.ask}, Last=${ticker.lastPrice}, 24hVolEUR=${ticker.volume24h.setScale(0, RoundingMode.HALF_UP)}")
+                val settledAiCounterfactuals = runCatching {
+                    aiValueAttribution.settleDueForSymbol(exchange, ticker)
+                }.getOrDefault(0)
+                if (settledAiCounterfactuals > 0) {
+                    val attributionSummary = aiValueAttribution.summary()
+                    updateStatus(
+                        "[$symbol] M7 AI attribution resolved=$settledAiCounterfactuals. AI value=${attributionSummary.aiValueAddedQuote.setScale(4, RoundingMode.HALF_UP)}, avoided=${attributionSummary.avoidedLossQuote.setScale(4, RoundingMode.HALF_UP)}, missed=${attributionSummary.missedProfitQuote.setScale(4, RoundingMode.HALF_UP)}, ROI=${attributionSummary.aiRoi?.setScale(3, RoundingMode.HALF_UP) ?: "n/a"}, verdict=${attributionSummary.verdict}",
+                        if (attributionSummary.aiValueAddedQuote < BigDecimal.ZERO) "WARN" else "INFO"
+                    )
+                }
                 val symbolRank = proAutomationSuite.rankSymbol(ticker, recentTrades)
                 updateStatus("[$symbol] Smart rotation score=${symbolRank.score}. ${symbolRank.reason}", if (symbolRank.score < 45) "WARN" else "INFO")
                 val candlesByTimeframe = if (settings.recoveredScalpingStrategyEnabled) {
@@ -1567,6 +1597,14 @@ Crypto TradeStation remote commands:
                     regime = research.regime.regime.toString(),
                     news = news,
                     recentTrades = recentTrades
+                )
+                aiValueAttribution.beginCloudReview(
+                    deterministicDecision = deterministicDecision,
+                    review = cloudAi.review,
+                    ticker = ticker,
+                    settings = settings,
+                    strategy = research.selectedStrategy.toString(),
+                    regime = research.regime.regime.toString()
                 )
                 val decision = cloudAi.decision
                 if (cloudAi.review.modelPath != "DETERMINISTIC" || cloudAi.review.verdict == com.ksp.cryptobot.intelligence.CloudAiVerdict.REJECT) {
