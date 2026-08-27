@@ -22,6 +22,10 @@ import com.ksp.cryptobot.intelligence.AiDecisionEngine
 import com.ksp.cryptobot.intelligence.OpenAiDecisionRouter
 import com.ksp.cryptobot.intelligence.AiValueAttributionEngine
 import com.ksp.cryptobot.intelligence.AiValueAttributionSummary
+import com.ksp.cryptobot.intelligence.AiAdaptiveGovernanceEngine
+import com.ksp.cryptobot.intelligence.AiAdaptiveGovernanceDecision
+import com.ksp.cryptobot.intelligence.AiAdaptiveGovernanceState
+import com.ksp.cryptobot.intelligence.AiAdaptiveAction
 import com.ksp.cryptobot.news.NewsApiClient
 import com.ksp.cryptobot.news.CompositeNewsClient
 import com.ksp.cryptobot.news.CryptoPanicNewsClient
@@ -87,6 +91,11 @@ class BotController(
     private val protectiveStops = ProtectiveStopManager(dao, AppDatabase.get(appContext).governanceDao())
     private val cloudAiRouter = OpenAiDecisionRouter(appContext, settingsStore)
     private val aiValueAttribution = AiValueAttributionEngine(AppDatabase.get(appContext).governanceDao())
+    private val aiAdaptiveGovernance = AiAdaptiveGovernanceEngine(
+        appContext,
+        AppDatabase.get(appContext).governanceDao(),
+        settingsStore
+    )
     private val remoteAlertClient = RemoteAlertClient()
     private val remoteCommandClient = RemoteCommandClient()
     private val _status = MutableStateFlow("Stopped")
@@ -107,6 +116,12 @@ class BotController(
 
     suspend fun loadAiValueAttributionRows(limit: Int = 100): List<AiValueAttributionEntity> =
         aiValueAttribution.recent(limit)
+
+    suspend fun loadAiAdaptiveGovernanceDecision(): AiAdaptiveGovernanceDecision =
+        aiAdaptiveGovernance.inspect()
+
+    fun loadAiAdaptiveGovernanceState(): AiAdaptiveGovernanceState =
+        aiAdaptiveGovernance.state()
 
     suspend fun sendTelegramTestAlert(settings: BotSettings = settingsStore.load()): Boolean {
         val ok = remoteAlertClient.sendTelegram(
@@ -237,6 +252,18 @@ class BotController(
                 "PASS",
                 "AI Value Attribution",
                 "open=${attribution.openCounterfactuals}, resolved=${attribution.resolvedCounterfactuals}, AI_COST=${attribution.totalAiCostQuote.setScale(4, RoundingMode.HALF_UP)}, AI_VALUE_ADDED=${attribution.aiValueAddedQuote.setScale(4, RoundingMode.HALF_UP)}, AI_AVOIDED_LOSS=${attribution.avoidedLossQuote.setScale(4, RoundingMode.HALF_UP)}, AI_MISSED_PROFIT=${attribution.missedProfitQuote.setScale(4, RoundingMode.HALF_UP)}, AI_GENERATED_PROFIT=${attribution.aiGeneratedProfitQuote.setScale(4, RoundingMode.HALF_UP)}, AI_ROI=${attribution.aiRoi?.setScale(3, RoundingMode.HALF_UP) ?: "n/a"}, verdict=${attribution.verdict}. No paid AI call is made by this verifier."
+            )
+        }
+
+        val adaptiveInspection = runCatching { aiAdaptiveGovernance.inspect() }.getOrNull()
+        if (adaptiveInspection == null) {
+            add("WARN", "AI Adaptive Governance", "Unable to inspect M8 adaptive-governance evidence.")
+        } else {
+            val adaptiveState = aiAdaptiveGovernance.state()
+            add(
+                "PASS",
+                "AI Adaptive Governance",
+                "action=${adaptiveInspection.action}, overallN=${adaptiveInspection.overall.samples}, overall95=[${adaptiveInspection.overall.lower95.setScale(5, RoundingMode.HALF_UP)},${adaptiveInspection.overall.upper95.setScale(5, RoundingMode.HALF_UP)}], solN=${adaptiveInspection.sol.samples}, sol95=[${adaptiveInspection.sol.lower95.setScale(5, RoundingMode.HALF_UP)},${adaptiveInspection.sol.upper95.setScale(5, RoundingMode.HALF_UP)}], excludedLowIntegrity=${adaptiveInspection.excludedLowIntegrityRows}, lastApplied=${adaptiveState.lastAction}. Inspection is read-only and makes no paid AI call."
             )
         }
 
@@ -1535,6 +1562,23 @@ Crypto TradeStation remote commands:
                         "[$symbol] M7 AI attribution resolved=$settledAiCounterfactuals. AI value=${attributionSummary.aiValueAddedQuote.setScale(4, RoundingMode.HALF_UP)}, avoided=${attributionSummary.avoidedLossQuote.setScale(4, RoundingMode.HALF_UP)}, missed=${attributionSummary.missedProfitQuote.setScale(4, RoundingMode.HALF_UP)}, ROI=${attributionSummary.aiRoi?.setScale(3, RoundingMode.HALF_UP) ?: "n/a"}, verdict=${attributionSummary.verdict}",
                         if (attributionSummary.aiValueAddedQuote < BigDecimal.ZERO) "WARN" else "INFO"
                     )
+
+                    val adaptiveDecision = runCatching {
+                        aiAdaptiveGovernance.evaluateAndApply()
+                    }.getOrNull()
+                    if (adaptiveDecision != null) {
+                        updateStatus(
+                            "[$symbol] M8 AI adaptive governance=${adaptiveDecision.action}. overallN=${adaptiveDecision.overall.samples}, overallUpper95=${adaptiveDecision.overall.upper95.setScale(5, RoundingMode.HALF_UP)}, solN=${adaptiveDecision.sol.samples}, solUpper95=${adaptiveDecision.sol.upper95.setScale(5, RoundingMode.HALF_UP)}, excluded=${adaptiveDecision.excludedLowIntegrityRows}. ${adaptiveDecision.reason.take(280)}",
+                            if (adaptiveDecision.action == AiAdaptiveAction.HOLD) "INFO" else "WARN"
+                        )
+                        if (adaptiveDecision.action != AiAdaptiveAction.HOLD) {
+                            sendRemoteAlert(
+                                settings,
+                                "AI adaptive governance",
+                                "${adaptiveDecision.action}: ${adaptiveDecision.reason}"
+                            )
+                        }
+                    }
                 }
                 val symbolRank = proAutomationSuite.rankSymbol(ticker, recentTrades)
                 updateStatus("[$symbol] Smart rotation score=${symbolRank.score}. ${symbolRank.reason}", if (symbolRank.score < 45) "WARN" else "INFO")
