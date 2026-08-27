@@ -16,6 +16,7 @@ def main():
     controller = read(repo / "app/src/main/java/com/ksp/cryptobot/core/BotController.kt")
     advanced = read(repo / "app/src/main/java/com/ksp/cryptobot/execution/AdvancedExecutionCoordinator.kt")
     tests = read(repo / "app/src/test/java/com/ksp/cryptobot/intelligence/AiValueAttributionEngineTest.kt")
+    canonical = read(repo / "tools/verify_canonical_v407.py")
 
     checks = {
         "M7 Room entity": 'tableName = "ai_value_attribution"' in entity,
@@ -29,6 +30,9 @@ def main():
         "missed profit stored": "missedProfitQuote" in entity,
         "generated profit stored": "aiGeneratedProfitQuote" in entity,
         "Room version bumped to 12": "version = 12" in db,
+        "canonical verifier accepts evolving Room schema": '"Room schema >= 11"' in canonical,
+        "canonical verifier requires current migration chain": '"Room migration chain current"' in canonical and "MIGRATION_11_12" in canonical,
+        "stale canonical Room-11-only check removed": 'audit.check("Room schema 11"' not in canonical,
         "explicit 11 to 12 migration": "MIGRATION_11_12 = object : Migration(11, 12)" in db,
         "migration registered": "MIGRATION_10_11, MIGRATION_11_12" in db,
         "M7 table migration": "CREATE TABLE IF NOT EXISTS ai_value_attribution" in db,

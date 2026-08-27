@@ -27,6 +27,40 @@ def main():
     if dirty:
         fail("Refusing to patch dirty app/ tree:\n" + dirty)
 
+    # M7 advances Room from schema 11 to 12. Keep the canonical v4 verifier
+    # forward-compatible while still requiring explicit migrations for newer schemas.
+    canonical_verifier_path = repo / "tools/verify_canonical_v407.py"
+    canonical_verifier = canonical_verifier_path.read_text(encoding="utf-8")
+    stale_room_check = '    audit.check("Room schema 11", "version = 11" in database)\n'
+    forward_room_check = """    room_match = re.search(r"version\\s*=\\s*(\\d+)", database)
+    room_version = int(room_match.group(1)) if room_match else -1
+    audit.check(
+        "Room schema >= 11",
+        room_version >= 11,
+        f"version={room_version}" if room_version >= 0 else "unparsed",
+    )
+    room_migration_ok = (
+        room_version < 12
+        or (
+            "MIGRATION_11_12 = object : Migration(11, 12)" in database
+            and "MIGRATION_10_11, MIGRATION_11_12" in database
+        )
+    )
+    audit.check(
+        "Room migration chain current",
+        room_migration_ok,
+        "11->12 required" if room_version >= 12 else "schema 11 baseline",
+    )
+"""
+    if stale_room_check in canonical_verifier:
+        canonical_verifier = canonical_verifier.replace(stale_room_check, forward_room_check, 1)
+        canonical_verifier_path.write_text(canonical_verifier, encoding="utf-8")
+        print("PATCH |", canonical_verifier_path.relative_to(repo))
+    elif '"Room schema >= 11"' in canonical_verifier and '"Room migration chain current"' in canonical_verifier:
+        print("PASS | canonical Room verifier already forward-compatible")
+    else:
+        fail("Canonical Room verifier has an unexpected schema assertion; refusing an unsafe rewrite.")
+
     payload_root = Path(__file__).resolve().parent / "m7_payload"
     for rel in (NEW_ENTITY, NEW_ENGINE, NEW_TEST):
         source = payload_root / rel
