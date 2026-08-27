@@ -277,6 +277,15 @@ class BotController(
         }
 
         val primarySymbol = settings.symbols().firstOrNull()?.uppercase()?.replace("/", "")?.replace("-", "") ?: "BTCEUR"
+        val currentStrategyChampion = runCatching { researchIntelligence.strategyChampion(primarySymbol) }.getOrNull()
+        add(
+            "PASS",
+            "M9 Strategy Champion/Challenger",
+            if(currentStrategyChampion.isNullOrBlank())
+                "No champion yet for $primarySymbol. PAPER challengers may gather exact evidence; LIVE research promotion remains champion-gated."
+            else
+                "Champion for $primarySymbol=$currentStrategyChampion. System inspection is read-only; M9 cannot increase size or bypass M4/M5/risk gates."
+        )
         val publicKraken = KrakenSpotClient(apiKey = "", secretKey = "")
 
         runCatching { publicKraken.validateSymbol(primarySymbol) }

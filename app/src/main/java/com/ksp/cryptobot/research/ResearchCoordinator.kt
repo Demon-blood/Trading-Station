@@ -28,6 +28,7 @@ class ResearchCoordinator(context: Context, private val dao: ResearchDao) {
     private val replay=OrderBookReplayResearchEngine()
     private val professionalRisk=ProfessionalRiskOverlayEngine()
     private val handoff=ResearchHandoffEngine(context.applicationContext, dao, settingsStore)
+    private val championChallenger=StrategyChampionChallengerEngine(dao)
     private val moshi=Moshi.Builder().build()
     private val mapAdapter=moshi.adapter<Map<String,Any?>>(Types.newParameterizedType(Map::class.java,String::class.java,Any::class.java))
     @Volatile private var broadCache=BroadMarketContext()
@@ -83,7 +84,21 @@ class ResearchCoordinator(context: Context, private val dao: ResearchDao) {
         val professionalRiskResult=professionalRisk.evaluate(strategy,ticker,baseCandles,recentTrades,professionalExternalResult.compositeAdjustment)
         val handoffResult=handoff.evaluate(settings,decision,ticker,candlesByTimeframe,recentTrades,exchange,broad)
         val handoffEntry=handoffResult.selectedEntry
-        val handoffCanExecute=handoffEntry?.let { if(settings.mode==BotMode.PAPER) it.allowedForPaperExecution else it.allowedForLiveEntry } ?: false
+        val governedStrategy=handoffEntry?.definition?.id ?: strategy
+        val governanceWf=if(governedStrategy.equals(strategy,true)) wf
+            else validation.walkForward(governedStrategy,ticker.symbol,recentTrades,maxOf(10,settingsStore.minimumOutcomeSamples()))
+        val governanceMc=if(governedStrategy.equals(strategy,true)) mc
+            else validation.monteCarlo(governedStrategy,ticker.symbol,recentTrades,settingsStore.monteCarloSimulations(),maxOf(10,settingsStore.minimumOutcomeSamples()))
+        val strategyGovernance=championChallenger.evaluateAndMaybePromote(
+            settings=settings,
+            challengerStrategy=governedStrategy,
+            symbol=ticker.symbol,
+            trades=recentTrades,
+            walkForward=governanceWf,
+            monteCarlo=governanceMc
+        )
+        val handoffModeEligible=handoffEntry?.let { if(settings.mode==BotMode.PAPER) it.allowedForPaperExecution else it.allowedForLiveEntry } ?: false
+        val handoffCanExecute=handoffModeEligible && (settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized)
         val handoffCanStage=handoffEntry?.candidate?.let { it.triggerDetected || it.entryPlan.resting } ?: false
         val handoffProtective=handoffResult.protectiveAction
 
@@ -113,7 +128,7 @@ class ResearchCoordinator(context: Context, private val dao: ResearchDao) {
         else if(action==SignalAction.BUY && score<78)action=SignalAction.SMALL_BUY
         else if(action in setOf(SignalAction.WAIT,SignalAction.WATCH) && selected?.action in setOf(SignalAction.BUY,SignalAction.SMALL_BUY) && (selected?.score?:0)>=80 && total>=4){
             val canPromote=if(settings.mode==BotMode.PAPER)settingsStore.researchPromotionInPaper() else settingsStore.researchPromotionInLive()
-            if(canPromote && regime.risk!="RISK_OFF"){action=SignalAction.SMALL_BUY;score=maxOf(score,68);promoted=true}
+            if(canPromote && regime.risk!="RISK_OFF" && (settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized)){action=SignalAction.SMALL_BUY;score=maxOf(score,68);promoted=true}
         }
         if (handoffProtective != null) {
             action = SignalAction.SELL
@@ -139,8 +154,9 @@ class ResearchCoordinator(context: Context, private val dao: ResearchDao) {
         val confidenceMult=(metaResult.confidenceMultiplier*crossResult.multiplier*futures.multiplier*wallet.multiplier*crossMarket.multiplier).coerceIn(.50,1.10)
         val externalRiskMultiplier=when{professionalExternalResult.compositeAdjustment<=-8->.80;professionalExternalResult.compositeAdjustment<=-4->.90;else->1.0}
         val sizeMult=(metaResult.sizeMultiplier*crossResult.multiplier*futures.multiplier*wallet.multiplier*crossMarket.multiplier*externalRiskMultiplier*desktopSmartResult.appliedSizeMultiplier*professionalRiskResult.sizeMultiplier*handoffResult.sizeMultiplier).coerceIn(.05,1.00)
+        val governanceLine="M9 strategy=$governedStrategy action=${strategyGovernance.action} championBefore=${strategyGovernance.championBefore ?: "none"} championAfter=${strategyGovernance.championAfter ?: "none"} liveAuthorized=${strategyGovernance.productionAuthorized} exact=${strategyGovernance.challenger.exactSamples} paper=${strategyGovernance.challenger.paperSamples} oos=${strategyGovernance.challenger.testSamples} regimes=${strategyGovernance.regimeCount} lower95=${strategyGovernance.challenger.lower95Return} diffLower95=${strategyGovernance.difference?.lower95Difference ?: BigDecimal.ZERO}"
         val handoffLine="handoffSelected=${handoffEntry?.definition?.id ?: "none"}/${handoffEntry?.status ?: "none"}; handoffEligible=$handoffCanExecute; handoffCanStage=$handoffCanStage; handoffProtective=${handoffProtective?.definition?.id ?: "none"}/${handoffProtective?.candidate?.sideIntent ?: "none"}; handoffAdj=${handoffResult.aggregateAdjustment}; handoffSize=${"%.3f".format(handoffResult.sizeMultiplier)}; handoffBlock=${handoffResult.hardEntryBlock}"
-        val explanation="Research strategy=$strategy score=${selected?.score?:0}; strategyEnsembleAdj=$voteAdj (parity=$parityVoteAdj, professional=$professionalVoteAdj/raw=$professionalVoteRaw, proMature=$professionalMature, samples=$professionalOutcomeSamples); regime=${regime.regime}; totalAdj=$total; WF=${"%.1f".format(wf.score)}; MC=${"%.1f".format(mc.score)}; desktopWF=${desktopWf.first}; desktopMC=${desktopMc.first}; desktopMTF=${desktopMtf.first}; desktopSmart=${desktopSmartResult.adjustment}/size=${"%.2f".format(desktopSmartResult.appliedSizeMultiplier)}; meta=${metaResult.adjustment}; cross=${crossResult.adjustment}; seq=${sequence.adjustment}; RL=${rl.adjustment}; replay=${replayResult.first}; mutation=${mutationResult.variant}/${mutationResult.adjustment}; hypothesis=${hypothesis.first}; futures=${futures.adjustment}; wallet=${wallet.adjustment}; crossMarket=${crossMarket.adjustment}; professionalExternal=${professionalExternalResult.compositeAdjustment}; proRisk=${"%.2f".format(professionalRiskResult.sizeMultiplier)}x/ATR=${"%.2f".format(professionalRiskResult.atrPercent)}%; $handoffLine; promoted=$promoted; exitPreserved=$isExit. $parameterSuggestion | ${desktopSmartResult.report} | ${professionalRiskResult.reason} | ${professionalExternalResult.reason} | ${handoffResult.reason}"
+        val explanation="Research strategy=$strategy score=${selected?.score?:0}; strategyEnsembleAdj=$voteAdj (parity=$parityVoteAdj, professional=$professionalVoteAdj/raw=$professionalVoteRaw, proMature=$professionalMature, samples=$professionalOutcomeSamples); regime=${regime.regime}; totalAdj=$total; WF=${"%.1f".format(wf.score)}; MC=${"%.1f".format(mc.score)}; desktopWF=${desktopWf.first}; desktopMC=${desktopMc.first}; desktopMTF=${desktopMtf.first}; desktopSmart=${desktopSmartResult.adjustment}/size=${"%.2f".format(desktopSmartResult.appliedSizeMultiplier)}; meta=${metaResult.adjustment}; cross=${crossResult.adjustment}; seq=${sequence.adjustment}; RL=${rl.adjustment}; replay=${replayResult.first}; mutation=${mutationResult.variant}/${mutationResult.adjustment}; hypothesis=${hypothesis.first}; futures=${futures.adjustment}; wallet=${wallet.adjustment}; crossMarket=${crossMarket.adjustment}; professionalExternal=${professionalExternalResult.compositeAdjustment}; proRisk=${"%.2f".format(professionalRiskResult.sizeMultiplier)}x/ATR=${"%.2f".format(professionalRiskResult.atrPercent)}%; $governanceLine; $handoffLine; promoted=$promoted; exitPreserved=$isExit. $parameterSuggestion | ${desktopSmartResult.report} | ${professionalRiskResult.reason} | ${professionalExternalResult.reason} | ${strategyGovernance.reason} | ${handoffResult.reason}"
         val out=decision.copy(finalAction=action,finalScore=score,confidencePercent=if(isExit) decision.confidencePercent else (decision.confidencePercent*confidenceMult).toInt().coerceIn(0,100),allowedToTrade=finalAllowed,explanation=decision.explanation+" | "+explanation)
         val summary=ResearchDecisionSummary(strategy,selected,total,confidenceMult,sizeMult,allowed,promoted,regime,wf,mc,metaResult,crossResult,futures,wallet,crossMarket,sequence,rl,mutationResult,parameterSuggestion,explanation)
         persist(settings,out,summary,replayResult.second,hypothesis.second)
@@ -150,6 +166,8 @@ class ResearchCoordinator(context: Context, private val dao: ResearchDao) {
 
     suspend fun diagnostics(limit:Int=100):List<ResearchEventEntity> = dao.recentEvents(limit)
     suspend fun profiles():List<ResearchStrategyProfileEntity> = dao.profiles()
+    suspend fun strategyChampion(symbol:String):String? = championChallenger.currentChampion(symbol)
+    suspend fun strategyPromotions(limit:Int=100):List<ResearchEventEntity> = championChallenger.recentPromotions(limit)
     fun researchSettings():ResearchSettingsStore=settingsStore
     fun handoffAssetAudit():Map<String,String> = handoff.assetAudit()
 
