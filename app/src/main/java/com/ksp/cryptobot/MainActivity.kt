@@ -569,6 +569,13 @@ private fun AdvancedBotApp(
     var newsDataKey by remember { mutableStateOf("") }
     var gNewsKey by remember { mutableStateOf("") }
     var guardianKey by remember { mutableStateOf("") }
+    val initialCloudAiConfig = remember { store.cloudAiConfig() }
+    var openAiKey by remember { mutableStateOf("") }
+    var openAiConfigured by remember { mutableStateOf(store.openAiApiKey() != null) }
+    var cloudAiEnabled by remember { mutableStateOf(initialCloudAiConfig.enabled) }
+    var cloudAiMonthlyBudget by remember { mutableStateOf(initialCloudAiConfig.monthlyBudgetUsd.toPlainString()) }
+    var cloudAiSolEnabled by remember { mutableStateOf(initialCloudAiConfig.solEnabled) }
+    var cloudAiMaxSolCalls by remember { mutableStateOf(initialCloudAiConfig.maxSolCallsPerDay.toString()) }
     var symbols by remember { mutableStateOf(settings.symbolsCsv) }
     var maxPosition by remember { mutableStateOf(settings.maxPositionEur.toPlainString()) }
     var maxLoss by remember { mutableStateOf(settings.maxDailyLossEur.toPlainString()) }
@@ -1059,6 +1066,12 @@ private fun AdvancedBotApp(
                     newsDataKey = newsDataKey,
                     gNewsKey = gNewsKey,
                     guardianKey = guardianKey,
+                    openAiKey = openAiKey,
+                    openAiConfigured = openAiConfigured,
+                    cloudAiEnabled = cloudAiEnabled,
+                    cloudAiMonthlyBudget = cloudAiMonthlyBudget,
+                    cloudAiSolEnabled = cloudAiSolEnabled,
+                    cloudAiMaxSolCalls = cloudAiMaxSolCalls,
                     onApiKey = { apiKey = it },
                     onSecretKey = { secretKey = it },
                     onNewsKey = { newsKey = it },
@@ -1067,6 +1080,11 @@ private fun AdvancedBotApp(
                     onNewsDataKey = { newsDataKey = it },
                     onGNewsKey = { gNewsKey = it },
                     onGuardianKey = { guardianKey = it },
+                    onOpenAiKey = { openAiKey = it },
+                    onCloudAiEnabled = { cloudAiEnabled = it },
+                    onCloudAiMonthlyBudget = { cloudAiMonthlyBudget = it },
+                    onCloudAiSolEnabled = { cloudAiSolEnabled = it },
+                    onCloudAiMaxSolCalls = { cloudAiMaxSolCalls = it },
                     settings = settings,
                     onExchangeProvider = { provider ->
                         persistSettings(settings.copy(
@@ -1103,7 +1121,18 @@ private fun AdvancedBotApp(
                         if (newsDataKey.isNotBlank()) store.saveNewsDataApiKey(newsDataKey)
                         if (gNewsKey.isNotBlank()) store.saveGNewsApiKey(gNewsKey)
                         if (guardianKey.isNotBlank()) store.saveGuardianApiKey(guardianKey)
-                        status = "${settings.exchangeProvider.name.replace('_', ' ')} / news secrets saved locally"
+                        if (openAiKey.isNotBlank()) {
+                            store.saveOpenAiApiKey(openAiKey)
+                            openAiConfigured = true
+                            openAiKey = ""
+                        }
+                        store.saveCloudAiConfig(
+                            enabled = cloudAiEnabled,
+                            monthlyBudgetUsd = cloudAiMonthlyBudget.toBigDecimalOrNull() ?: BigDecimal("2.00"),
+                            solEnabled = cloudAiSolEnabled,
+                            maxSolCallsPerDay = cloudAiMaxSolCalls.toIntOrNull() ?: 3
+                        )
+                        status = "${settings.exchangeProvider.name.replace('_', ' ')} / news / selective AI secrets saved locally"
                     }
                 )
                 AppTab.HEALTH -> BuildHealthScreen(
@@ -4894,6 +4923,12 @@ private fun SettingsScreen(
     newsDataKey: String,
     gNewsKey: String,
     guardianKey: String,
+    openAiKey: String,
+    openAiConfigured: Boolean,
+    cloudAiEnabled: Boolean,
+    cloudAiMonthlyBudget: String,
+    cloudAiSolEnabled: Boolean,
+    cloudAiMaxSolCalls: String,
     onApiKey: (String) -> Unit,
     onSecretKey: (String) -> Unit,
     onNewsKey: (String) -> Unit,
@@ -4902,6 +4937,11 @@ private fun SettingsScreen(
     onNewsDataKey: (String) -> Unit,
     onGNewsKey: (String) -> Unit,
     onGuardianKey: (String) -> Unit,
+    onOpenAiKey: (String) -> Unit,
+    onCloudAiEnabled: (Boolean) -> Unit,
+    onCloudAiMonthlyBudget: (String) -> Unit,
+    onCloudAiSolEnabled: (Boolean) -> Unit,
+    onCloudAiMaxSolCalls: (String) -> Unit,
     settings: BotSettings,
     onExchangeProvider: (ExchangeProvider) -> Unit,
     onModeChange: (BotMode) -> Unit,
@@ -4963,6 +5003,37 @@ private fun SettingsScreen(
                 OutlinedTextField(value = gNewsKey, onValueChange = onGNewsKey, label = { Text("GNews API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 OutlinedTextField(value = guardianKey, onValueChange = onGuardianKey, label = { Text("Guardian API key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation())
                 Text("News stack: GDELT + RSS + CryptoPanic + Marketaux + NewsData.io + GNews + Guardian + NewsAPI.org. GDELT/RSS need no API key.", color = Muted)
+
+                Spacer(Modifier.height(8.dp))
+                Text("Selective Cloud AI Validation", fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = openAiKey,
+                    onValueChange = onOpenAiKey,
+                    label = { Text(if (openAiConfigured) "OpenAI API key (configured; enter only to replace)" else "OpenAI API key") },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true
+                )
+                ToggleRow("Enable selective cloud AI", cloudAiEnabled, onCloudAiEnabled)
+                OutlinedTextField(
+                    value = cloudAiMonthlyBudget,
+                    onValueChange = onCloudAiMonthlyBudget,
+                    label = { Text("Monthly OpenAI API budget (USD)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                ToggleRow("Allow rare GPT-5.6 Sol escalation", cloudAiSolEnabled, onCloudAiSolEnabled)
+                OutlinedTextField(
+                    value = cloudAiMaxSolCalls,
+                    onValueChange = onCloudAiMaxSolCalls,
+                    label = { Text("Maximum Sol calls per UTC day") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Text(
+                    "Deterministic/local logic remains primary. Luna validates selected BUY candidates; Sol is rare escalation. Cloud AI may veto or reduce size but cannot create or enlarge a trade. M5 net-EV and deterministic risk remain final authority.",
+                    color = Muted
+                )
                 Button(onClick = onSaveKeys, modifier = Modifier.fillMaxWidth()) { Text("Save Secure Keys") }
             }
         }

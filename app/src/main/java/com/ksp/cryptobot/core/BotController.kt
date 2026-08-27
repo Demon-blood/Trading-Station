@@ -19,6 +19,7 @@ import com.ksp.cryptobot.execution.ExecutionGuard
 import com.ksp.cryptobot.execution.ExchangeMinimumOrderPolicy
 import com.ksp.cryptobot.execution.AdvancedRiskManager
 import com.ksp.cryptobot.intelligence.AiDecisionEngine
+import com.ksp.cryptobot.intelligence.OpenAiDecisionRouter
 import com.ksp.cryptobot.news.NewsApiClient
 import com.ksp.cryptobot.news.CompositeNewsClient
 import com.ksp.cryptobot.news.CryptoPanicNewsClient
@@ -82,6 +83,7 @@ class BotController(
     private val researchIntelligence = ResearchCoordinator(appContext, AppDatabase.get(appContext).researchDao())
     private val advancedExecution = AdvancedExecutionCoordinator(dao, AppDatabase.get(appContext).governanceDao())
     private val protectiveStops = ProtectiveStopManager(dao, AppDatabase.get(appContext).governanceDao())
+    private val cloudAiRouter = OpenAiDecisionRouter(appContext, settingsStore)
     private val remoteAlertClient = RemoteAlertClient()
     private val remoteCommandClient = RemoteCommandClient()
     private val _status = MutableStateFlow("Stopped")
@@ -200,6 +202,23 @@ class BotController(
 
         add("PASS", "Settings Store", "Loaded provider=${settings.exchangeProvider}, mode=${settings.mode}, symbols=${settings.symbolsCsv}")
         add("PASS", "Secure Exchange Key Store", "Encrypted key store is reachable. Keys are not exposed in diagnostics.")
+
+        val cloudConfig = settingsStore.cloudAiConfig()
+        val cloudKeyConfigured = !settingsStore.openAiApiKey().isNullOrBlank()
+        when {
+            !cloudConfig.enabled ->
+                add("PASS", "Selective Cloud AI Router", "Disabled. Deterministic/local zero-API-cost path is active.")
+            !cloudKeyConfigured ->
+                add("WARN", "Selective Cloud AI Router", "Enabled but OpenAI API key is not configured. Trading continues on deterministic safeguards.")
+            else -> {
+                val cloudBudget = cloudAiRouter.budgetSnapshot()
+                add(
+                    "PASS",
+                    "Selective Cloud AI Router",
+                    "Enabled; key stored securely; budget=${cloudBudget.spentUsd.setScale(4, RoundingMode.HALF_UP)}/${cloudBudget.monthlyBudgetUsd.setScale(2, RoundingMode.HALF_UP)} USD; Sol=${cloudConfig.solEnabled}; SolToday=${cloudBudget.solCallsToday}/${cloudConfig.maxSolCallsPerDay}. This check makes no paid API call."
+                )
+            }
+        }
 
         try {
             V4SystemVerifier(appContext).verify(settings).forEach { check ->
@@ -1536,9 +1555,27 @@ Crypto TradeStation remote commands:
                 val productionResult = productionIntelligence.evaluateDecision(
                     researchedDecision, ticker, candlesByTimeframe[Timeframe.M15].orEmpty(), recentTrades, settings
                 )
-                val decision = productionResult.first
+                val deterministicDecision = productionResult.first
                 val production = productionResult.second
                 updateStatus("[$symbol] Production intelligence: blocked=${production.blocked}, adj=${production.scoreAdjustment}, size×${"%.2f".format(production.sizeMultiplier)}, safe=${production.safeMode.level}, anomaly=${production.anomaly.severity}, kill=${production.killSwitch.severity}. ${production.reason.take(240)}", if (production.blocked) "WARN" else "INFO")
+
+                val cloudAi = cloudAiRouter.reviewIfUseful(
+                    decision = deterministicDecision,
+                    ticker = ticker,
+                    settings = settings,
+                    strategy = research.selectedStrategy.toString(),
+                    regime = research.regime.regime.toString(),
+                    news = news,
+                    recentTrades = recentTrades
+                )
+                val decision = cloudAi.decision
+                if (cloudAi.review.modelPath != "DETERMINISTIC" || cloudAi.review.verdict == com.ksp.cryptobot.intelligence.CloudAiVerdict.REJECT) {
+                    val budget = cloudAiRouter.budgetSnapshot()
+                    updateStatus(
+                        "[$symbol] Selective cloud AI: ${cloudAi.review.verdict} via ${cloudAi.review.modelPath}, risk×${cloudAi.review.riskMultiplier.setScale(2, RoundingMode.HALF_UP)}, callCost≈${cloudAi.review.totalCostUsd.setScale(6, RoundingMode.HALF_UP)} USD, month=${budget.spentUsd.setScale(4, RoundingMode.HALF_UP)}/${budget.monthlyBudgetUsd.setScale(2, RoundingMode.HALF_UP)} USD. ${cloudAi.review.reason.take(220)}",
+                        if (cloudAi.review.verdict == com.ksp.cryptobot.intelligence.CloudAiVerdict.REJECT) "WARN" else "INFO"
+                    )
+                }
                 val replay = autonomousPack.buildTradeReplay(decision, ticker, settings)
                 val netCheck = proAutomationSuite.netProfitCheck(ticker, decision, settings)
                 val whyLine = proAutomationSuite.explainTrade(ticker, decision, symbolRank, netCheck)
