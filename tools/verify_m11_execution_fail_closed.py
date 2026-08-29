@@ -6,6 +6,15 @@ def read(path):
     p=Path(path)
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
+def function_slice(text: str, start_marker: str, end_marker: str) -> str:
+    start = text.find(start_marker)
+    if start < 0:
+        return ""
+    end = text.find(end_marker, start + len(start_marker))
+    if end < 0:
+        end = len(text)
+    return text[start:end]
+
 def main():
     repo=Path(sys.argv[1] if len(sys.argv)>1 else ".").resolve()
     service=read(repo/"app/src/main/java/com/ksp/cryptobot/service/BotForegroundService.kt")
@@ -18,6 +27,28 @@ def main():
     truth_tests=read(repo/"app/src/test/java/com/ksp/cryptobot/execution/ExecutionTruthGateTest.kt")
     durable_tests=read(repo/"app/src/test/java/com/ksp/cryptobot/exchange/KrakenDurableSubmissionCodecTest.kt")
     db=read(repo/"app/src/main/java/com/ksp/cryptobot/data/AppDatabase.kt")
+
+    # Scope ordering assertions to the functions they are intended to verify.
+    # The previous verifier used str.find() against the full multi-thousand-line
+    # Kotlin files, so unrelated earlier "open orders" / http.execute occurrences
+    # produced false failures.
+    reconcile_live = function_slice(
+        advanced,
+        "suspend fun reconcileLive(",
+        "suspend fun diagnostics("
+    )
+    place_order = function_slice(
+        exchange,
+        "override suspend fun placeOrder(request: OrderRequest)",
+        "private fun roundKrakenPriceToTick("
+    )
+
+    balance_truth_idx = reconcile_live.find('"portfolio balances"')
+    order_truth_idx = reconcile_live.find('"open orders"')
+    local_positions_idx = reconcile_live.find("val positions = appDao.openPositionsSnapshot()")
+
+    pending_boundary_idx = place_order.find("KrakenPrivateExecutionRegistry.markSubmissionPending(")
+    add_order_transport_idx = place_order.find("http.newCall(req).execute().use")
 
     checks={
       "no Room schema bump":"version = 12" in db,
@@ -32,13 +63,18 @@ def main():
       "strict controller runs advanced reconcile":"advancedExecution.reconcileLive(settings, exchange)" in controller,
       "strict controller refreshes Kraken truth":"KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)" in controller,
 
-      "advanced balance failures are not empty":"ExecutionTruthGate.requireAuthoritative(" in advanced and '"portfolio balances"' in advanced,
-      "advanced open-order failures are not empty":'"open orders"' in advanced and "runCatching { exchange.getOpenOrders() }" in advanced,
-      "old fail-open balance fallback removed":"exchange.getPortfolioBalances() }.getOrElse { emptyList() }" not in advanced,
-      "old fail-open order fallback removed":"exchange.getOpenOrders() }.getOrElse { emptyList() }" not in advanced,
+      "advanced balance failures are not empty":"ExecutionTruthGate.requireAuthoritative(" in reconcile_live and
+          '"portfolio balances"' in reconcile_live,
+      "advanced open-order failures are not empty":'"open orders"' in reconcile_live and
+          "runCatching { exchange.getOpenOrders() }" in reconcile_live,
+      "old fail-open balance fallback removed":"exchange.getPortfolioBalances() }.getOrElse { emptyList() }" not in reconcile_live,
+      "old fail-open order fallback removed":"exchange.getOpenOrders() }.getOrElse { emptyList() }" not in reconcile_live,
       "authoritative reads happen before local mutation":
-          advanced.find('"open orders"') > 0 and
-          advanced.find("val positions = appDao.openPositionsSnapshot()") > advanced.find('"open orders"'),
+          balance_truth_idx >= 0 and
+          order_truth_idx >= 0 and
+          local_positions_idx >= 0 and
+          balance_truth_idx < local_positions_idx and
+          order_truth_idx < local_positions_idx,
 
       "recovery establishes strict truth first":"val executionTruth = controller.reconcileLiveExecutionState(settings)" in service,
       "diagnostic mismatch fails reconciliation":"Open-order diagnostics disagree with strict execution truth" in service,
@@ -50,27 +86,44 @@ def main():
 
       "durable quarantine object":"object KrakenDurableExecutionQuarantine" in durable,
       "durable persistence uses commit":"commit()" in durable,
-      "registry initialize hook":"fun initialize(context: Context)" in registry and "KrakenDurableExecutionQuarantine.initialize(context)" in registry,
+      "registry initialize hook":"fun initialize(context: Context)" in registry and
+          "KrakenDurableExecutionQuarantine.initialize(context)" in registry,
       "controller initializes registry":"KrakenPrivateExecutionRegistry.initialize(appContext)" in controller,
-      "registry restores unresolved as ambiguous":"restoreDurableQuarantineLocked" in registry and "ambiguous[id] = PendingSubmission(" in registry,
+      "registry restores unresolved as ambiguous":"restoreDurableQuarantineLocked" in registry and
+          "ambiguous[id] = PendingSubmission(" in registry,
       "pending persisted":"KrakenDurableExecutionQuarantine.markPending(" in registry,
       "ambiguous persisted":"KrakenDurableExecutionQuarantine.markAmbiguous(id, reason)" in registry,
       "ack clears durable":"KrakenDurableExecutionQuarantine.clear(id)" in registry,
       "execution report clears durable":"KrakenDurableExecutionQuarantine.clear(report.clientOrderId)" in registry,
       "stop does not erase durable quarantine":
-          "KrakenDurableExecutionQuarantine.clear" not in registry[registry.find("fun stop()"):registry.find("fun onNetworkAvailable")],
+          "KrakenDurableExecutionQuarantine.clear" not in
+          registry[registry.find("fun stop()"):registry.find("fun onNetworkAvailable")],
+
       "AddOrder pending boundary remains before transport":
-          exchange.find("KrakenPrivateExecutionRegistry.markSubmissionPending(") > 0 and
-          exchange.find("KrakenPrivateExecutionRegistry.markSubmissionPending(") < exchange.find("http.newCall(req).execute().use"),
+          pending_boundary_idx >= 0 and
+          add_order_transport_idx >= 0 and
+          pending_boundary_idx < add_order_transport_idx,
+
       "durable codec roundtrip test":"unresolvedSubmissionRoundTripsAcrossProcessBoundary" in durable_tests,
     }
 
     failed=[]
     for name,ok in checks.items():
         print(("PASS" if ok else "FAIL")+" | "+name)
-        if not ok: failed.append(name)
+        if not ok:
+            failed.append(name)
+
     if failed:
+        print(
+            "DEBUG | reconcile indexes "
+            f"balance={balance_truth_idx}, orders={order_truth_idx}, localPositions={local_positions_idx}"
+        )
+        print(
+            "DEBUG | AddOrder indexes "
+            f"pending={pending_boundary_idx}, transport={add_order_transport_idx}"
+        )
         raise SystemExit("M11 execution fail-closed verification failed: "+", ".join(failed))
+
     print("\nPASS | M11 execution fail-closed / durable unknown-state contracts satisfied.")
 
 if __name__=="__main__":
