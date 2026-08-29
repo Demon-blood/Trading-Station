@@ -286,6 +286,10 @@ class BotController(
             else
                 "Champion for $primarySymbol=$currentStrategyChampion. System inspection is read-only; M9 cannot increase size or bypass M4/M5/risk gates."
         )
+        val m10Trades = runCatching { dao.recentTradesSnapshot(500) }.getOrDefault(emptyList())
+        val currentChampionHealth = runCatching { researchIntelligence.championHealth(settings, primarySymbol, m10Trades) }.getOrNull()
+        if(currentChampionHealth==null) add("WARN","M10 Champion Degradation","Unable to inspect champion health.")
+        else add("PASS","M10 Champion Degradation","state=${currentChampionHealth.state}, champion=${currentChampionHealth.championAfter ?: "none"}, rollingN=${currentChampionHealth.rolling.samples}, mean=${currentChampionHealth.rolling.meanReturn}, upper95=${currentChampionHealth.rolling.upper95Return}, liveAuthorized=${currentChampionHealth.liveEntryAuthorized}, sizeCap=${currentChampionHealth.liveSizeMultiplier}, rollback=${currentChampionHealth.rollbackCandidate ?: "none"}. Inspection is read-only and never affects protective exits.")
         val publicKraken = KrakenSpotClient(apiKey = "", secretKey = "")
 
         runCatching { publicKraken.validateSymbol(primarySymbol) }
