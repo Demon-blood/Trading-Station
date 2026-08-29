@@ -238,8 +238,14 @@ class AdvancedExecutionCoordinator(
 
     suspend fun reconcileLive(settings: BotSettings, exchange: CryptoExchangeClient): ReconciliationSummary {
         if (settings.mode != BotMode.LIVE_AUTO && settings.mode != BotMode.LIVE_CONFIRM) return ReconciliationSummary(0, 0, 0, emptyList())
-        val balances = runCatching { exchange.getPortfolioBalances() }.getOrElse { emptyList() }
-        val openOrders = runCatching { exchange.getOpenOrders() }.getOrElse { emptyList() }
+        val balances = ExecutionTruthGate.requireAuthoritative(
+            "portfolio balances",
+            runCatching { exchange.getPortfolioBalances() }
+        )
+        val openOrders = ExecutionTruthGate.requireAuthoritative(
+            "open orders",
+            runCatching { exchange.getOpenOrders() }
+        )
         val byAsset = balances.associateBy { normalizeAsset(it.asset) }
         val positions = appDao.openPositionsSnapshot()
         val messages = mutableListOf<String>()
