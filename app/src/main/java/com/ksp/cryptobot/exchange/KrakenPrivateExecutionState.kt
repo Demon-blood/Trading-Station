@@ -1,5 +1,6 @@
 package com.ksp.cryptobot.exchange
 
+import android.content.Context
 import com.ksp.cryptobot.core.OrderSide
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
@@ -145,6 +146,29 @@ object KrakenPrivateExecutionRegistry {
     private val pending = linkedMapOf<String, PendingSubmission>()
     private val ambiguous = linkedMapOf<String, PendingSubmission>()
 
+    fun initialize(context: Context) {
+        KrakenDurableExecutionQuarantine.initialize(context)
+        synchronized(lock) {
+            restoreDurableQuarantineLocked()
+        }
+    }
+
+    private fun restoreDurableQuarantineLocked() {
+        KrakenDurableExecutionQuarantine.unresolved().forEach { row ->
+            val id = KrakenClientOrderId.normalize(row.clientOrderId)
+            ambiguous[id] = PendingSubmission(
+                clientOrderId = id,
+                symbol = normalizeSymbol(row.symbol),
+                side = row.side,
+                startedAtEpochMs = row.startedAtEpochMs,
+                reason = "Recovered unresolved ${row.status} across process boundary: ${row.reason}".take(300)
+            )
+        }
+        if (ambiguous.isNotEmpty()) {
+            lastError = "Recovered ${ambiguous.size} unresolved Kraken AddOrder intent(s) from durable quarantine."
+        }
+    }
+
     fun start(newApiKey: String, newSecretKey: String) {
         if (newApiKey.isBlank() || newSecretKey.isBlank()) {
             stop()
@@ -157,6 +181,7 @@ object KrakenPrivateExecutionRegistry {
             apiKey = newApiKey
             secretKey = newSecretKey
             enabled = true
+            restoreDurableQuarantineLocked()
             if (credentialsChanged) {
                 resetSocket = socket
                 socket = null
@@ -241,11 +266,18 @@ object KrakenPrivateExecutionRegistry {
     fun markSubmissionPending(clientOrderId: String, symbol: String, side: OrderSide) {
         val id = KrakenClientOrderId.normalize(clientOrderId)
         synchronized(lock) {
+            val startedAt = System.currentTimeMillis()
             pending[id] = PendingSubmission(
                 clientOrderId = id,
                 symbol = normalizeSymbol(symbol),
                 side = side,
-                startedAtEpochMs = System.currentTimeMillis()
+                startedAtEpochMs = startedAt
+            )
+            KrakenDurableExecutionQuarantine.markPending(
+                clientOrderId = id,
+                symbol = normalizeSymbol(symbol),
+                side = side,
+                startedAtEpochMs = startedAt
             )
         }
     }
@@ -255,6 +287,7 @@ object KrakenPrivateExecutionRegistry {
         synchronized(lock) {
             pending.remove(id)
             ambiguous.remove(id)
+            KrakenDurableExecutionQuarantine.clear(id)
             lastError = ""
         }
     }
@@ -264,6 +297,7 @@ object KrakenPrivateExecutionRegistry {
         synchronized(lock) {
             val item = pending.remove(id) ?: return
             ambiguous[id] = item.copy(reason = reason.take(300))
+            KrakenDurableExecutionQuarantine.markAmbiguous(id, reason)
             lastError = "Ambiguous AddOrder result for $id: ${reason.take(200)}"
         }
     }
@@ -273,6 +307,7 @@ object KrakenPrivateExecutionRegistry {
         synchronized(lock) {
             pending.remove(id)
             ambiguous.remove(id)
+            KrakenDurableExecutionQuarantine.clear(id)
         }
     }
 
@@ -482,6 +517,7 @@ object KrakenPrivateExecutionRegistry {
                 if (report.clientOrderId.isNotBlank()) {
                     pending.remove(report.clientOrderId)
                     ambiguous.remove(report.clientOrderId)
+                    KrakenDurableExecutionQuarantine.clear(report.clientOrderId)
                 }
                 recentReports.addLast(report)
                 while (recentReports.size > MAX_REPORTS) recentReports.removeFirst()

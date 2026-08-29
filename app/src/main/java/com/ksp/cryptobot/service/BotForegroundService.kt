@@ -128,8 +128,22 @@ class BotForegroundService : Service() {
                 }
             }
 
-            if (!reconcileAfterRecovery(startSettings, "startup:$recoveryReason")) {
+            var startupReconciled = reconcileAfterRecovery(startSettings, "startup:$recoveryReason")
+            while (isActive && hostStore.snapshot().desiredRunning && !startupReconciled) {
+                hostStore.recovery("STARTUP_RECONCILIATION_BLOCKED:$recoveryReason")
                 updateNotification("Waiting for safe exchange reconciliation")
+                delay(RECONCILIATION_RETRY_MS)
+                if (!connectivity.refresh().usable) {
+                    if (!awaitUsableNetwork("startup-reconciliation")) return@launch
+                }
+                startupReconciled = reconcileAfterRecovery(
+                    settingsStore.load(),
+                    "startup-retry:$recoveryReason"
+                )
+            }
+            if (!isActive || !hostStore.snapshot().desiredRunning || !startupReconciled) {
+                statusStore.write("Trading controller was not started because authoritative startup reconciliation never completed.", "ERROR")
+                return@launch
             }
 
             controller.start()
@@ -313,7 +327,11 @@ class BotForegroundService : Service() {
                 "Kraken health failed: ${hardFailures.take(3).joinToString(" | ")}"
             }
 
+            val executionTruth = controller.reconcileLiveExecutionState(settings)
             val openOrders = controller.loadOpenOrdersSnapshot(settings)
+            require(openOrders.size == executionTruth.openOrders) {
+                "Open-order diagnostics disagree with strict execution truth: diagnostics=${openOrders.size}, authoritative=${executionTruth.openOrders}"
+            }
             val lifecycle = controller.loadLifecycleSnapshot(settings)
             val portfolio = controller.loadPortfolioSnapshot(settings)
             if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {

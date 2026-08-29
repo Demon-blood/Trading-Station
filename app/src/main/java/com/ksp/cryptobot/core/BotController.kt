@@ -110,6 +110,9 @@ class BotController(
     @Volatile var running: Boolean = false
         private set
 
+    init {
+        KrakenPrivateExecutionRegistry.initialize(appContext)
+    }
 
     suspend fun loadAiValueAttributionSummary(): AiValueAttributionSummary =
         aiValueAttribution.summary()
@@ -2807,6 +2810,25 @@ Crypto TradeStation remote commands:
         return snapshot
     }
 
+
+    suspend fun reconcileLiveExecutionState(
+        settings: BotSettings = settingsStore.load()
+    ): com.ksp.cryptobot.execution.ReconciliationSummary {
+        if (settings.mode != BotMode.LIVE_AUTO && settings.mode != BotMode.LIVE_CONFIRM) {
+            return com.ksp.cryptobot.execution.ReconciliationSummary(0, 0, 0, emptyList())
+        }
+        val exchange = createExchange(settings)
+        lifecycleManager.runPreScanMaintenance(settings, exchange)
+        val reconciliation = advancedExecution.reconcileLive(settings, exchange)
+        if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
+            KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)
+        }
+        updateStatus(
+            "Strict live execution reconciliation passed: adjusted=${reconciliation.adjusted}, removed=${reconciliation.removed}, openOrders=${reconciliation.openOrders}.",
+            if (reconciliation.removed > 0) "WARN" else "INFO"
+        )
+        return reconciliation
+    }
 
     suspend fun loadLifecycleSnapshot(settings: BotSettings = settingsStore.load()): LifecycleSnapshot {
         updateStatus("Lifecycle snapshot refresh started. Provider=${settings.exchangeProvider}")
