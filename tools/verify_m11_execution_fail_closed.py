@@ -6,7 +6,7 @@ def read(path):
     p=Path(path)
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
-def function_slice(text: str, start_marker: str, end_marker: str) -> str:
+def slice_between(text: str, start_marker: str, end_marker: str) -> str:
     start = text.find(start_marker)
     if start < 0:
         return ""
@@ -28,17 +28,27 @@ def main():
     durable_tests=read(repo/"app/src/test/java/com/ksp/cryptobot/exchange/KrakenDurableSubmissionCodecTest.kt")
     db=read(repo/"app/src/main/java/com/ksp/cryptobot/data/AppDatabase.kt")
 
-    # Scope ordering assertions to the functions they are intended to verify.
-    # The previous verifier used str.find() against the full multi-thousand-line
-    # Kotlin files, so unrelated earlier "open orders" / http.execute occurrences
-    # produced false failures.
-    reconcile_live = function_slice(
+    reconcile_live = slice_between(
         advanced,
         "suspend fun reconcileLive(",
         "suspend fun diagnostics("
     )
-    place_order = function_slice(
+
+    # ExchangeClientsV08.kt contains several placeOrder() overrides.
+    # First isolate KrakenSpotClient, then isolate Kraken's own placeOrder().
+    kraken_class = slice_between(
         exchange,
+        "class KrakenSpotClient(",
+        "class CoinbaseAdvancedClient"
+    )
+    if not kraken_class:
+        # Forward-compatible fallback: use the Kraken class until EOF if the next
+        # client class name changes.
+        start = exchange.find("class KrakenSpotClient(")
+        kraken_class = exchange[start:] if start >= 0 else ""
+
+    kraken_place_order = slice_between(
+        kraken_class,
         "override suspend fun placeOrder(request: OrderRequest)",
         "private fun roundKrakenPriceToTick("
     )
@@ -47,8 +57,12 @@ def main():
     order_truth_idx = reconcile_live.find('"open orders"')
     local_positions_idx = reconcile_live.find("val positions = appDao.openPositionsSnapshot()")
 
-    pending_boundary_idx = place_order.find("KrakenPrivateExecutionRegistry.markSubmissionPending(")
-    add_order_transport_idx = place_order.find("http.newCall(req).execute().use")
+    pending_boundary_idx = kraken_place_order.find(
+        "KrakenPrivateExecutionRegistry.markSubmissionPending("
+    )
+    add_order_transport_idx = kraken_place_order.find(
+        "http.newCall(req).execute().use"
+    )
 
     checks={
       "no Room schema bump":"version = 12" in db,
@@ -99,6 +113,10 @@ def main():
           "KrakenDurableExecutionQuarantine.clear" not in
           registry[registry.find("fun stop()"):registry.find("fun onNetworkAvailable")],
 
+      "Kraken placeOrder isolated":
+          "KrakenPrivateExecutionRegistry.markSubmissionPending(" in kraken_place_order and
+          '"https://api.kraken.com$path"' in kraken_place_order,
+
       "AddOrder pending boundary remains before transport":
           pending_boundary_idx >= 0 and
           add_order_transport_idx >= 0 and
@@ -119,8 +137,9 @@ def main():
             f"balance={balance_truth_idx}, orders={order_truth_idx}, localPositions={local_positions_idx}"
         )
         print(
-            "DEBUG | AddOrder indexes "
-            f"pending={pending_boundary_idx}, transport={add_order_transport_idx}"
+            "DEBUG | Kraken AddOrder indexes "
+            f"pending={pending_boundary_idx}, transport={add_order_transport_idx}, "
+            f"krakenClassLen={len(kraken_class)}, placeOrderLen={len(kraken_place_order)}"
         )
         raise SystemExit("M11 execution fail-closed verification failed: "+", ".join(failed))
 
