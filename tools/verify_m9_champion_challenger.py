@@ -12,6 +12,22 @@ def main():
     tests=read(repo/"app/src/test/java/com/ksp/cryptobot/research/StrategyChampionChallengerEngineTest.kt")
     db=read(repo/"app/src/main/java/com/ksp/cryptobot/data/AppDatabase.kt")
 
+    # M9 direct production authority:
+    m9_direct_paper_gate = "settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized" in coord
+    m9_direct_handoff_gate = "handoffModeEligible && (settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized)" in coord
+    m9_direct_generic_gate = 'canPromote && regime.risk!="RISK_OFF" && (settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized)' in coord
+
+    # M10 intentionally strengthens M9 by composing champion authorization with
+    # champion-health authorization. This remains M9-compatible because PAPER is
+    # still explicitly allowed and LIVE authority is strictly narrower.
+    m10_composite_authority = (
+        "val governedLiveAuthorized=strategyGovernance.productionAuthorized && championHealth.liveEntryAuthorized" in coord
+        and "championHealth.championAfter?.equals(governedStrategy,true)==true" in coord
+    )
+    m10_paper_gate = "settings.mode==BotMode.PAPER || governedLiveAuthorized" in coord
+    m10_handoff_gate = "handoffModeEligible && (settings.mode==BotMode.PAPER || governedLiveAuthorized)" in coord
+    m10_generic_gate = 'canPromote && regime.risk!="RISK_OFF" && (settings.mode==BotMode.PAPER || governedLiveAuthorized)' in coord
+
     checks={
       "M9 engine present":"class StrategyChampionChallengerEngine" in engine,
       "no Room schema bump":"version = 12" in db,
@@ -41,9 +57,12 @@ def main():
       "current champion remains authorized":"StrategyGovernanceAction.KEEP_CHAMPION" in engine and "productionAuthorized" in engine,
       "governed handoff strategy":"val governedStrategy=handoffEntry?.definition?.id ?: strategy" in coord,
       "M9 evaluates selected strategy":"championChallenger.evaluateAndMaybePromote(" in coord,
-      "PAPER trials stay allowed":"settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized" in coord,
-      "handoff LIVE champion gate":"handoffModeEligible && (settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized)" in coord,
-      "generic research LIVE champion gate":'canPromote && regime.risk!="RISK_OFF" && (settings.mode==BotMode.PAPER || strategyGovernance.productionAuthorized)' in coord,
+
+      # Backward + forward-compatible gate assertions:
+      "PAPER trials stay allowed":m9_direct_paper_gate or (m10_composite_authority and m10_paper_gate),
+      "handoff LIVE champion gate":m9_direct_handoff_gate or (m10_composite_authority and m10_handoff_gate),
+      "generic research LIVE champion gate":m9_direct_generic_gate or (m10_composite_authority and m10_generic_gate),
+
       "protective handoff untouched":"val handoffProtective=handoffResult.protectiveAction" in coord,
       "M9 state in explanation":"val governanceLine=" in coord and "${strategyGovernance.action}" in coord,
       "read only system visibility":"M9 Strategy Champion/Challenger" in controller and "strategyChampion(primarySymbol)" in controller,
@@ -60,7 +79,9 @@ def main():
     for name,ok in checks.items():
         print(("PASS" if ok else "FAIL")+" | "+name)
         if not ok: failed.append(name)
-    if failed: raise SystemExit("M9 champion/challenger verification failed: "+", ".join(failed))
+    if failed:
+        raise SystemExit("M9 champion/challenger verification failed: "+", ".join(failed))
     print("\nPASS | M9 champion/challenger contracts satisfied.")
 
-if __name__=="__main__": main()
+if __name__=="__main__":
+    main()
