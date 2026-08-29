@@ -1,0 +1,182 @@
+name: M10 Champion Degradation Rollback
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cts-m10-champion-degradation
+  cancel-in-progress: false
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  CTS_VERSION_NAME: 4.0.7
+  CTS_VERSION_CODE: 112
+
+jobs:
+  m10:
+    name: Patch, verify, compile, test and branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Configure Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | head -n 1 || true)"; fi
+          [ -x "$SDKMANAGER" ] || { echo "sdkmanager missing" >&2; exit 1; }
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Apply M10 champion degradation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_m10_champion_degradation.py "$GITHUB_WORKSPACE" | tee m10-apply.log
+      - name: Verify M10 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m10_champion_degradation.py "$GITHUB_WORKSPACE" | tee m10-verify.log
+      - name: Verify M9 champion challenger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m9_champion_challenger.py "$GITHUB_WORKSPACE" | tee m9-verify.log
+      - name: Verify M8 adaptive AI governance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m8_ai_adaptive_governance.py "$GITHUB_WORKSPACE" | tee m8-verify.log
+      - name: Verify M7 AI value attribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m7_ai_value_attribution.py "$GITHUB_WORKSPACE" | tee m7-verify.log
+      - name: Verify M6 selective AI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m6_selective_ai.py "$GITHUB_WORKSPACE" | tee m6-verify.log
+      - name: Verify M5 net EV
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m5_trade_economics.py "$GITHUB_WORKSPACE" | tee m5-verify.log
+      - name: Verify M4 execution state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m4_execution_hardening.py "$GITHUB_WORKSPACE" | tee m4-verify.log
+      - name: Verify M3.2 market data
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m32_kraken_websocket.py "$GITHUB_WORKSPACE" | tee m32-verify.log
+      - name: Verify M3 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m3_runtime_host.py "$GITHUB_WORKSPACE" | tee m3-verify.log
+      - name: Verify canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_canonical_v407.py "$GITHUB_WORKSPACE" | tee canonical-verify.log
+      - name: Compile debug Kotlin
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:compileDebugKotlin 2>&1 | tee compile-debug.log
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee unit-tests.log
+      - name: Assemble APK
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug 2>&1 | tee apk-build.log
+      - name: Show controlled M10 diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git diff --stat
+          { git diff --name-only -- app; git ls-files --others --exclude-standard -- app; } | sort -u | tee m10-files.txt
+      - name: Create M10 branch
+        id: branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="milestone/m10-champion-degradation-${GITHUB_RUN_NUMBER}"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add app
+          git diff --cached --quiet && { echo "No M10 app changes" >&2; exit 1; }
+          git commit -m "M10 add champion degradation probation and rollback"
+          git push --set-upstream origin "$BRANCH"
+      - name: Create pull request
+        id: pr
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        shell: bash
+        run: |
+          gh pr create --base "$GITHUB_REF_NAME" --head "$BRANCH_NAME" \
+            --title "M10: champion degradation, probation and rollback" \
+            --body "Adds post-promotion rolling champion health: WATCH (75% research LIVE size), PROBATION (50%), statistically gated LIVE_DISABLED, and rollback only to a previously promoted champion that still passes conservative M9 standalone gates. M10 never authorizes an entry in the rollback scan and never gates protective EXIT/REDUCE actions."
+      - name: PR fallback
+        if: steps.pr.outcome != 'success'
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: echo "::warning::M10 branch pushed; open PR from $BRANCH_NAME into $GITHUB_REF_NAME."
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CTS-M10-champion-degradation-${{ github.run_number }}
+          path: |
+            m10-apply.log
+            m10-verify.log
+            m9-verify.log
+            m8-verify.log
+            m7-verify.log
+            m6-verify.log
+            m5-verify.log
+            m4-verify.log
+            m32-verify.log
+            m3-verify.log
+            canonical-verify.log
+            compile-debug.log
+            unit-tests.log
+            apk-build.log
+            m10-files.txt
+            app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 30
