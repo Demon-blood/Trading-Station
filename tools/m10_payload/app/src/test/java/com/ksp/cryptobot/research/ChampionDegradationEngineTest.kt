@@ -26,7 +26,9 @@ class ChampionDegradationEngineTest {
         assertEquals(ChampionHealthState.LIVE_DISABLED,d.state);assertFalse(d.liveEntryAuthorized);assertTrue(d.rolling.upper95Return<BigDecimal.ZERO)
     }
     @Test fun oneBadDayCannotStatisticallyDisable(){
-        val d=ChampionDegradationEngine.classify(ChampionHealthState.WATCH,ChampionDegradationEngine.rollingStats(rows(20,"-0.010","-0.05",1)),BigDecimal("10"))
+        // Deliberately severe enough for PROBATION but below the independent 10% hard-drawdown gate.
+        // This isolates the 3-day statistical-disable span rule instead of testing two safety gates at once.
+        val d=ChampionDegradationEngine.classify(ChampionHealthState.WATCH,ChampionDegradationEngine.rollingStats(rows(20,"-0.003","-0.05",1)),BigDecimal("10"))
         assertEquals(ChampionHealthState.PROBATION,d.state);assertTrue(d.liveEntryAuthorized)
     }
     @Test fun stronglyRecoveredProbationReturnsHealthy(){
