@@ -52,11 +52,18 @@ class ProtectiveStopManager(
             }
             if (attempt < 2) delay(250)
         }
+        val existingBeforeStandalone = activeStops(exchange, symbol, stopPrice)
+        val coveredBeforeStandalone = existingBeforeStandalone.fold(BigDecimal.ZERO) { acc, o -> acc + o.remainingQuantity }
+        val missingCoverage = quantity.subtract(coveredBeforeStandalone).max(BigDecimal.ZERO)
+        if (missingCoverage <= quantity.multiply(BigDecimal("0.02"))) {
+            clearUnprotectedState(symbol)
+            return ProtectionResult(true,false,false,existingBeforeStandalone.map { it.exchangeOrderId },"Protective stop coverage already sufficient after refresh. covered=$coveredBeforeStandalone requested=$quantity.")
+        }
         val standalone = runCatching {
             exchange.placeOrder(OrderRequest(
                 symbol=symbol,
                 side=OrderSide.SELL,
-                quantity=quantity,
+                quantity=missingCoverage,
                 limitPrice=stopPrice,
                 orderType=OrderType.STOP_LOSS,
                 clientOrderId="ksp-protect-${symbol.lowercase()}-${System.currentTimeMillis()}",

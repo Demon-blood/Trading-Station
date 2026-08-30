@@ -648,7 +648,10 @@ data class LiveOrderInfo(
     val remainingQuantity: BigDecimal,
     val status: String,
     val openedAtEpochSeconds: Long,
-    val description: String = ""
+    val description: String = "",
+    val clientOrderId: String = "",
+    val averageFillPrice: BigDecimal = BigDecimal.ZERO,
+    val fee: BigDecimal = BigDecimal.ZERO
 )
 
 
@@ -663,7 +666,8 @@ data class ClosedOrderInfo(
     val fee: BigDecimal,
     val closedAtEpochSeconds: Long,
     val status: String,
-    val description: String = ""
+    val description: String = "",
+    val clientOrderId: String = ""
 )
 
 data class PositionInfo(
