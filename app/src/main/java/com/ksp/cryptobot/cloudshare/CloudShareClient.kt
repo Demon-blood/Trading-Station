@@ -175,6 +175,7 @@ class CloudShareClient(
     suspend fun heartbeatEngineLease(
         accountKey: String,
         engineId: String,
+        fenceToken: Long,
         ttlSeconds: Int
     ): Map<String, Any?> = requestMap(
         "POST",
@@ -182,17 +183,37 @@ class CloudShareClient(
         body = mapOf(
             "account_key" to accountKey,
             "engine_id" to engineId,
+            "fence_token" to fenceToken,
             "ttl_seconds" to ttlSeconds.coerceIn(30, 300)
         )
     )
 
     suspend fun releaseEngineLease(
         accountKey: String,
-        engineId: String
+        engineId: String,
+        fenceToken: Long
     ): Map<String, Any?> = requestMap(
         "POST",
         "/v1/engine-lease/release",
-        body = mapOf("account_key" to accountKey, "engine_id" to engineId)
+        body = mapOf(
+            "account_key" to accountKey,
+            "engine_id" to engineId,
+            "fence_token" to fenceToken
+        )
+    )
+
+    suspend fun engineLeaseStatus(
+        accountKey: String,
+        engineId: String,
+        fenceToken: Long
+    ): Map<String, Any?> = requestMap(
+        "POST",
+        "/v1/engine-lease/status",
+        body = mapOf(
+            "account_key" to accountKey,
+            "engine_id" to engineId,
+            "fence_token" to fenceToken
+        )
     )
 
     suspend fun adminPing(): Map<String, Any?> = requestMap("GET", "/v1/admin/ping", admin = true)

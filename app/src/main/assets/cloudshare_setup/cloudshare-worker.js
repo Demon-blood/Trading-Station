@@ -1,4 +1,5 @@
 const PROTOCOL_VERSION = "2026-07-26";
+const ENGINE_LEASE_SCHEMA_VERSION = 2;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -207,6 +208,7 @@ async function handleEngineLease(request, env, client, path) {
   const accountKey = String(body.account_key || "").trim().toLowerCase();
   const engineId = String(body.engine_id || "").trim().slice(0, 120);
   const platform = String(body.platform || "").trim().slice(0, 40);
+  const fenceToken = Math.max(0, Number(body.fence_token || 0));
   const ttlSeconds = Math.min(300, Math.max(30, Number(body.ttl_seconds || 75)));
   if (!/^[a-f0-9]{64}$/.test(accountKey) || !engineId) {
     return json({ error: "valid account_key and engine_id required" }, 400);
@@ -216,68 +218,119 @@ async function handleEngineLease(request, env, client, path) {
   const expires = now + ttlSeconds * 1000;
   const updated = nowIso();
 
+  const readLease = async () => env.DB.prepare(
+    `SELECT holder_client_id, holder_engine_id, platform, expires_at_epoch_ms,
+            fence_token, schema_version
+       FROM engine_leases WHERE account_key=? LIMIT 1`
+  ).bind(accountKey).first();
+
+  const wire = (row, extra = {}) => {
+    const expiry = Number(row?.expires_at_epoch_ms || 0);
+    return {
+      ...extra,
+      holder_engine_id: row?.holder_engine_id || "",
+      holder_platform: row?.platform || "",
+      expires_at_epoch_ms: expiry,
+      fence_token: Number(row?.fence_token || 0),
+      lease_schema_version: Number(row?.schema_version || 0),
+      server_now_epoch_ms: now,
+      lease_remaining_ms: Math.max(0, expiry - now)
+    };
+  };
+
   if (path === "/v1/engine-lease/acquire") {
     await env.DB.prepare(
       `INSERT INTO engine_leases
-       (account_key, holder_client_id, holder_engine_id, platform, expires_at_epoch_ms, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+       (account_key, holder_client_id, holder_engine_id, platform,
+        expires_at_epoch_ms, updated_at, fence_token, schema_version)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?)
        ON CONFLICT(account_key) DO UPDATE SET
          holder_client_id=excluded.holder_client_id,
          holder_engine_id=excluded.holder_engine_id,
          platform=excluded.platform,
          expires_at_epoch_ms=excluded.expires_at_epoch_ms,
-         updated_at=excluded.updated_at
+         updated_at=excluded.updated_at,
+         fence_token=CASE
+           WHEN engine_leases.expires_at_epoch_ms <= ? THEN engine_leases.fence_token + 1
+           ELSE engine_leases.fence_token
+         END,
+         schema_version=excluded.schema_version
        WHERE engine_leases.expires_at_epoch_ms <= ?
           OR (engine_leases.holder_client_id=? AND engine_leases.holder_engine_id=?)`
     ).bind(
       accountKey, client.client_id, engineId, platform, expires, updated,
+      ENGINE_LEASE_SCHEMA_VERSION,
+      now,
       now, client.client_id, engineId
     ).run();
 
-    const row = await env.DB.prepare(
-      "SELECT holder_client_id, holder_engine_id, platform, expires_at_epoch_ms FROM engine_leases WHERE account_key=? LIMIT 1"
-    ).bind(accountKey).first();
-
+    const row = await readLease();
     const acquired = !!row &&
       row.holder_client_id === client.client_id &&
-      row.holder_engine_id === engineId;
+      row.holder_engine_id === engineId &&
+      Number(row.schema_version || 0) === ENGINE_LEASE_SCHEMA_VERSION &&
+      Number(row.expires_at_epoch_ms || 0) > now;
 
-    return json({
-      acquired,
-      holder_engine_id: row?.holder_engine_id || "",
-      holder_platform: row?.platform || "",
-      expires_at_epoch_ms: Number(row?.expires_at_epoch_ms || 0)
-    });
+    return json(wire(row, { acquired }));
   }
 
   if (path === "/v1/engine-lease/heartbeat") {
+    if (fenceToken <= 0) return json({ error: "positive fence_token required" }, 400);
+
     const result = await env.DB.prepare(
       `UPDATE engine_leases
           SET expires_at_epoch_ms=?, updated_at=?, platform=?
-        WHERE account_key=? AND holder_client_id=? AND holder_engine_id=? AND expires_at_epoch_ms > ?`
-    ).bind(expires, updated, platform, accountKey, client.client_id, engineId, now).run();
+        WHERE account_key=?
+          AND holder_client_id=?
+          AND holder_engine_id=?
+          AND fence_token=?
+          AND schema_version=?
+          AND expires_at_epoch_ms > ?`
+    ).bind(
+      expires, updated, platform,
+      accountKey, client.client_id, engineId, fenceToken,
+      ENGINE_LEASE_SCHEMA_VERSION, now
+    ).run();
 
-    const row = await env.DB.prepare(
-      "SELECT holder_client_id, holder_engine_id, platform, expires_at_epoch_ms FROM engine_leases WHERE account_key=? LIMIT 1"
-    ).bind(accountKey).first();
-
+    const row = await readLease();
     const renewed = Number(result?.meta?.changes || 0) > 0 &&
       row?.holder_client_id === client.client_id &&
-      row?.holder_engine_id === engineId;
+      row?.holder_engine_id === engineId &&
+      Number(row?.fence_token || 0) === fenceToken;
 
-    return json({
-      renewed,
-      holder_engine_id: row?.holder_engine_id || "",
-      holder_platform: row?.platform || "",
-      expires_at_epoch_ms: Number(row?.expires_at_epoch_ms || 0)
-    });
+    return json(wire(row, { renewed }));
   }
 
   if (path === "/v1/engine-lease/release") {
+    if (fenceToken <= 0) return json({ error: "positive fence_token required" }, 400);
     const result = await env.DB.prepare(
-      "DELETE FROM engine_leases WHERE account_key=? AND holder_client_id=? AND holder_engine_id=?"
-    ).bind(accountKey, client.client_id, engineId).run();
-    return json({ released: Number(result?.meta?.changes || 0) > 0 });
+      `DELETE FROM engine_leases
+        WHERE account_key=?
+          AND holder_client_id=?
+          AND holder_engine_id=?
+          AND fence_token=?
+          AND schema_version=?`
+    ).bind(
+      accountKey, client.client_id, engineId, fenceToken,
+      ENGINE_LEASE_SCHEMA_VERSION
+    ).run();
+    return json({
+      released: Number(result?.meta?.changes || 0) > 0,
+      fence_token: fenceToken,
+      lease_schema_version: ENGINE_LEASE_SCHEMA_VERSION,
+      server_now_epoch_ms: now
+    });
+  }
+
+  if (path === "/v1/engine-lease/status") {
+    const row = await readLease();
+    const owned = !!row &&
+      row.holder_client_id === client.client_id &&
+      row.holder_engine_id === engineId &&
+      Number(row.fence_token || 0) === fenceToken &&
+      Number(row.schema_version || 0) === ENGINE_LEASE_SCHEMA_VERSION &&
+      Number(row.expires_at_epoch_ms || 0) > now;
+    return json(wire(row, { owned }));
   }
 
   return json({ error: "engine lease route not found" }, 404);
@@ -359,10 +412,12 @@ export default {
 
       if (request.method === "GET" && path === "/v1/health") {
         await env.DB.prepare("SELECT 1 AS ok").first();
+        await env.DB.prepare("SELECT fence_token, schema_version FROM engine_leases LIMIT 1").first();
         return json({
           ok: true,
           service: "Crypto TradeStation CloudShare",
           protocol_version: PROTOCOL_VERSION,
+          engine_lease_schema_version: ENGINE_LEASE_SCHEMA_VERSION,
           d1: true,
           r2: true,
           now: nowIso()
