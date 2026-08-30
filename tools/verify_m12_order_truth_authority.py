@@ -14,6 +14,7 @@ def slice_between(text, start_marker, end_marker):
     return text[start:] if end < 0 else text[start:end]
 
 def main():
+    print("INFO | M12 verifier revision v1.7")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
     models = read(repo / "app/src/main/java/com/ksp/cryptobot/core/Models.kt")
@@ -205,6 +206,10 @@ def main():
             failed.append(name)
 
     if failed:
+        if "paper does not need LIVE lease" in failed:
+            print("DEBUG | PAPER branch present =", 'settings.mode == BotMode.PAPER || settings.exchangeProvider == ExchangeProvider.PAPER' in lease)
+            print("DEBUG | PAPER snapshot present =", 'EngineAuthoritySnapshot(true, "PAPER"' in lease)
+            print("DEBUG | PAPER return present =", 'return paper' in lease)
         raise SystemExit("M12 authoritative order truth / engine authority verification failed: " + ", ".join(failed))
 
     print("\nPASS | M12 authoritative order truth, partial-fill lifecycle, distributed engine authority and DMS policy contracts satisfied.")
