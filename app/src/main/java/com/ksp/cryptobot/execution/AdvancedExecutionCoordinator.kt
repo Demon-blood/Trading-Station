@@ -141,7 +141,10 @@ class AdvancedExecutionCoordinator(
         }
         if (finalOrderType == OrderType.MARKET) finalQuote = finalQuote.min(settings.maxMarketOrderEur)
 
-        val finalPostOnly = directive?.postOnlyPreferred == true && finalOrderType == OrderType.LIMIT
+        val finalPostOnly = finalOrderType == OrderType.LIMIT && when {
+            directive?.preferredOrderType != null -> directive.postOnlyPreferred == true
+            else -> optimizedOrder.postOnly
+        }
         val entryReference = (finalLimitOrTrigger ?: ticker.ask).takeIf { it > BigDecimal.ZERO } ?: ticker.lastPrice
         val targetPrice = directive?.targets
             ?.firstOrNull { it > entryReference }
