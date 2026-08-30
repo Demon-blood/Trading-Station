@@ -19,7 +19,7 @@ def replace_once(text, old, new, label):
     return text.replace(old, new, 1)
 
 def main():
-    print("INFO | M15 applier revision v1")
+    print("INFO | M15 applier revision v1.1")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     if not (repo / ".git").exists():
         fail("Not a git checkout")
@@ -164,9 +164,18 @@ def main():
 '''
     anchor = '''    override suspend fun cancelOrder(orderId: String): Boolean = withContext(Dispatchers.IO) {
 '''
-    if t.count(anchor) != 1:
-        fail(f"M15 Kraken cancel anchor: expected one match, got {t.count(anchor)}")
-    t = t.replace(anchor, amend_method + anchor, 1)
+    kraken_start = t.find("class KrakenSpotClient(")
+    if kraken_start < 0:
+        fail("M15 KrakenSpotClient scope start missing")
+    next_top_level_class = t.find("\nclass ", kraken_start + len("class KrakenSpotClient("))
+    kraken_end = len(t) if next_top_level_class < 0 else next_top_level_class
+    kraken_scope = t[kraken_start:kraken_end]
+    if kraken_scope.count(anchor) != 1:
+        fail(f"M15 Kraken-scoped cancel anchor: expected one match, got {kraken_scope.count(anchor)}")
+    kraken_scope = kraken_scope.replace(anchor, amend_method + anchor, 1)
+    t = t[:kraken_start] + kraken_scope + t[kraken_end:]
+    if t.count('privateJson("/0/private/AmendOrder", form)') != 1:
+        fail(f"M15 expected exactly one Kraken AmendOrder implementation, got {t.count('privateJson(\"/0/private/AmendOrder\", form)')}")
     p.write_text(t, encoding="utf-8")
     print("PATCH |", p.relative_to(repo))
 
