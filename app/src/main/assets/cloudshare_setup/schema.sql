@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS engine_leases (
     holder_engine_id TEXT NOT NULL,
     platform TEXT NOT NULL DEFAULT '',
     expires_at_epoch_ms INTEGER NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    fence_token INTEGER NOT NULL DEFAULT 1,
+    schema_version INTEGER NOT NULL DEFAULT 2
 );
 
 CREATE INDEX IF NOT EXISTS idx_engine_leases_expiry ON engine_leases(expires_at_epoch_ms);
