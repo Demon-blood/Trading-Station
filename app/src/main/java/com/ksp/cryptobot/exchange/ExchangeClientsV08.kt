@@ -510,6 +510,93 @@ class KrakenSpotClient(
         orders.sortedByDescending { it.closedAtEpochSeconds }.take(limit)
     }
 
+    override suspend fun amendOrder(request: AtomicOrderAmendRequest): AtomicOrderAmendResult = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) {
+            error("Kraken API key and private key are required to amend orders.")
+        }
+        require(request.exchangeOrderId.isNotBlank() || request.clientOrderId.isNotBlank()) {
+            "Kraken AmendOrder requires txid or cl_ord_id."
+        }
+
+        val rule = resolvePairRule(request.symbol)
+        if (!rule.tradable) error("Kraken pair is not tradable: ${request.symbol}. ${rule.status}")
+
+        val form = linkedMapOf<String, String>()
+        if (request.clientOrderId.isNotBlank()) {
+            form["cl_ord_id"] = KrakenClientOrderId.normalize(request.clientOrderId)
+        } else {
+            form["txid"] = request.exchangeOrderId
+        }
+
+        request.newTotalQuantity?.let { raw ->
+            val total = raw.setScale(rule.quantityDecimals, RoundingMode.DOWN)
+            require(total >= rule.minOrderSize) {
+                "Kraken amended total quantity too small for ${rule.canonicalSymbol}. quantity=$total min=${rule.minOrderSize}"
+            }
+            form["order_qty"] = total.stripTrailingZeros().toPlainString()
+        }
+
+        request.newLimitPrice?.let { raw ->
+            require(request.orderType == OrderType.LIMIT) {
+                "M15 limit_price amend requires LIMIT order type."
+            }
+            val price = roundKrakenPriceToTick(
+                raw,
+                rule.tickSize,
+                rule.priceDecimals,
+                request.side,
+                OrderType.LIMIT
+            )
+            form["limit_price"] = price.stripTrailingZeros().toPlainString()
+        }
+
+        request.newTriggerPrice?.let { raw ->
+            require(request.orderType == OrderType.STOP_LOSS || request.orderType == OrderType.TAKE_PROFIT) {
+                "M15 trigger_price amend requires a triggered order type."
+            }
+            val trigger = roundKrakenPriceToTick(
+                raw,
+                rule.tickSize,
+                rule.priceDecimals,
+                request.side,
+                request.orderType
+            )
+            form["trigger_price"] = trigger.stripTrailingZeros().toPlainString()
+        }
+
+        request.postOnly?.let { post ->
+            require(request.newLimitPrice != null && request.orderType == OrderType.LIMIT) {
+                "Kraken post_only amend is valid only with a LIMIT price amendment."
+            }
+            form["post_only"] = post.toString()
+        }
+        request.deadline?.let { deadline ->
+            val now = java.time.Instant.now()
+            require(!deadline.isBefore(now.plusSeconds(2)) && !deadline.isAfter(now.plusSeconds(60))) {
+                "Kraken AmendOrder deadline must be at least 2 seconds and no more than 60 seconds ahead."
+            }
+            form["deadline"] = deadline.toString()
+        }
+
+        require(form.keys.any { it in setOf("order_qty", "limit_price", "trigger_price") }) {
+            "Kraken AmendOrder requires at least one mutable order field."
+        }
+
+        val root = privateJson("/0/private/AmendOrder", form)
+        val result = root.optJSONObject("result") ?: error("Kraken AmendOrder returned no result.")
+        val amendId = result.optString("amend_id", "")
+        require(amendId.isNotBlank()) { "Kraken AmendOrder returned no amend_id." }
+
+        AtomicOrderAmendResult(
+            supported = true,
+            amended = true,
+            amendId = amendId,
+            exchangeOrderId = request.exchangeOrderId,
+            clientOrderId = request.clientOrderId,
+            reason = "Kraken atomic amend accepted; order identifiers remain stable."
+        )
+    }
+
     override suspend fun cancelOrder(orderId: String): Boolean = withContext(Dispatchers.IO) {
         if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken API key and private key are required to cancel orders.")
         val root = privateJson("/0/private/CancelOrder", mapOf("txid" to orderId))

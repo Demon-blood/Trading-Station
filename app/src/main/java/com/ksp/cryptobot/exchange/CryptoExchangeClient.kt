@@ -68,6 +68,19 @@ interface CryptoExchangeClient {
     /** Open live orders as reported by the exchange. */
     suspend fun getOpenOrders(): List<LiveOrderInfo> = emptyList()
 
+    /**
+     * Atomically amend a working order without cancel/recreate when the connector supports it.
+     * Unsupported connectors return supported=false and must never simulate success.
+     */
+    suspend fun amendOrder(request: AtomicOrderAmendRequest): AtomicOrderAmendResult =
+        AtomicOrderAmendResult(
+            supported = false,
+            amended = false,
+            exchangeOrderId = request.exchangeOrderId,
+            clientOrderId = request.clientOrderId,
+            reason = "Atomic amend is not supported by this exchange connector."
+        )
+
     /** Cancel one live order when the exchange supports it. */
     suspend fun cancelOrder(orderId: String): Boolean = false
 
