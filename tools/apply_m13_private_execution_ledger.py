@@ -17,7 +17,7 @@ def replace_once(text, old, new, label):
     return text.replace(old, new, 1)
 
 def main():
-    print("INFO | M13 applier revision v1")
+    print("INFO | M13 applier revision v1.1")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     if not (repo / ".git").exists():
         fail("Not a git checkout")
@@ -75,13 +75,17 @@ object KrakenPrivatePermissionHints {
 object KrakenPrivateExecutionRegistry {
 ''', "M13 permission hints")
     t = replace_once(t,
-'''        val clientOrderId: String,
+'''    data class ExecutionReport(
+        val orderId: String,
+        val clientOrderId: String,
         val symbol: String,
 ''',
-'''        val clientOrderId: String,
+'''    data class ExecutionReport(
+        val orderId: String,
+        val clientOrderId: String,
         val executionId: String,
         val symbol: String,
-''', "M13 execution id model")
+''', "M13 ExecutionReport execution id model")
     t = replace_once(t,
 '''                        lastError = "GetWebSocketsToken failed: ${error.message ?: error.javaClass.simpleName}"
 ''',
