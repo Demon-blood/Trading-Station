@@ -37,3 +37,14 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_seq ON events(seq);
 CREATE INDEX IF NOT EXISTS idx_events_source ON events(source_table);
 CREATE INDEX IF NOT EXISTS idx_events_contributor ON events(contributor_id);
+
+CREATE TABLE IF NOT EXISTS engine_leases (
+    account_key TEXT PRIMARY KEY,
+    holder_client_id TEXT NOT NULL,
+    holder_engine_id TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT '',
+    expires_at_epoch_ms INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_engine_leases_expiry ON engine_leases(expires_at_epoch_ms);

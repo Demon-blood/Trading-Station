@@ -51,11 +51,13 @@ class TradeLifecycleManager(
     private val spikeProfitTimingEngine = SpikeProfitTimingEngine()
     private val advancedExitOptimizer = AdvancedExitOptimizer(governanceDao)
     private val protectiveStops = governanceDao?.let { ProtectiveStopManager(dao, it) }
+    private val partialFillSynchronizer = PartialFillSynchronizer(dao, statusStore, protectiveStops)
     private fun log(message: String, level: String = "INFO") = statusStore.write(message, level)
 
     suspend fun runPreScanMaintenance(settings: BotSettings, exchange: CryptoExchangeClient) {
         if (!settings.liveLifecycleManagerEnabled) return
         if (settings.syncKrakenHistory && settings.mode != BotMode.PAPER) syncClosedOrders(settings, exchange)
+        partialFillSynchronizer.sync(settings, exchange)
         refreshPositionRows(settings, exchange)
     }
 
@@ -445,21 +447,33 @@ class TradeLifecycleManager(
             if (order.executedQuantity <= BigDecimal.ZERO) return@forEach
             val syncedStrategyId = pendingPlan?.strategyId ?: HandoffPositionPlanCodec.decode(pendingPosition?.source)?.strategyId ?: "KRAKEN_SYNC"
             val syncedEntry = pendingPosition?.entryPriceEur?.toBigDecimalOrNull() ?: BigDecimal.ZERO
-            val syncedRealized = if (order.side == OrderSide.SELL && syncedEntry > BigDecimal.ZERO && order.price > BigDecimal.ZERO) order.price.subtract(syncedEntry).multiply(order.executedQuantity).subtract(order.fee) else BigDecimal.ZERO
-            val exists = dao.recentTradesSnapshot(300).any { it.exchangeOrderId == order.exchangeOrderId }
-            if (!exists) {
+            val alreadyRecordedRows = dao.recentTradesSnapshot(500).filter {
+                it.exchangeOrderId == order.exchangeOrderId && it.side.equals(order.side.name, true)
+            }
+            val alreadyRecordedQty = alreadyRecordedRows.fold(BigDecimal.ZERO) { acc, row ->
+                acc + (row.quantity.toBigDecimalOrNull() ?: BigDecimal.ZERO)
+            }
+            val alreadyRecordedFee = alreadyRecordedRows.fold(BigDecimal.ZERO) { acc, row ->
+                acc + (row.feeEur.toBigDecimalOrNull() ?: BigDecimal.ZERO)
+            }
+            val deltaQty = PartialFillMath.incrementalQuantity(order.executedQuantity, alreadyRecordedQty)
+            val deltaFee = PartialFillMath.incrementalFee(order.fee, alreadyRecordedFee)
+            val syncedRealized = if (order.side == OrderSide.SELL && syncedEntry > BigDecimal.ZERO && order.price > BigDecimal.ZERO) {
+                order.price.subtract(syncedEntry).multiply(deltaQty).subtract(deltaFee)
+            } else BigDecimal.ZERO
+            if (deltaQty > BigDecimal.ZERO) {
                 dao.insertTrade(
                     TradeEntity(
                         symbol = order.symbol,
                         side = order.side.name,
-                        quantity = order.executedQuantity.toPlainString(),
+                        quantity = deltaQty.toPlainString(),
                         priceEur = order.price.toPlainString(),
-                        feeEur = order.fee.toPlainString(),
+                        feeEur = deltaFee.toPlainString(),
                         paper = false,
                         realizedPnlEur = syncedRealized.toPlainString(),
                         aiScore = 0,
                         aiReason = "Synced Kraken fill [$syncedStrategyId]: ${order.description}",
-                        clientOrderId = "kraken-sync-${order.exchangeOrderId}",
+                        clientOrderId = order.clientOrderId.ifBlank { "kraken-sync-${order.exchangeOrderId}" },
                         exchangeOrderId = order.exchangeOrderId,
                         timestampEpochMs = order.closedAtEpochSeconds * 1000L
                     )

@@ -9,6 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.security.MessageDigest
 import com.ksp.cryptobot.core.BalanceInfo
 import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
 
@@ -89,6 +90,96 @@ class KrakenSpotClient(
         val root = privateJson("/0/private/GetWebSocketsToken", emptyMap())
         root.optJSONObject("result")?.optString("token")?.takeIf { it.isNotBlank() }
             ?: error("Kraken GetWebSocketsToken returned no token.")
+    }
+
+
+    suspend fun accountAuthorityIdentity(): KrakenAccountAuthorityIdentity = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken credentials are required for account authority identity.")
+        val root = privateJson("/0/private/GetApiKeyInfo", emptyMap())
+        val result = root.optJSONObject("result") ?: error("Kraken GetApiKeyInfo returned no result.")
+        val iban = result.optString("iban", "").trim()
+        require(iban.isNotBlank()) {
+            "Kraken GetApiKeyInfo returned no account IIBAN. M12 refuses a key-specific fallback because different API keys on the same account must not create independent LIVE leases."
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(("KRAKEN-IIBAN:" + iban).toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        KrakenAccountAuthorityIdentity(
+            accountKey = digest,
+            source = "KRAKEN_IIBAN"
+        )
+    }
+
+    suspend fun resolveClientOrderId(rawClientOrderId: String): KrakenClientOrderResolution = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken credentials are required for client-order resolution.")
+        val clientOrderId = KrakenClientOrderId.normalize(rawClientOrderId)
+
+        fun parse(item: org.json.JSONObject, txid: String, isOpen: Boolean): KrakenClientOrderResolution {
+            val descr = item.optJSONObject("descr")
+            val pair = descr?.optString("pair", "").orEmpty()
+            val side = if (descr?.optString("type", "buy").equals("sell", true)) OrderSide.SELL else OrderSide.BUY
+            val orderType = when (descr?.optString("ordertype", "limit")?.lowercase()) {
+                "market" -> OrderType.MARKET
+                "stop-loss", "stop-loss-limit" -> OrderType.STOP_LOSS
+                "take-profit", "take-profit-limit" -> OrderType.TAKE_PROFIT
+                else -> OrderType.LIMIT
+            }
+            val qty = item.optString("vol", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val executed = item.optString("vol_exec", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val avg = item.optString("price", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val fee = item.optString("fee", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            return KrakenClientOrderResolution(
+                found = true,
+                open = isOpen,
+                exchangeOrderId = txid,
+                clientOrderId = item.optString("cl_ord_id", clientOrderId).ifBlank { clientOrderId },
+                symbol = fromKrakenPair(pair),
+                side = side,
+                orderType = orderType,
+                status = item.optString("status", if (isOpen) "open" else "closed"),
+                quantity = qty,
+                executedQuantity = executed,
+                averageFillPrice = avg,
+                fee = fee
+            )
+        }
+
+        val openRoot = privateJson(
+            "/0/private/OpenOrders",
+            mapOf("trades" to "true", "cl_ord_id" to clientOrderId)
+        )
+        val open = openRoot.optJSONObject("result")?.optJSONObject("open")
+        val openTxid = open?.keys()?.asSequence()?.firstOrNull()
+        if (openTxid != null) {
+            return@withContext parse(open.getJSONObject(openTxid), openTxid, true)
+        }
+
+        val closedRoot = privateJson(
+            "/0/private/ClosedOrders",
+            mapOf("trades" to "true", "closetime" to "close", "cl_ord_id" to clientOrderId)
+        )
+        val closed = closedRoot.optJSONObject("result")?.optJSONObject("closed")
+        val closedTxid = closed?.keys()?.asSequence()?.firstOrNull()
+        if (closedTxid != null) {
+            return@withContext parse(closed.getJSONObject(closedTxid), closedTxid, false)
+        }
+
+        KrakenClientOrderResolution(found = false, open = false, clientOrderId = clientOrderId)
+    }
+
+    suspend fun setDeadMansSwitch(timeoutSeconds: Int): KrakenDeadManSwitchStatus = withContext(Dispatchers.IO) {
+        require(timeoutSeconds in 0 until 86400) { "Kraken CancelAllOrdersAfter timeout must be 0..86399 seconds." }
+        val root = privateJson(
+            "/0/private/CancelAllOrdersAfter",
+            mapOf("timeout" to timeoutSeconds.toString())
+        )
+        val result = root.optJSONObject("result") ?: error("Kraken CancelAllOrdersAfter returned no result.")
+        KrakenDeadManSwitchStatus(
+            timeoutSeconds = timeoutSeconds,
+            currentTime = result.optString("currentTime", ""),
+            triggerTime = result.optString("triggerTime", ""),
+            enabled = timeoutSeconds > 0
+        )
     }
 
     override suspend fun validateSymbol(symbol: String): ExchangeSymbolInfo = withContext(Dispatchers.IO) {
@@ -354,6 +445,9 @@ class KrakenSpotClient(
                 else -> OrderType.LIMIT
             }
             val price = (descr?.optString("price", "0") ?: "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val avgFill = item.optString("price", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val fee = item.optString("fee", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val clientOrderId = item.optString("cl_ord_id", "")
             val vol = item.optString("vol", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
             val volExec = item.optString("vol_exec", "0").toBigDecimalOrNull() ?: BigDecimal.ZERO
             orders += LiveOrderInfo(
@@ -367,7 +461,10 @@ class KrakenSpotClient(
                 remainingQuantity = vol.subtract(volExec).max(BigDecimal.ZERO),
                 status = item.optString("status", "open"),
                 openedAtEpochSeconds = item.optLong("opentm", 0L),
-                description = descr?.optString("order", "") ?: ""
+                description = descr?.optString("order", "") ?: "",
+                clientOrderId = clientOrderId,
+                averageFillPrice = avgFill,
+                fee = fee
             )
         }
         orders.sortedByDescending { it.openedAtEpochSeconds }
@@ -406,7 +503,8 @@ class KrakenSpotClient(
                 fee = fee,
                 closedAtEpochSeconds = item.optLong("closetm", item.optLong("opentm", 0L)),
                 status = item.optString("status", "closed"),
-                description = descr?.optString("order", "") ?: ""
+                description = descr?.optString("order", "") ?: "",
+                clientOrderId = item.optString("cl_ord_id", "")
             )
         }
         orders.sortedByDescending { it.closedAtEpochSeconds }.take(limit)
