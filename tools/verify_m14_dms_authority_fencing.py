@@ -7,7 +7,7 @@ def read(path):
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 def main():
-    print("INFO | M14 verifier revision v1")
+    print("INFO | M14 verifier revision v1.1")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
     lease = read(repo / "app/src/main/java/com/ksp/cryptobot/execution/EngineAuthorityLeaseManager.kt")
@@ -43,8 +43,10 @@ def main():
             "runtimeLeaseValid(" in lease and
             "localDeadlineElapsedMs > nowElapsedMs" in lease,
         "old CloudShare lease schema blocks LIVE":
-            'blocked("LEASE_SCHEMA_UPGRADE_REQUIRED"' in lease and
-            'health["engine_lease_schema_version"]' in lease,
+            '"LEASE_SCHEMA_UPGRADE_REQUIRED"' in lease and
+            'return blocked(' in lease and
+            'health["engine_lease_schema_version"]' in lease and
+            'remoteSchema != EngineAuthorityFencePolicy.LEASE_SCHEMA_VERSION' in lease,
         "heartbeat loss remains fail closed":
             'EngineAuthoritySnapshot(false, "LOST"' in lease and
             'EngineAuthoritySnapshot(false, "UNKNOWN"' in lease,
@@ -138,6 +140,12 @@ def main():
         print(("PASS" if ok else "FAIL") + " | " + name)
         if not ok:
             failed.append(name)
+
+    if "old CloudShare lease schema blocks LIVE" in failed:
+        print('DEBUG | upgrade-state present =', '"LEASE_SCHEMA_UPGRADE_REQUIRED"' in lease)
+        print('DEBUG | blocked call present =', 'return blocked(' in lease)
+        print('DEBUG | health schema read present =', 'health["engine_lease_schema_version"]' in lease)
+        print('DEBUG | remote schema mismatch branch present =', 'remoteSchema != EngineAuthorityFencePolicy.LEASE_SCHEMA_VERSION' in lease)
 
     if failed:
         raise SystemExit("M14 DMS / authority fencing verification failed: " + ", ".join(failed))
