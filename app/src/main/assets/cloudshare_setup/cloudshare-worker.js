@@ -201,6 +201,88 @@ async function handleBootstrap(request, env, client) {
   return json({ stored: true, key, bytes: bytes.byteLength });
 }
 
+
+async function handleEngineLease(request, env, client, path) {
+  const body = await request.json().catch(() => ({}));
+  const accountKey = String(body.account_key || "").trim().toLowerCase();
+  const engineId = String(body.engine_id || "").trim().slice(0, 120);
+  const platform = String(body.platform || "").trim().slice(0, 40);
+  const ttlSeconds = Math.min(300, Math.max(30, Number(body.ttl_seconds || 75)));
+  if (!/^[a-f0-9]{64}$/.test(accountKey) || !engineId) {
+    return json({ error: "valid account_key and engine_id required" }, 400);
+  }
+
+  const now = Date.now();
+  const expires = now + ttlSeconds * 1000;
+  const updated = nowIso();
+
+  if (path === "/v1/engine-lease/acquire") {
+    await env.DB.prepare(
+      `INSERT INTO engine_leases
+       (account_key, holder_client_id, holder_engine_id, platform, expires_at_epoch_ms, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(account_key) DO UPDATE SET
+         holder_client_id=excluded.holder_client_id,
+         holder_engine_id=excluded.holder_engine_id,
+         platform=excluded.platform,
+         expires_at_epoch_ms=excluded.expires_at_epoch_ms,
+         updated_at=excluded.updated_at
+       WHERE engine_leases.expires_at_epoch_ms <= ?
+          OR (engine_leases.holder_client_id=? AND engine_leases.holder_engine_id=?)`
+    ).bind(
+      accountKey, client.client_id, engineId, platform, expires, updated,
+      now, client.client_id, engineId
+    ).run();
+
+    const row = await env.DB.prepare(
+      "SELECT holder_client_id, holder_engine_id, platform, expires_at_epoch_ms FROM engine_leases WHERE account_key=? LIMIT 1"
+    ).bind(accountKey).first();
+
+    const acquired = !!row &&
+      row.holder_client_id === client.client_id &&
+      row.holder_engine_id === engineId;
+
+    return json({
+      acquired,
+      holder_engine_id: row?.holder_engine_id || "",
+      holder_platform: row?.platform || "",
+      expires_at_epoch_ms: Number(row?.expires_at_epoch_ms || 0)
+    });
+  }
+
+  if (path === "/v1/engine-lease/heartbeat") {
+    const result = await env.DB.prepare(
+      `UPDATE engine_leases
+          SET expires_at_epoch_ms=?, updated_at=?, platform=?
+        WHERE account_key=? AND holder_client_id=? AND holder_engine_id=? AND expires_at_epoch_ms > ?`
+    ).bind(expires, updated, platform, accountKey, client.client_id, engineId, now).run();
+
+    const row = await env.DB.prepare(
+      "SELECT holder_client_id, holder_engine_id, platform, expires_at_epoch_ms FROM engine_leases WHERE account_key=? LIMIT 1"
+    ).bind(accountKey).first();
+
+    const renewed = Number(result?.meta?.changes || 0) > 0 &&
+      row?.holder_client_id === client.client_id &&
+      row?.holder_engine_id === engineId;
+
+    return json({
+      renewed,
+      holder_engine_id: row?.holder_engine_id || "",
+      holder_platform: row?.platform || "",
+      expires_at_epoch_ms: Number(row?.expires_at_epoch_ms || 0)
+    });
+  }
+
+  if (path === "/v1/engine-lease/release") {
+    const result = await env.DB.prepare(
+      "DELETE FROM engine_leases WHERE account_key=? AND holder_client_id=? AND holder_engine_id=?"
+    ).bind(accountKey, client.client_id, engineId).run();
+    return json({ released: Number(result?.meta?.changes || 0) > 0 });
+  }
+
+  return json({ error: "engine lease route not found" }, 404);
+}
+
 async function adminRoutes(request, env, path) {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
@@ -308,6 +390,7 @@ export default {
         return json({ protocol_version: PROTOCOL_VERSION, event_count: Number(count?.count || 0) });
       }
 
+      if (request.method === "POST" && path.startsWith("/v1/engine-lease/")) return await handleEngineLease(request, env, client, path);
       if (request.method === "POST" && path === "/v1/events/batch") return await handleBatch(request, env, client);
       if (request.method === "GET" && path === "/v1/intelligence/events") return await handleIntelligence(request, env);
       if (request.method === "POST" && path === "/v1/bootstrap") return await handleBootstrap(request, env, client);

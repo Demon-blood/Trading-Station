@@ -18,6 +18,7 @@ import com.ksp.cryptobot.core.BotMode
 import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.data.AppDatabase
 import com.ksp.cryptobot.governance.ProductionIntelligenceServiceMonitor
+import com.ksp.cryptobot.execution.EngineAuthorityLeaseManager
 import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
 import com.ksp.cryptobot.exchange.KrakenPrivateExecutionRegistry
 import com.ksp.cryptobot.settings.AppSettingsStore
@@ -34,6 +35,7 @@ class BotForegroundService : Service() {
     private lateinit var productionMonitor: ProductionIntelligenceServiceMonitor
     private lateinit var hostStore: RuntimeHostStateStore
     private lateinit var connectivity: RuntimeConnectivityMonitor
+    private lateinit var authorityLease: EngineAuthorityLeaseManager
 
     @Volatile
     private var loopJob: Job? = null
@@ -46,6 +48,7 @@ class BotForegroundService : Service() {
         cloudShareSync = CloudShareSyncEngine(applicationContext)
         productionMonitor = ProductionIntelligenceServiceMonitor(AppDatabase.get(applicationContext).governanceDao())
         hostStore = RuntimeHostStateStore(applicationContext)
+        authorityLease = EngineAuthorityLeaseManager(applicationContext)
         connectivity = RuntimeConnectivityMonitor(applicationContext) { state ->
             hostStore.network(state.summary())
         }
@@ -112,6 +115,22 @@ class BotForegroundService : Service() {
             if (!awaitUsableNetwork("startup")) return@launch
             configureRealtimeMarketData(startSettings, connectivity.snapshot.usable)
             configurePrivateExecutionState(startSettings, connectivity.snapshot.usable)
+
+            if (startSettings.mode != BotMode.PAPER && startSettings.exchangeProvider != ExchangeProvider.PAPER) {
+                updateNotification("Acquiring distributed LIVE engine authority…")
+                val authority = runCatching { authorityLease.acquire(startSettings) }.getOrElse { error ->
+                    com.ksp.cryptobot.execution.EngineAuthoritySnapshot(false, "ERROR", reason = error.message ?: error.javaClass.simpleName)
+                }
+                if (!authority.authorized) {
+                    hostStore.failure("LIVE authority blocked: ${authority.state}: ${authority.reason}")
+                    statusStore.write("LIVE start blocked by distributed authority: ${authority.state}: ${authority.reason}", "ERROR")
+                    updateNotification("LIVE blocked: engine authority unavailable")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@launch
+                }
+                statusStore.write("Distributed LIVE authority acquired. engine=${authority.engineId}, state=${authority.state}, expires=${authority.expiresAtEpochMs}.", "LIVE")
+            }
 
             if (startSettings.mode == BotMode.LIVE_AUTO) {
                 updateNotification("LIVE_AUTO startup verification…")
@@ -361,6 +380,7 @@ class BotForegroundService : Service() {
         statusStore.write("Stop requested. Trading host shutting down.", "WARN")
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
+        authorityLease.stop()
         controller.stop()
         loopJob?.cancel()
         loopJob = null
@@ -449,6 +469,7 @@ class BotForegroundService : Service() {
     override fun onDestroy() {
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
+        authorityLease.stop()
         connectivity.stop()
         loopJob?.cancel()
         scope.cancel()

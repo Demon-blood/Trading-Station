@@ -156,6 +156,45 @@ class CloudShareClient(
         }
     }
 
+    suspend fun acquireEngineLease(
+        accountKey: String,
+        engineId: String,
+        platform: String,
+        ttlSeconds: Int
+    ): Map<String, Any?> = requestMap(
+        "POST",
+        "/v1/engine-lease/acquire",
+        body = mapOf(
+            "account_key" to accountKey,
+            "engine_id" to engineId,
+            "platform" to platform,
+            "ttl_seconds" to ttlSeconds.coerceIn(30, 300)
+        )
+    )
+
+    suspend fun heartbeatEngineLease(
+        accountKey: String,
+        engineId: String,
+        ttlSeconds: Int
+    ): Map<String, Any?> = requestMap(
+        "POST",
+        "/v1/engine-lease/heartbeat",
+        body = mapOf(
+            "account_key" to accountKey,
+            "engine_id" to engineId,
+            "ttl_seconds" to ttlSeconds.coerceIn(30, 300)
+        )
+    )
+
+    suspend fun releaseEngineLease(
+        accountKey: String,
+        engineId: String
+    ): Map<String, Any?> = requestMap(
+        "POST",
+        "/v1/engine-lease/release",
+        body = mapOf("account_key" to accountKey, "engine_id" to engineId)
+    )
+
     suspend fun adminPing(): Map<String, Any?> = requestMap("GET", "/v1/admin/ping", admin = true)
 
     suspend fun adminCreateInvite(label: String, maxUses: Int = 1, expiresInHours: Int = 168): Map<String, Any?> =

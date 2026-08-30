@@ -1483,6 +1483,13 @@ Crypto TradeStation remote commands:
             manageExistingLiveOrders(settings, exchange)
             lifecycleManager.runPreScanMaintenance(settings, exchange)
             val reconciliation = advancedExecution.reconcileLive(settings, exchange)
+            if (exchange is KrakenSpotClient) {
+                val orderTruth = com.ksp.cryptobot.execution.KrakenOrderTruthResolver.resolveDurable(exchange)
+                orderTruth.messages.take(8).forEach { updateStatus("M12 order truth: $it", if (orderTruth.unresolved > 0) "WARN" else "INFO") }
+                require(orderTruth.unresolved == 0) {
+                    "Kraken durable client-order ambiguity remains unresolved (${orderTruth.unresolved}); LIVE entry authority stays blocked."
+                }
+            }
             if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
                 KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)
             }
@@ -2227,6 +2234,14 @@ Crypto TradeStation remote commands:
         val orderModeLabel = request.orderType.name
         val submittedNotionalEstimate = request.quantity.multiply(price).setScale(8, RoundingMode.HALF_UP)
 
+        if (settings.mode != BotMode.PAPER && request.side == OrderSide.BUY) {
+            val authority = com.ksp.cryptobot.execution.EngineAuthorityRuntime.canSubmitNewEntry(settings.mode)
+            if (!authority.first) {
+                updateStatus("LIVE entry blocked by distributed engine-authority gate: ${authority.second}", "ERROR")
+                return ExecutionAttemptResult(false)
+            }
+        }
+
         if (settings.mode == BotMode.LIVE_AUTO &&
             settings.exchangeProvider == ExchangeProvider.KRAKEN &&
             request.side == OrderSide.BUY
@@ -2820,6 +2835,13 @@ Crypto TradeStation remote commands:
         val exchange = createExchange(settings)
         lifecycleManager.runPreScanMaintenance(settings, exchange)
         val reconciliation = advancedExecution.reconcileLive(settings, exchange)
+        if (exchange is KrakenSpotClient) {
+            val orderTruth = com.ksp.cryptobot.execution.KrakenOrderTruthResolver.resolveDurable(exchange)
+            orderTruth.messages.take(8).forEach { updateStatus("M12 order truth: $it", if (orderTruth.unresolved > 0) "WARN" else "INFO") }
+            require(orderTruth.unresolved == 0) {
+                "Kraken durable client-order ambiguity remains unresolved (${orderTruth.unresolved}); LIVE entry authority stays blocked."
+            }
+        }
         if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
             KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)
         }
