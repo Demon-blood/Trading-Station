@@ -14,6 +14,7 @@ import com.ksp.cryptobot.research.HandoffSideIntent
 import com.ksp.cryptobot.research.ResearchExecutionRuntime
 import com.ksp.cryptobot.research.HandoffPositionPlanCodec
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
+import com.ksp.cryptobot.exchange.KrakenClientOrderId
 import com.ksp.cryptobot.learning.TrueSelfLearningEngine
 import com.ksp.cryptobot.learning.SpikeProfitTimingEngine
 import com.ksp.cryptobot.status.BotStatusStore
@@ -250,7 +251,7 @@ class TradeLifecycleManager(
             quantity = qty,
             limitPrice = if (lifecycleOrderType == OrderType.MARKET) null else position.currentPrice,
             orderType = lifecycleOrderType,
-            clientOrderId = "ksp-exit-${symbol.lowercase()}-${System.currentTimeMillis()}",
+            clientOrderId = KrakenClientOrderId.newId(),
             reduceOnly = true,
             purpose = "$reason; ${exitPlan.method}; strategy=${persistedHandoffPlan?.strategyId ?: handoffDirective?.strategyId ?: settings.strategyMode.name}"
         )

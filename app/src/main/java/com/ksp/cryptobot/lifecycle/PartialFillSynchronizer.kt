@@ -4,6 +4,7 @@ package com.ksp.cryptobot.lifecycle
 import com.ksp.cryptobot.core.*
 import com.ksp.cryptobot.data.*
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
+import com.ksp.cryptobot.exchange.KrakenPrivateExecutionRegistry
 import com.ksp.cryptobot.execution.ExecutionTruthGate
 import com.ksp.cryptobot.execution.ProtectiveStopManager
 import com.ksp.cryptobot.research.HandoffPositionPlanCodec
@@ -17,6 +18,27 @@ object PartialFillMath {
 
     fun incrementalFee(exchangeCumulativeFee: BigDecimal, alreadyRecordedFee: BigDecimal): BigDecimal =
         exchangeCumulativeFee.subtract(alreadyRecordedFee).max(BigDecimal.ZERO)
+
+    fun incrementalAveragePrice(
+        exchangeCumulative: BigDecimal,
+        exchangeAveragePrice: BigDecimal,
+        alreadyRecorded: BigDecimal,
+        alreadyRecordedCost: BigDecimal,
+        fallbackPrice: BigDecimal
+    ): BigDecimal {
+        val delta = incrementalQuantity(exchangeCumulative, alreadyRecorded)
+        if (delta <= BigDecimal.ZERO) {
+            return exchangeAveragePrice.takeIf { it > BigDecimal.ZERO }
+                ?: fallbackPrice.max(BigDecimal.ZERO)
+        }
+        val cumulativePrice = exchangeAveragePrice.takeIf { it > BigDecimal.ZERO } ?: fallbackPrice
+        if (cumulativePrice <= BigDecimal.ZERO) return BigDecimal.ZERO
+        val cumulativeCost = cumulativePrice.multiply(exchangeCumulative)
+        val deltaCost = cumulativeCost.subtract(alreadyRecordedCost).max(BigDecimal.ZERO)
+        return if (deltaCost > BigDecimal.ZERO) {
+            deltaCost.divide(delta, 12, RoundingMode.HALF_UP)
+        } else fallbackPrice.max(BigDecimal.ZERO)
+    }
 }
 
 /**
@@ -31,20 +53,21 @@ class PartialFillSynchronizer(
     suspend fun sync(settings: BotSettings, exchange: CryptoExchangeClient) {
         if (settings.mode == BotMode.PAPER) return
 
+        syncPrivateExecutionReports()
+
         val openOrders = ExecutionTruthGate.requireAuthoritative(
             "partial-fill open orders",
             runCatching { exchange.getOpenOrders() }
         )
         val candidates = openOrders.filter {
-            it.side == OrderSide.BUY &&
-                it.executedQuantity > BigDecimal.ZERO &&
+            it.executedQuantity > BigDecimal.ZERO &&
                 it.remainingQuantity > BigDecimal.ZERO
         }
         if (candidates.isEmpty()) return
 
         for (order in candidates) {
-            val previousRows = dao.recentTradesSnapshot(500).filter {
-                it.exchangeOrderId == order.exchangeOrderId && it.side.equals(OrderSide.BUY.name, true)
+            val previousRows = dao.recentTradesSnapshot(1000).filter {
+                it.exchangeOrderId == order.exchangeOrderId && it.side.equals(order.side.name, true)
             }
             val recordedQty = previousRows.fold(BigDecimal.ZERO) { a, row ->
                 a + (row.quantity.toBigDecimalOrNull() ?: BigDecimal.ZERO)
@@ -52,26 +75,49 @@ class PartialFillSynchronizer(
             val recordedFee = previousRows.fold(BigDecimal.ZERO) { a, row ->
                 a + (row.feeEur.toBigDecimalOrNull() ?: BigDecimal.ZERO)
             }
+            val recordedCost = previousRows.fold(BigDecimal.ZERO) { a, row ->
+                val qty = row.quantity.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                val px = row.priceEur.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                a + qty.multiply(px)
+            }
             val deltaQty = PartialFillMath.incrementalQuantity(order.executedQuantity, recordedQty)
             val deltaFee = PartialFillMath.incrementalFee(order.fee, recordedFee)
-            val fillPrice = order.averageFillPrice.takeIf { it > BigDecimal.ZERO } ?: order.price
+            val fillPrice = PartialFillMath.incrementalAveragePrice(
+                exchangeCumulative = order.executedQuantity,
+                exchangeAveragePrice = order.averageFillPrice,
+                alreadyRecorded = recordedQty,
+                alreadyRecordedCost = recordedCost,
+                fallbackPrice = order.price
+            )
+            val trackedEntry = dao.positionForSymbol(order.symbol)?.entryPriceEur?.toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val realizedDelta = if (order.side == OrderSide.SELL && trackedEntry > BigDecimal.ZERO && fillPrice > BigDecimal.ZERO) {
+                fillPrice.subtract(trackedEntry).multiply(deltaQty).subtract(deltaFee)
+            } else BigDecimal.ZERO
             if (deltaQty > BigDecimal.ZERO && fillPrice > BigDecimal.ZERO) {
                 dao.insertTrade(
                     TradeEntity(
                         symbol = order.symbol,
-                        side = OrderSide.BUY.name,
+                        side = order.side.name,
                         quantity = deltaQty.toPlainString(),
                         priceEur = fillPrice.toPlainString(),
                         feeEur = deltaFee.toPlainString(),
                         paper = false,
-                        realizedPnlEur = "0",
+                        realizedPnlEur = realizedDelta.toPlainString(),
                         aiScore = 0,
-                        aiReason = "Kraken incremental partial fill sync",
+                        aiReason = "Kraken REST cumulative partial fill sync",
                         clientOrderId = order.clientOrderId,
                         exchangeOrderId = order.exchangeOrderId,
                         timestampEpochMs = System.currentTimeMillis()
                     )
                 )
+            }
+
+            if (order.side != OrderSide.BUY) {
+                statusStore.write(
+                    "Partial SELL fill synced ${order.symbol}: cumulative=${order.executedQuantity}, delta=$deltaQty, avg=$fillPrice, remaining=${order.remainingQuantity}, realizedDelta=$realizedDelta. Position quantity will be refreshed from authoritative balances.",
+                    "LIVE"
+                )
+                continue
             }
 
             val existing = dao.positionForSymbol(order.symbol)
@@ -136,6 +182,54 @@ class PartialFillSynchronizer(
                     "WARN"
                 )
             }
+        }
+    }
+
+    private suspend fun syncPrivateExecutionReports() {
+        val reports = KrakenPrivateExecutionRegistry.recentExecutionReports(500)
+            .filter {
+                it.execType == "trade" &&
+                    it.orderId.isNotBlank() &&
+                    it.executionId.isNotBlank() &&
+                    it.lastQuantity > BigDecimal.ZERO &&
+                    it.lastPrice > BigDecimal.ZERO
+            }
+
+        val seenExecMarkers = dao.recentTradesSnapshot(2000)
+            .asSequence()
+            .mapNotNull { row ->
+                val markerStart = row.aiReason.indexOf("kraken_exec_id=")
+                if (markerStart < 0) null else row.aiReason.substring(markerStart).substringBefore(' ')
+            }
+            .toMutableSet()
+
+        for (report in reports) {
+            val execMarker = "kraken_exec_id=${report.executionId}"
+            if (!seenExecMarkers.add(execMarker)) continue
+
+            val trackedEntry = dao.positionForSymbol(report.symbol)?.entryPriceEur?.toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val realized = if (report.side == OrderSide.SELL && trackedEntry > BigDecimal.ZERO) {
+                report.lastPrice.subtract(trackedEntry)
+                    .multiply(report.lastQuantity)
+                    .subtract(report.feeQuantity.max(BigDecimal.ZERO))
+            } else BigDecimal.ZERO
+
+            dao.insertTrade(
+                TradeEntity(
+                    symbol = report.symbol,
+                    side = report.side.name,
+                    quantity = report.lastQuantity.toPlainString(),
+                    priceEur = report.lastPrice.toPlainString(),
+                    feeEur = report.feeQuantity.max(BigDecimal.ZERO).toPlainString(),
+                    paper = false,
+                    realizedPnlEur = realized.toPlainString(),
+                    aiScore = 0,
+                    aiReason = "Kraken private execution fill; $execMarker",
+                    clientOrderId = report.clientOrderId,
+                    exchangeOrderId = report.orderId,
+                    timestampEpochMs = report.observedAtEpochMs
+                )
+            )
         }
     }
 

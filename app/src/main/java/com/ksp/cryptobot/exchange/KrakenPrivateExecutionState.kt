@@ -14,6 +14,7 @@ import java.math.BigDecimal
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.UUID
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -35,6 +36,8 @@ object KrakenClientOrderId {
     private val longUuid = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
     private val shortUuid = Regex("^[0-9a-fA-F]{32}$")
 
+    fun newId(): String = UUID.randomUUID().toString()
+
     fun normalize(raw: String): String {
         val trimmed = raw.trim()
         if (longUuid.matches(trimmed) || shortUuid.matches(trimmed)) return trimmed
@@ -44,6 +47,18 @@ object KrakenClientOrderId {
             .digest(trimmed.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
         return "cts-" + digest.take(14)
+    }
+}
+
+object KrakenPrivatePermissionHints {
+    fun describe(raw: String): String {
+        val message = raw.trim()
+        val permissionLike =
+            message.contains("permission", ignoreCase = true) ||
+            message.contains("EGeneral:Permission denied", ignoreCase = true)
+        return if (permissionLike) {
+            "$message. Kraken API key requirement: enable 'WebSocket interface - On' for authenticated private executions."
+        } else message
     }
 }
 
@@ -57,6 +72,7 @@ object KrakenPrivateExecutionRegistry {
     data class ExecutionReport(
         val orderId: String,
         val clientOrderId: String,
+        val executionId: String,
         val symbol: String,
         val side: OrderSide,
         val execType: String,
@@ -389,7 +405,8 @@ object KrakenPrivateExecutionRegistry {
                     synchronized(lock) {
                         connectJob = null
                         state = "REST_ONLY"
-                        lastError = "GetWebSocketsToken failed: ${error.message ?: error.javaClass.simpleName}"
+                        val rawError = error.message ?: error.javaClass.simpleName
+                        lastError = "GetWebSocketsToken failed: ${KrakenPrivatePermissionHints.describe(rawError)}"
                     }
                     scheduleReconnect(immediate = false)
                     return@launch
@@ -478,7 +495,7 @@ object KrakenPrivateExecutionRegistry {
                     root.optJSONObject("result")?.optString("channel") == "executions"
                 if (!success) {
                     state = "REST_ONLY"
-                    lastError = "Executions subscribe failed: ${root.optString("error", "unknown")}"
+                    lastError = "Executions subscribe failed: ${KrakenPrivatePermissionHints.describe(root.optString("error", "unknown"))}"
                 }
             }
             if (!success) runCatching { webSocket.cancel() }
@@ -547,6 +564,7 @@ object KrakenPrivateExecutionRegistry {
         return ExecutionReport(
             orderId = item.optString("order_id"),
             clientOrderId = item.optString("cl_ord_id"),
+            executionId = item.optString("exec_id"),
             symbol = normalizeSymbol(item.optString("symbol")),
             side = side,
             execType = item.optString("exec_type"),
