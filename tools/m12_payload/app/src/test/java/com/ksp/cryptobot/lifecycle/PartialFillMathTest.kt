@@ -1,4 +1,3 @@
-
 package com.ksp.cryptobot.lifecycle
 
 import org.junit.Assert.assertEquals
@@ -11,7 +10,8 @@ class PartialFillMathTest {
     }
 
     @Test fun replayedSameCumulativeFillCreatesNoDuplicateQuantity() {
-        assertEquals(BigDecimal.ZERO, PartialFillMath.incrementalQuantity(BigDecimal("1.00"), BigDecimal("1.00")))
+        val delta = PartialFillMath.incrementalQuantity(BigDecimal("1.00"), BigDecimal("1.00"))
+        assertEquals(0, delta.compareTo(BigDecimal.ZERO))
     }
 
     @Test fun cumulativeFeeCreatesOnlyIncrementalFee() {
