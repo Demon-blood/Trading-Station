@@ -156,8 +156,9 @@ def main():
             'EngineAuthoritySnapshot(false, "LOST"' in lease and
             'EngineAuthoritySnapshot(false, "UNKNOWN"' in lease,
         "paper does not need LIVE lease":
-            'mode == BotMode.PAPER' in lease and
-            'state = "PAPER"' in lease,
+            'settings.mode == BotMode.PAPER || settings.exchangeProvider == ExchangeProvider.PAPER' in lease and
+            'EngineAuthoritySnapshot(true, "PAPER"' in lease and
+            'return paper' in lease,
         "service acquires authority before controller start":
             start_bot.find("authorityLease.acquire(startSettings)") >= 0 and
             start_bot.find("authorityLease.acquire(startSettings)") <
