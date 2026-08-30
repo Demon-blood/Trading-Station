@@ -566,10 +566,32 @@ import com.ksp.cryptobot.core.BalanceInfo
             KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)
         }
 '''
-    reconcile_count = t.count(old_reconcile)
-    if reconcile_count != 2:
-        fail(f"M12 expected 2 live reconciliation anchors, got {reconcile_count}")
-    t = t.replace(old_reconcile, new_reconcile)
+
+    def patch_reconcile_scope(text, start_marker, end_marker, label):
+        start = text.find(start_marker)
+        if start < 0:
+            fail(f"{label}: start marker missing")
+        end = text.find(end_marker, start + len(start_marker))
+        if end < 0:
+            fail(f"{label}: end marker missing")
+        body = text[start:end]
+        matches = body.count(old_reconcile)
+        if matches != 1:
+            fail(f"{label}: expected one reconciliation anchor, got {matches}")
+        return text[:start] + body.replace(old_reconcile, new_reconcile, 1) + text[end:]
+
+    t = patch_reconcile_scope(
+        t,
+        "suspend fun reconcileLiveExecutionState(",
+        "suspend fun loadLifecycleSnapshot(",
+        "M12 strict startup/recovery reconciliation"
+    )
+    t = patch_reconcile_scope(
+        t,
+        "suspend fun scanOnce(",
+        "private suspend fun selectSymbolUniverse(",
+        "M12 LIVE scan reconciliation"
+    )
 
     gate_anchor = '''        if (
             settings.mode == BotMode.LIVE_AUTO &&
