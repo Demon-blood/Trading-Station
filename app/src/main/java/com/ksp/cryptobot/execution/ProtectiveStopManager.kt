@@ -3,6 +3,7 @@ package com.ksp.cryptobot.execution
 import com.ksp.cryptobot.core.*
 import com.ksp.cryptobot.data.*
 import com.ksp.cryptobot.exchange.CryptoExchangeClient
+import com.ksp.cryptobot.exchange.KrakenClientOrderId
 import kotlinx.coroutines.delay
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -66,7 +67,7 @@ class ProtectiveStopManager(
                 quantity=missingCoverage,
                 limitPrice=stopPrice,
                 orderType=OrderType.STOP_LOSS,
-                clientOrderId="ksp-protect-${symbol.lowercase()}-${System.currentTimeMillis()}",
+                clientOrderId=KrakenClientOrderId.newId(),
                 reduceOnly=true,
                 purpose="PROTECTIVE_STOP strategy=$strategyId"
             ))
@@ -140,7 +141,7 @@ class ProtectiveStopManager(
         if(quantity<=BigDecimal.ZERO) return ProtectionResult(false,false,false,emptyList(),"UNPROTECTED_POSITION and no quantity available for emergency flatten: $cause")
         val result=runCatching { exchange.placeOrder(OrderRequest(
             symbol=symbol,side=OrderSide.SELL,quantity=quantity,orderType=OrderType.MARKET,
-            clientOrderId="ksp-emergency-${symbol.lowercase()}-${System.currentTimeMillis()}",reduceOnly=true,
+            clientOrderId=KrakenClientOrderId.newId(),reduceOnly=true,
             purpose="EMERGENCY_FLATTEN_UNPROTECTED strategy=$strategyId cause=${cause.take(160)}"
         )) }.getOrNull()
         if(result!=null && result.executedQuantity>BigDecimal.ZERO && result.averagePrice>BigDecimal.ZERO){
