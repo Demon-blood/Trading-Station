@@ -549,23 +549,16 @@ import com.ksp.cryptobot.core.BalanceInfo
     # Controller strict order truth + distributed entry gate
     p = repo / "app/src/main/java/com/ksp/cryptobot/core/BotController.kt"
     t = p.read_text(encoding="utf-8")
-    old_reconcile = '''        val reconciliation = advancedExecution.reconcileLive(settings, exchange)
-        if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
-            KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)
-        }
-'''
-    new_reconcile = '''        val reconciliation = advancedExecution.reconcileLive(settings, exchange)
-        if (exchange is KrakenSpotClient) {
-            val orderTruth = com.ksp.cryptobot.execution.KrakenOrderTruthResolver.resolveDurable(exchange)
-            orderTruth.messages.take(8).forEach { updateStatus("M12 order truth: $it", if (orderTruth.unresolved > 0) "WARN" else "INFO") }
-            require(orderTruth.unresolved == 0) {
-                "Kraken durable client-order ambiguity remains unresolved (${orderTruth.unresolved}); LIVE entry authority stays blocked."
-            }
-        }
-        if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
-            KrakenPrivateExecutionRegistry.markRestReconciled(reconciliation.openOrders)
-        }
-'''
+    reconciliation_marker = "val reconciliation = advancedExecution.reconcileLive(settings, exchange)"
+    order_truth_lines = [
+        "if (exchange is KrakenSpotClient) {",
+        "    val orderTruth = com.ksp.cryptobot.execution.KrakenOrderTruthResolver.resolveDurable(exchange)",
+        '    orderTruth.messages.take(8).forEach { updateStatus("M12 order truth: $it", if (orderTruth.unresolved > 0) "WARN" else "INFO") }',
+        "    require(orderTruth.unresolved == 0) {",
+        '        "Kraken durable client-order ambiguity remains unresolved (${orderTruth.unresolved}); LIVE entry authority stays blocked."',
+        "    }",
+        "}",
+    ]
 
     def patch_reconcile_scope(text, start_marker, end_marker, label):
         start = text.find(start_marker)
@@ -575,10 +568,29 @@ import com.ksp.cryptobot.core.BalanceInfo
         if end < 0:
             fail(f"{label}: end marker missing")
         body = text[start:end]
-        matches = body.count(old_reconcile)
-        if matches != 1:
-            fail(f"{label}: expected one reconciliation anchor, got {matches}")
-        return text[:start] + body.replace(old_reconcile, new_reconcile, 1) + text[end:]
+
+        if "KrakenOrderTruthResolver.resolveDurable(exchange)" in body:
+            fail(f"{label}: M12 order-truth block already present")
+
+        lines = body.splitlines(keepends=True)
+        matches = [
+            i for i, line in enumerate(lines)
+            if line.strip() == reconciliation_marker
+        ]
+        if len(matches) != 1:
+            fail(f"{label}: expected one reconciliation statement, got {len(matches)}")
+
+        index = matches[0]
+        source_line = lines[index]
+        indent = source_line[:len(source_line) - len(source_line.lstrip())]
+        newline = "\r\n" if source_line.endswith("\r\n") else "\n"
+
+        injected = "".join(
+            indent + logical_line + newline
+            for logical_line in order_truth_lines
+        )
+        lines.insert(index + 1, injected)
+        return text[:start] + "".join(lines) + text[end:]
 
     t = patch_reconcile_scope(
         t,
