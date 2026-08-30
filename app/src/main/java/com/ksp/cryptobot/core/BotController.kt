@@ -13,6 +13,7 @@ import com.ksp.cryptobot.exchange.ExchangeCapabilityChecker
 import com.ksp.cryptobot.exchange.KrakenSpotClient
 import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
 import com.ksp.cryptobot.exchange.KrakenPrivateExecutionRegistry
+import com.ksp.cryptobot.exchange.KrakenClientOrderId
 import com.ksp.cryptobot.exchange.ManualExecutionClient
 import com.ksp.cryptobot.exchange.PaperExchangeClient
 import com.ksp.cryptobot.execution.ExecutionGuard
@@ -2226,7 +2227,7 @@ Crypto TradeStation remote commands:
             quantity = quantity,
             limitPrice = if (useMarketOrder) null else price,
             orderType = plannedEntryOrderType ?: if (useMarketOrder) OrderType.MARKET else OrderType.LIMIT,
-            clientOrderId = "ksp-${ticker.symbol.lowercase()}-${System.currentTimeMillis()}",
+            clientOrderId = KrakenClientOrderId.newId(),
             purpose = if (side == OrderSide.BUY && plannedEntryOrderType != null) "RESEARCH/HANDOFF strategy=${ResearchExecutionRuntime.snapshot(ticker.symbol)?.strategyId ?: "GENERIC"} order=${plannedEntryOrderType}" else "ENTRY",
             postOnly = plannedEntryPostOnly,
             protectiveStopPrice = if (side == OrderSide.BUY && settings.mode != BotMode.PAPER) ResearchExecutionRuntime.snapshot(ticker.symbol)?.stopPrice?.takeIf { it > BigDecimal.ZERO && it < price } else null
