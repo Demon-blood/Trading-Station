@@ -23,7 +23,7 @@ def replace_once(text, old, new, label):
     return text.replace(old, new, 1)
 
 def main():
-    print("INFO | M16 applier revision v1")
+    print("INFO | M16 applier revision v1.1")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     if not (repo / ".git").exists():
         fail("Not a git checkout")
@@ -39,9 +39,12 @@ def main():
         if not src.exists():
             fail(f"M16 payload missing: {rel}")
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_text(src.read_text(encoding="utf-8").rstrip() + "\\n", encoding="utf-8")
-        if dst.read_text(encoding="utf-8").endswith("\\\\n"):
+        dst.write_text(src.read_text(encoding="utf-8").rstrip() + "\n", encoding="utf-8")
+        copied = dst.read_bytes()
+        if copied.endswith(b"\\n"):
             fail(f"M16 payload copy produced literal backslash-n EOF: {rel}")
+        if not copied.endswith(b"\n"):
+            fail(f"M16 payload copy missing real newline EOF: {rel}")
         print("WRITE |", rel)
 
     # M16 makes the optimizer's passive-maker decision authoritative when no
