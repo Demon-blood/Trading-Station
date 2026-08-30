@@ -2241,6 +2241,11 @@ Crypto TradeStation remote commands:
                 updateStatus("LIVE entry blocked by distributed engine-authority gate: ${authority.second}", "ERROR")
                 return ExecutionAttemptResult(false)
             }
+            val dms = com.ksp.cryptobot.execution.KrakenDmsSafetyRuntime.canSubmitNewEntry(settings.mode)
+            if (!dms.first) {
+                updateStatus("LIVE entry blocked by Kraken DMS safety gate: ${dms.second}", "ERROR")
+                return ExecutionAttemptResult(false)
+            }
         }
 
         if (settings.mode == BotMode.LIVE_AUTO &&

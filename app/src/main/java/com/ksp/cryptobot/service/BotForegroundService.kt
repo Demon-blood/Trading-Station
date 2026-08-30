@@ -19,6 +19,8 @@ import com.ksp.cryptobot.core.ExchangeProvider
 import com.ksp.cryptobot.data.AppDatabase
 import com.ksp.cryptobot.governance.ProductionIntelligenceServiceMonitor
 import com.ksp.cryptobot.execution.EngineAuthorityLeaseManager
+import com.ksp.cryptobot.execution.KrakenDmsSafetyManager
+import com.ksp.cryptobot.execution.KrakenDmsSafetyRuntime
 import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
 import com.ksp.cryptobot.exchange.KrakenPrivateExecutionRegistry
 import com.ksp.cryptobot.settings.AppSettingsStore
@@ -36,6 +38,7 @@ class BotForegroundService : Service() {
     private lateinit var hostStore: RuntimeHostStateStore
     private lateinit var connectivity: RuntimeConnectivityMonitor
     private lateinit var authorityLease: EngineAuthorityLeaseManager
+    private lateinit var dmsSafety: KrakenDmsSafetyManager
 
     @Volatile
     private var loopJob: Job? = null
@@ -49,6 +52,7 @@ class BotForegroundService : Service() {
         productionMonitor = ProductionIntelligenceServiceMonitor(AppDatabase.get(applicationContext).governanceDao())
         hostStore = RuntimeHostStateStore(applicationContext)
         authorityLease = EngineAuthorityLeaseManager(applicationContext)
+        dmsSafety = KrakenDmsSafetyManager(applicationContext)
         connectivity = RuntimeConnectivityMonitor(applicationContext) { state ->
             hostStore.network(state.summary())
         }
@@ -130,6 +134,16 @@ class BotForegroundService : Service() {
                     return@launch
                 }
                 statusStore.write("Distributed LIVE authority acquired. engine=${authority.engineId}, state=${authority.state}, expires=${authority.expiresAtEpochMs}.", "LIVE")
+                val dms = dmsSafety.ensureDisarmed(startSettings, "startup:$recoveryReason")
+                if (!dms.safeForNewEntries) {
+                    hostStore.failure("LIVE DMS safety blocked: ${dms.state}: ${dms.reason}")
+                    statusStore.write("LIVE start blocked because Kraken DMS could not be confirmed disabled: ${dms.state}: ${dms.reason}", "ERROR")
+                    updateNotification("LIVE blocked: Kraken DMS state unknown")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@launch
+                }
+                statusStore.write("Kraken DMS safety confirmed: ${dms.state}. Account-wide CancelAllOrdersAfter remains disabled to preserve protective SELL orders.", "LIVE")
             }
 
             if (startSettings.mode == BotMode.LIVE_AUTO) {
@@ -199,6 +213,15 @@ class BotForegroundService : Service() {
                 val current = settingsStore.load()
                 configureRealtimeMarketData(current, network.usable)
                 configurePrivateExecutionState(current, network.usable)
+                if (current.mode != BotMode.PAPER && current.exchangeProvider == ExchangeProvider.KRAKEN) {
+                    val dms = dmsSafety.ensureDisarmed(current, "service-cycle")
+                    if (!dms.safeForNewEntries) {
+                        statusStore.write(
+                            "Kraken DMS confirmation degraded: ${dms.state}: ${dms.reason}. New BUYs are fail-closed; protective SELLs remain allowed.",
+                            "ERROR"
+                        )
+                    }
+                }
                 val cycleStart = System.currentTimeMillis()
                 try {
                     val cloud = cloudShareSync.syncIfDue()
@@ -230,8 +253,9 @@ class BotForegroundService : Service() {
                     val modeText = "${afterCommands.mode}/${afterCommands.exchangeProvider}"
                     val wsHealth = KrakenRealtimeMarketDataRegistry.health()
                     val execHealth = KrakenPrivateExecutionRegistry.health()
+                    val dmsHealth = KrakenDmsSafetyRuntime.snapshot()
                     updateNotification(
-                        "RUNNING $modeText • net=${network.transports} • ws=${wsHealth.state}/${wsHealth.systemStatus} • exec=${execHealth.state}${if (execHealth.knownForEntries) "/known" else "/unknown"} • next=${selectedDelay}s • signals=${decisions.size}"
+                        "RUNNING $modeText • net=${network.transports} • ws=${wsHealth.state}/${wsHealth.systemStatus} • exec=${execHealth.state}${if (execHealth.knownForEntries) "/known" else "/unknown"} • dms=${dmsHealth.state} • next=${selectedDelay}s • signals=${decisions.size}"
                     )
                 } catch (error: Exception) {
                     productionMonitor.recordLoopError(error.message ?: error.javaClass.simpleName)
@@ -381,6 +405,7 @@ class BotForegroundService : Service() {
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
         authorityLease.stop()
+        dmsSafety.stop()
         controller.stop()
         loopJob?.cancel()
         loopJob = null
@@ -470,6 +495,7 @@ class BotForegroundService : Service() {
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
         authorityLease.stop()
+        dmsSafety.stop()
         connectivity.stop()
         loopJob?.cancel()
         scope.cancel()
