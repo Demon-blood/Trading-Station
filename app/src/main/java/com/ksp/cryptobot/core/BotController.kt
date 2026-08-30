@@ -59,6 +59,7 @@ import com.ksp.cryptobot.research.ResearchCoordinator
 import com.ksp.cryptobot.release.V4SystemVerifier
 import com.ksp.cryptobot.execution.AdvancedExecutionCoordinator
 import com.ksp.cryptobot.execution.ProtectiveStopManager
+import com.ksp.cryptobot.execution.SmartOrderLifecycleManager
 import com.ksp.cryptobot.research.ResearchExecutionRuntime
 import com.ksp.cryptobot.research.HandoffPositionPlan
 import com.ksp.cryptobot.research.HandoffPositionPlanCodec
@@ -90,6 +91,7 @@ class BotController(
     private val researchIntelligence = ResearchCoordinator(appContext, AppDatabase.get(appContext).researchDao())
     private val advancedExecution = AdvancedExecutionCoordinator(dao, AppDatabase.get(appContext).governanceDao())
     private val protectiveStops = ProtectiveStopManager(dao, AppDatabase.get(appContext).governanceDao())
+    private val smartOrderLifecycle = SmartOrderLifecycleManager(appContext)
     private val cloudAiRouter = OpenAiDecisionRouter(appContext, settingsStore)
     private val aiValueAttribution = AiValueAttributionEngine(AppDatabase.get(appContext).governanceDao())
     private val aiAdaptiveGovernance = AiAdaptiveGovernanceEngine(
@@ -2746,14 +2748,9 @@ Crypto TradeStation remote commands:
         orders.take(8).forEach { order ->
             val age = (nowSec - order.openedAtEpochSeconds).coerceAtLeast(0L)
             updateStatus("Open order: ${order.side} ${order.symbol} ${order.orderType} remaining=${order.remainingQuantity.stripTrailingZeros().toPlainString()} price=${order.price.stripTrailingZeros().toPlainString()} age=${age}s status=${order.status}", "INFO")
-            if (settings.smartLimitRequote && order.orderType == OrderType.LIMIT && age >= settings.staleOrderTimeoutSeconds) {
-                val cancelled = runCatching { exchange.cancelOrder(order.exchangeOrderId) }.getOrDefault(false)
-                if (cancelled) {
-                    updateStatus("Stale order cancelled for requote: ${order.exchangeOrderId} ${order.symbol} age=${age}s", "LIVE")
-                } else {
-                    updateStatus("Stale order cancel failed or not supported: ${order.exchangeOrderId}", "WARN")
-                }
-            }
+        }
+        smartOrderLifecycle.manage(settings, exchange, orders).forEach { event ->
+            updateStatus("M15 order lifecycle: ${event.message}", event.severity)
         }
     }
 
