@@ -110,7 +110,7 @@ object ExecutionCalibrationMath {
 }
 
 /**
- * M15 bounded open-order lifecycle:
+ * M15 bounded open-order lifecycle with M16 L2 microstructure overlay:
  *
  *   HOLD -> ATOMIC AMEND (price only, post-only) -> hard-timeout CANCEL
  *
@@ -125,6 +125,7 @@ object ExecutionCalibrationMath {
 class SmartOrderLifecycleManager(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences("cts_m15_execution_calibration", Context.MODE_PRIVATE)
+    private val microstructure = MarketMicrostructureEngine()
 
     suspend fun manage(
         settings: BotSettings,
@@ -170,11 +171,38 @@ class SmartOrderLifecycleManager(context: Context) {
                 ?.takeIf { it > BigDecimal.ZERO }
                 ?: BigDecimal.ONE.movePointLeft((symbolInfo?.priceDecimals ?: 8).coerceIn(0, 12))
 
-            // For a BUY we only improve a stale resting price upward toward current best bid.
-            // We never chase downward or cross the ask here.
-            val target = ticker.bid
+            val book = runCatching { exchange.getOrderBook(order.symbol, 25) }.getOrNull()
+            val micro = book?.let {
+                microstructure.evaluate(
+                    orderBook = it,
+                    side = OrderSide.BUY,
+                    requestedQuote = order.remainingQuantity.multiply(
+                        ticker.ask.takeIf { price -> price > BigDecimal.ZERO } ?: order.price
+                    ),
+                    workingPrice = order.price,
+                    tickSize = tick,
+                    fillHorizonSeconds = effectiveStale,
+                    calibrationSamples = calibration.samples,
+                    calibratedMeanFillSeconds = calibration.meanFillSeconds
+                )
+            }
+
+            // M16 only improves a stale BUY when L2 says the current passive price has
+            // weak fill odds AND stepping inward is not strongly adverse. L2 is an
+            // aggregated heuristic, never represented as exact Kraken queue position.
+            val target = micro?.makerTargetPrice
+                ?.takeIf { it > BigDecimal.ZERO && it < ticker.ask }
+                ?: ticker.bid
             val priceImprovement = target.subtract(order.price)
-            val changedByTick = target > BigDecimal.ZERO && priceImprovement >= tick
+            val microAllowsReprice = micro?.let {
+                it.valid &&
+                    it.makerFillProbability < 0.60 &&
+                    it.adverseSelectionRisk < 0.65
+            } ?: false
+            val changedByTick =
+                target > BigDecimal.ZERO &&
+                    priceImprovement >= tick &&
+                    microAllowsReprice
 
             val action = SmartOrderLifecyclePolicy.action(
                 side = order.side,
@@ -217,9 +245,12 @@ class SmartOrderLifecycleManager(context: Context) {
                     if (result.supported && result.amended) {
                         incrementOrderAmendments(order)
                         incrementCalibrationCounter(order.symbol, "amends")
+                        val microText = micro?.let {
+                            "fillHeuristic=${"%.3f".format(it.makerFillProbability)}, adverse=${"%.3f".format(it.adverseSelectionRisk)}, spread=${"%.2f".format(it.spreadBps)}bps, imbalance=${"%.3f".format(it.bookImbalance)}, pressure=${"%.2f".format(it.microPricePressureBps)}bps"
+                        } ?: "microstructure=unavailable"
                         events += SmartOrderLifecycleEvent(
                             "LIVE",
-                            "Atomic amend ${result.amendId}: ${order.symbol} BUY kept ids txid=${order.exchangeOrderId}, cl_ord_id=${order.clientOrderId}; price ${order.price.stripTrailingZeros().toPlainString()} -> ${target.stripTrailingZeros().toPlainString()}, postOnly=true, age=${age}s, adaptiveStale=${effectiveStale}s, predictedFill=${predictedFillSeconds(settings, calibration)}s."
+                            "Atomic amend ${result.amendId}: ${order.symbol} BUY kept ids txid=${order.exchangeOrderId}, cl_ord_id=${order.clientOrderId}; price ${order.price.stripTrailingZeros().toPlainString()} -> ${target.stripTrailingZeros().toPlainString()}, postOnly=true, age=${age}s, adaptiveStale=${effectiveStale}s, predictedFill=${predictedFillSeconds(settings, calibration)}s, $microText."
                         )
                     } else {
                         events += SmartOrderLifecycleEvent(

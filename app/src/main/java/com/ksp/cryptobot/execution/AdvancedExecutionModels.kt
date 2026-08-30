@@ -31,7 +31,8 @@ data class OrderTypeDecision(
     val orderType: OrderType,
     val limitPrice: BigDecimal?,
     val reasonCategory: String,
-    val reason: String
+    val reason: String,
+    val postOnly: Boolean = false
 )
 
 data class AdvancedEntryPlan(
