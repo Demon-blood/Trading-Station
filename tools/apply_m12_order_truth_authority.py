@@ -605,12 +605,6 @@ import com.ksp.cryptobot.core.BalanceInfo
         "M12 LIVE scan reconciliation"
     )
 
-    gate_anchor = '''        if (
-            settings.mode == BotMode.LIVE_AUTO &&
-            settings.exchangeProvider == ExchangeProvider.KRAKEN &&
-            request.side == OrderSide.BUY
-        ) {
-'''
     authority_gate = '''        if (settings.mode != BotMode.PAPER && request.side == OrderSide.BUY) {
             val authority = com.ksp.cryptobot.execution.EngineAuthorityRuntime.canSubmitNewEntry(settings.mode)
             if (!authority.first) {
@@ -620,9 +614,34 @@ import com.ksp.cryptobot.core.BalanceInfo
         }
 
 '''
-    if gate_anchor not in t:
-        fail("M12 engine authority entry-gate anchor missing")
-    t = t.replace(gate_anchor, authority_gate + gate_anchor, 1)
+
+    def patch_authority_gate(text):
+        start_marker = "private suspend fun executeDecisionIfAllowed("
+        end_marker = "private fun estimateOrderBookSlippagePercent("
+        start = text.find(start_marker)
+        if start < 0:
+            fail("M12 executeDecisionIfAllowed start marker missing")
+        end = text.find(end_marker, start + len(start_marker))
+        if end < 0:
+            fail("M12 executeDecisionIfAllowed end marker missing")
+        body = text[start:end]
+
+        if "EngineAuthorityRuntime.canSubmitNewEntry(settings.mode)" in body:
+            fail("M12 distributed authority gate already present")
+
+        execution_marker = "val executionTruth = KrakenPrivateExecutionRegistry.canSubmitNewEntry(request.symbol, request.side)"
+        execution_index = body.find(execution_marker)
+        if execution_index < 0:
+            fail("M12 Kraken execution-state gate marker missing")
+
+        kraken_if_marker = "        if (settings.mode == BotMode.LIVE_AUTO &&"
+        kraken_if_index = body.rfind(kraken_if_marker, 0, execution_index)
+        if kraken_if_index < 0:
+            fail("M12 enclosing Kraken LIVE_AUTO BUY gate missing")
+
+        return text[:start] + body[:kraken_if_index] + authority_gate + body[kraken_if_index:] + text[end:]
+
+    t = patch_authority_gate(t)
     p.write_text(t, encoding="utf-8")
     print("PATCH |", p.relative_to(repo))
 
