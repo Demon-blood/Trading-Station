@@ -1,0 +1,265 @@
+name: M17 Portfolio Correlation & Capital Allocation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cts-m17-portfolio-correlation
+  cancel-in-progress: false
+
+jobs:
+  m17:
+    name: Patch, verify, compile, test and branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require main dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "main" || {
+            echo "M17 must be launched with Run workflow -> main. Current ref=$GITHUB_REF_NAME" >&2
+            exit 1
+          }
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | head -n 1 || true)"
+          fi
+          [ -x "$SDKMANAGER" ] || { echo "sdkmanager missing" >&2; exit 1; }
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply M17
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_m17_portfolio_correlation.py "$GITHUB_WORKSPACE" | tee m17-apply.log
+
+      - name: Verify M17
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m17_portfolio_correlation.py "$GITHUB_WORKSPACE" | tee m17-verify.log
+
+      - name: Verify M16
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m16_market_microstructure.py "$GITHUB_WORKSPACE" | tee m16-verify.log
+
+      - name: Verify M15
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m15_atomic_amend_lifecycle.py "$GITHUB_WORKSPACE" | tee m15-verify.log
+
+      - name: Verify M14
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m14_dms_authority_fencing.py "$GITHUB_WORKSPACE" | tee m14-verify.log
+
+      - name: Verify M13
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m13_private_execution_ledger.py "$GITHUB_WORKSPACE" | tee m13-verify.log
+
+      - name: Verify M12
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m12_order_truth_authority.py "$GITHUB_WORKSPACE" | tee m12-verify.log
+
+      - name: Verify M11
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m11_execution_fail_closed.py "$GITHUB_WORKSPACE" | tee m11-verify.log
+
+      - name: Verify M10
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m10_champion_degradation.py "$GITHUB_WORKSPACE" | tee m10-verify.log
+
+      - name: Verify M9
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m9_champion_challenger.py "$GITHUB_WORKSPACE" | tee m9-verify.log
+
+      - name: Verify M8
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m8_ai_adaptive_governance.py "$GITHUB_WORKSPACE" | tee m8-verify.log
+
+      - name: Verify M7
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m7_ai_value_attribution.py "$GITHUB_WORKSPACE" | tee m7-verify.log
+
+      - name: Verify M6
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m6_selective_ai.py "$GITHUB_WORKSPACE" | tee m6-verify.log
+
+      - name: Verify M5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m5_trade_economics.py "$GITHUB_WORKSPACE" | tee m5-verify.log
+
+      - name: Verify M4
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m4_execution_hardening.py "$GITHUB_WORKSPACE" | tee m4-verify.log
+
+      - name: Verify M3.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m32_kraken_websocket.py "$GITHUB_WORKSPACE" | tee m32-verify.log
+
+      - name: Verify M3
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_m3_runtime_host.py "$GITHUB_WORKSPACE" | tee m3-verify.log
+
+      - name: Verify canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_canonical_v407.py "$GITHUB_WORKSPACE" | tee canonical-verify.log
+
+      - name: Compile debug Kotlin
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:compileDebugKotlin 2>&1 | tee compile-debug.log
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee unit-tests.log
+
+      - name: Assemble verification APK
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug 2>&1 | tee apk-build.log
+
+      - name: Show controlled M17 diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          {
+            git diff --name-only -- app
+            git ls-files --others --exclude-standard -- app
+          } | sort -u | tee m17-files.txt
+
+      - name: Create M17 branch
+        id: branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="milestone/m17-portfolio-correlation-${GITHUB_RUN_NUMBER}"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add app
+          git diff --cached --quiet && { echo "No M16 app changes to commit" >&2; exit 1; }
+          git commit -m "M17 portfolio correlation and capital allocation"
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Create pull request
+        id: pr
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        shell: bash
+        run: |
+          gh pr create \
+            --base main \
+            --head "$BRANCH_NAME" \
+            --title "M17: portfolio correlation and capital allocation" \
+            --body "Adds account-aware EUR equity/reserve controls, live position exposure, aligned H1 return correlations with >=30-pair evidence, single-asset/common-factor caps, conservative unknown-correlation fallback, and reduction-only capital allocation."
+
+      - name: PR fallback
+        if: steps.pr.outcome != 'success'
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          echo "::warning::M17 branch pushed but PR creation was blocked. Open a PR from $BRANCH_NAME into main."
+
+      - name: Upload M17 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CTS-M17-portfolio-correlation-${{ github.run_number }}
+          path: |
+            m17-apply.log
+            m17-verify.log
+            m16-verify.log
+            m15-verify.log
+            m14-verify.log
+            m13-verify.log
+            m12-verify.log
+            m11-verify.log
+            m10-verify.log
+            m9-verify.log
+            m8-verify.log
+            m7-verify.log
+            m6-verify.log
+            m5-verify.log
+            m4-verify.log
+            m32-verify.log
+            m3-verify.log
+            canonical-verify.log
+            compile-debug.log
+            unit-tests.log
+            apk-build.log
+            m17-files.txt
+            app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 30
