@@ -38,11 +38,18 @@ class RecommendationEngine(
             val liquidityBoost = if (ticker.volume24h > BigDecimal("10000000")) 5 else 0
             val spreadPenalty = riskEngine.spreadPercent(ticker).toDouble().let { if (it > 0.20) 5 else 0 }
             val finalScore = (selected.score + liquidityBoost - spreadPenalty).coerceIn(0, 100)
+            val selectedEntryAllowed =
+                selected.action == SignalAction.BUY || selected.action == SignalAction.SMALL_BUY
             val action = when {
                 risk > BigDecimal("15") -> SignalAction.WAIT
                 selected.action == SignalAction.SELL -> SignalAction.SELL
-                finalScore >= settings.minStrategyScoreToBuy + 10 -> SignalAction.BUY
-                finalScore >= settings.minStrategyScoreToBuy -> SignalAction.SMALL_BUY
+                !selectedEntryAllowed -> selected.action
+                selected.action == SignalAction.SMALL_BUY &&
+                    finalScore >= settings.minStrategyScoreToBuy -> SignalAction.SMALL_BUY
+                selected.action == SignalAction.BUY &&
+                    finalScore >= settings.minStrategyScoreToBuy + 10 -> SignalAction.BUY
+                selected.action == SignalAction.BUY &&
+                    finalScore >= settings.minStrategyScoreToBuy -> SignalAction.SMALL_BUY
                 finalScore >= 58 -> SignalAction.WATCH
                 finalScore >= 45 -> SignalAction.WAIT
                 else -> SignalAction.AVOID
@@ -60,7 +67,6 @@ class RecommendationEngine(
         val fallbackScore = computeFallbackScore(ticker, risk)
         val fallbackAction = when {
             risk > BigDecimal("12") -> SignalAction.WAIT
-            fallbackScore >= 75 -> SignalAction.SMALL_BUY
             fallbackScore >= 60 -> SignalAction.WATCH
             fallbackScore >= 45 -> SignalAction.WAIT
             else -> SignalAction.AVOID
@@ -72,7 +78,7 @@ class RecommendationEngine(
             score = fallbackScore,
             riskPercent = risk,
             taxWarning = taxEstimate.warning,
-            reason = "Fallback momentum mode: 24h momentum=${ticker.priceChangePercent24h}%, estimated risk=$risk%, spread=${riskEngine.spreadPercent(ticker)}%."
+            reason = "M18 non-trading fallback: no truth-validated strategy candidate/candle set is available. 24h momentum=${ticker.priceChangePercent24h}%, estimated risk=$risk%, spread=${riskEngine.spreadPercent(ticker)}%. Fallback may observe but cannot authorize BUY."
         )
     }
 
