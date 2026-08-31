@@ -2132,7 +2132,8 @@ Crypto TradeStation remote commands:
                 orderBook = advancedOrderBook,
                 mode = if (settings.mode == BotMode.PAPER) "PAPER" else "LIVE",
                 currentUseMarket = useMarketOrder,
-                feeSchedule = advancedFeeSchedule
+                feeSchedule = advancedFeeSchedule,
+                exchange = exchange
             )
             updateStatus("[${ticker.symbol}] Advanced execution plan: allowed=${advancedPlan.allowed}, final=${advancedPlan.finalQuote.setScale(2, RoundingMode.DOWN)}, order=${advancedPlan.orderType}, protection=${advancedPlan.protectionLevel}, size×${advancedPlan.combinedMultiplier}. ${advancedPlan.reason.take(260)}", if (advancedPlan.allowed) "INFO" else "WARN")
             if (!advancedPlan.allowed) {

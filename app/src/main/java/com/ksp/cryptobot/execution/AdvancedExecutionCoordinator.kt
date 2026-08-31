@@ -19,6 +19,7 @@ class AdvancedExecutionCoordinator(
 ) {
     private val capitalProtection = CapitalProtectionEngine()
     private val portfolioAllocation = PortfolioAllocationEngine()
+    private val portfolioCorrelation = PortfolioCorrelationEngine()
     private val liquiditySizer = LiquidityAwareSizer()
     private val orderTypeOptimizer = OrderTypeOptimizer()
     private val tradeEconomics = TradeEconomicsEngine()
@@ -32,7 +33,8 @@ class AdvancedExecutionCoordinator(
         orderBook: OrderBookSnapshot?,
         mode: String,
         currentUseMarket: Boolean,
-        feeSchedule: TradingFeeSchedule? = null
+        feeSchedule: TradingFeeSchedule? = null,
+        exchange: CryptoExchangeClient? = null
     ): AdvancedEntryPlan {
         if (requestedQuote <= BigDecimal.ZERO) return AdvancedEntryPlan(false, BigDecimal.ZERO, OrderType.LIMIT, ticker.ask, BigDecimal.ZERO, 0, "requested quote is zero")
         val directive = ResearchExecutionRuntime.snapshot(decision.symbol)
@@ -60,6 +62,37 @@ class AdvancedExecutionCoordinator(
         }
         val trades = appDao.recentTradesSnapshot(500)
         val positions = appDao.openPositionsSnapshot()
+
+        var portfolioCorrelationContext: PortfolioCorrelationContext? = null
+        if (settings.portfolioBalancerEnabled && exchange != null) {
+            val portfolioContextResult = runCatching {
+                portfolioCorrelation.assess(
+                    settings = settings,
+                    exchange = exchange,
+                    candidateSymbol = decision.symbol,
+                    requestedQuote = researchCappedQuote,
+                    positions = positions
+                )
+            }
+            if (portfolioContextResult.isFailure) {
+                val error = portfolioContextResult.exceptionOrNull()
+                val reason = "M17 portfolio context unavailable: ${error?.message ?: error?.javaClass?.simpleName ?: "unknown"}. LIVE entry fails closed because account-level reserve/exposure state is not authoritative."
+                record("portfolio_correlation", decision.symbol, settings, mode, requestedQuote, BigDecimal.ZERO, BigDecimal.ZERO,
+                    "", "context_unavailable", sizeBand(requestedQuote), "", "blocked", settings.mode != BotMode.PAPER, reason,
+                    if (settings.mode == BotMode.PAPER) "WARN" else "HIGH")
+                if (settings.mode != BotMode.PAPER) {
+                    return AdvancedEntryPlan(false, BigDecimal.ZERO, OrderType.LIMIT, ticker.ask, BigDecimal.ZERO, 0, reason)
+                }
+            } else {
+                portfolioCorrelationContext = portfolioContextResult.getOrNull()
+                portfolioCorrelationContext?.let { context ->
+                    record("portfolio_correlation", decision.symbol, settings, mode, requestedQuote, requestedQuote,
+                        context.correlationMultiplier, "", "correlation_context", sizeBand(requestedQuote), "",
+                        "normal", false, context.reason, "INFO")
+                }
+            }
+        }
+
         val protection = capitalProtection.evaluate(settings, trades, mode)
         record("capital_protection", decision.symbol, settings, mode, requestedQuote, requestedQuote.multiply(protection.sizeMultiplier), protection.sizeMultiplier,
             "", "capital_protection", sizeBand(requestedQuote), "", if (protection.allowed) "normal" else "blocked", !protection.allowed, protection.reason, if (protection.allowed) "INFO" else "HIGH")
@@ -67,7 +100,14 @@ class AdvancedExecutionCoordinator(
 
         val productionMultiplier = BigDecimal.valueOf(ProductionIntelligenceRuntime.snapshot().sizeMultiplier.coerceIn(0.0, 1.0))
         val afterProduction = researchCappedQuote.multiply(productionMultiplier).multiply(protection.sizeMultiplier).setScale(2, RoundingMode.DOWN)
-        val allocation = portfolioAllocation.allocate(settings, decision, afterProduction, trades, positions)
+        val allocation = portfolioAllocation.allocate(
+            settings = settings,
+            decision = decision,
+            requestedQuote = afterProduction,
+            recentTrades = trades,
+            positions = positions,
+            correlation = portfolioCorrelationContext
+        )
         record("portfolio_allocation", decision.symbol, settings, mode, afterProduction, allocation.finalQuote, allocation.multiplier,
             "", "portfolio", sizeBand(afterProduction), "", if (allocation.allowed) "normal" else "blocked", !allocation.allowed, allocation.reason, if (allocation.allowed) "INFO" else "HIGH")
         if (!allocation.allowed) return AdvancedEntryPlan(false, BigDecimal.ZERO, OrderType.LIMIT, ticker.ask, BigDecimal.ZERO, protection.level, allocation.reason)
