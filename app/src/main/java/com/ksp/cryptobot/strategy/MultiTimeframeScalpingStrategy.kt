@@ -88,7 +88,7 @@ class MultiTimeframeScalpingStrategy {
             suggestedTakeProfitPercent = takeProfitPercent,
             suggestedStopLossPercent = stopLossPercent,
             action = action,
-            explanation = "Recovered scalping strategy: ${trendAgreement}/3 timeframe trend agreement, score=$score, TP≈$takeProfitPercent%, SL≈$stopLossPercent%. ${notes.joinToString("; ")}"
+            explanation = "Defined MTF EMA/OBV scalper: ${trendAgreement}/3 timeframe trend agreement, score=$score, TP≈$takeProfitPercent%, SL≈$stopLossPercent%. ${notes.joinToString("; ")}"
         )
     }
 }
