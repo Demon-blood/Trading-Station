@@ -11,6 +11,7 @@ import com.ksp.cryptobot.exchange.CryptoExchangeClient
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToLong
 
 enum class SmartOrderLifecycleAction { HOLD, AMEND, CANCEL }
@@ -29,6 +30,21 @@ data class ExecutionCalibrationSnapshot(
 ) {
     val amendmentsPerCompletedFill: Double
         get() = if (samples <= 0) 0.0 else totalAmendments.toDouble() / samples.toDouble()
+}
+
+object ExecutionCalibrationRuntime {
+    private val snapshots = ConcurrentHashMap<String, ExecutionCalibrationSnapshot>()
+
+    private fun key(symbol: String): String =
+        symbol.uppercase().replace("/", "").replace("-", "").replace("_", "")
+
+    fun publish(symbol: String, snapshot: ExecutionCalibrationSnapshot) {
+        snapshots[key(symbol)] = snapshot
+    }
+
+    fun snapshot(symbol: String): ExecutionCalibrationSnapshot? = snapshots[key(symbol)]
+    fun all(): Map<String, ExecutionCalibrationSnapshot> = snapshots.toMap()
+    fun clearAll() = snapshots.clear()
 }
 
 object SmartOrderLifecyclePolicy {
@@ -295,13 +311,15 @@ class SmartOrderLifecycleManager(context: Context) {
 
     fun calibration(symbol: String): ExecutionCalibrationSnapshot {
         val key = symbolKey(symbol)
-        return ExecutionCalibrationSnapshot(
+        val snapshot = ExecutionCalibrationSnapshot(
             samples = prefs.getInt("${key}_samples", 0),
             meanFillSeconds = prefs.getString("${key}_mean_fill_sec", "0")?.toDoubleOrNull() ?: 0.0,
             meanSlippageBps = prefs.getString("${key}_mean_slippage_bps", "0")?.toDoubleOrNull() ?: 0.0,
             totalAmendments = prefs.getLong("${key}_amends", 0L),
             totalCancels = prefs.getLong("${key}_cancels", 0L)
         )
+        ExecutionCalibrationRuntime.publish(symbol, snapshot)
+        return snapshot
     }
 
     private suspend fun harvestClosedOrders(
