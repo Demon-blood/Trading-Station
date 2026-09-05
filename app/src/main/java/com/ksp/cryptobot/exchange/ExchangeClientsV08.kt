@@ -12,6 +12,7 @@ import java.math.RoundingMode
 import java.security.MessageDigest
 import com.ksp.cryptobot.core.BalanceInfo
 import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
+import com.ksp.cryptobot.observability.M23RemoteOperationsRuntime
 
 /**
  * v1.3 Kraken-live exchange layer.
@@ -709,6 +710,10 @@ class KrakenSpotClient(
             val securityGate = KrakenApiKeySecurityRuntime.gateForNewBuy(apiKey)
             if (!securityGate.first) {
                 error("M22 Kraken API-key security gate blocks BUY: ${securityGate.second}")
+            }
+            val remoteSafetyGate = M23RemoteOperationsRuntime.canSubmitNewEntry()
+            if (!remoteSafetyGate.first) {
+                error("M23 remote-operations safety gate blocks BUY: ${remoteSafetyGate.second}")
             }
         }
         val rule = resolvePairRule(request.symbol)
