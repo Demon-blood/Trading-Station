@@ -279,12 +279,20 @@ class MarketMicrostructureEngine {
 
         val spreadScore = (1.0 - spreadBps / 100.0).coerceIn(0.20, 1.0)
 
+        val governanceOffset =
+            com.ksp.cryptobot.governance.LearningGovernanceRuntime
+                .snapshot()
+                .bounds
+                .fillProbabilityOffset
+                .coerceIn(-0.08, 0.0)
+
         return (
             0.10 +
                 0.35 * placementScore +
                 0.25 * opposingPressure +
                 0.20 * calibrationScore +
-                0.10 * spreadScore
+                0.10 * spreadScore +
+                governanceOffset
             ).coerceIn(0.02, 0.98)
     }
 

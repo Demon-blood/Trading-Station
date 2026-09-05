@@ -44,7 +44,13 @@ object SmartOrderLifecyclePolicy {
         if (calibrationSamples < 3 || !meanFillSeconds.isFinite() || meanFillSeconds <= 0.0) {
             return configured
         }
-        val learned = (meanFillSeconds * 1.25).roundToLong()
+        val governanceMultiplier =
+            com.ksp.cryptobot.governance.LearningGovernanceRuntime
+                .snapshot()
+                .bounds
+                .staleTimingMultiplier
+                .coerceIn(0.75, 1.0)
+        val learned = (meanFillSeconds * 1.25 * governanceMultiplier).roundToLong()
         return learned.coerceIn(
             (configured / 2L).coerceAtLeast(15L),
             (configured * 2L).coerceAtLeast(30L)
@@ -194,9 +200,15 @@ class SmartOrderLifecycleManager(context: Context) {
                 ?.takeIf { it > BigDecimal.ZERO && it < ticker.ask }
                 ?: ticker.bid
             val priceImprovement = target.subtract(order.price)
+            val governedFillThreshold =
+                com.ksp.cryptobot.governance.LearningGovernanceRuntime
+                    .snapshot()
+                    .bounds
+                    .amendFillProbabilityThreshold
+                    .coerceIn(0.45, 0.60)
             val microAllowsReprice = micro?.let {
                 it.valid &&
-                    it.makerFillProbability < 0.60 &&
+                    it.makerFillProbability < governedFillThreshold &&
                     it.adverseSelectionRisk < 0.65
             } ?: false
             val changedByTick =

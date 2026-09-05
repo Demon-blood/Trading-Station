@@ -86,7 +86,9 @@ class BotController(
     private val proAutomationSuite = ProAutomationSuite(appContext)
     private val autonomousPack = AutonomousIntelligencePack(appContext)
     private val liveVerificationEngine = LiveVerificationEngine()
-    private val selfLearningEngine = TrueSelfLearningEngine()
+    private val selfLearningEngine = TrueSelfLearningEngine(
+        AppDatabase.get(appContext).governanceDao()
+    )
     private val productionIntelligence = ProductionIntelligenceEngine(AppDatabase.get(appContext).governanceDao())
     private val researchIntelligence = ResearchCoordinator(appContext, AppDatabase.get(appContext).researchDao())
     private val advancedExecution = AdvancedExecutionCoordinator(dao, AppDatabase.get(appContext).governanceDao())
