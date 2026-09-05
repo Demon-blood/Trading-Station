@@ -1,0 +1,188 @@
+name: Android Signed Release APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-signed-release:
+    name: Build and attest signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configure Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | head -n 1 || true)"
+          fi
+          [ -x "$SDKMANAGER" ] || {
+            echo "sdkmanager not found" >&2
+            exit 1
+          }
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Require production signing secrets
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_EXPECTED_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          for value in "$KEYSTORE_B64" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" "$EXPECTED_CERT_SHA256"; do
+            [ -n "$value" ] || {
+              echo "Required Android production signing secret is missing." >&2
+              exit 1
+            }
+          done
+
+      - name: Restore release signing material
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > app/release-keystore.jks
+          test -s app/release-keystore.jks
+          cat > signing.properties <<EOF
+          storeFile=release-keystore.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+          chmod 600 app/release-keystore.jks signing.properties
+
+      - name: Verify dependency metadata exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s gradle/verification-metadata.xml || {
+            echo "M22 dependency verification metadata is missing. Refusing production release." >&2
+            exit 1
+          }
+
+      - name: Build signed release APK
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon clean :app:assembleRelease 2>&1 | tee release-build.log
+
+      - name: Verify APK signature and pinned certificate
+        shell: bash
+        env:
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_EXPECTED_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK" && test -s "$APK"
+
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          [ -x "$APKSIGNER" ] || {
+            echo "apksigner missing" >&2
+            exit 1
+          }
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee release-signing-certificate.txt
+
+          ACTUAL_CERT="$(
+            awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' release-signing-certificate.txt \
+              | tr -d ':[:space:]' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+          EXPECTED_CERT="$(
+            printf '%s' "$EXPECTED_CERT_SHA256" \
+              | tr -d ':[:space:]' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+
+          [ -n "$ACTUAL_CERT" ] || {
+            echo "Could not extract release signer SHA-256." >&2
+            exit 1
+          }
+          [ "$ACTUAL_CERT" = "$EXPECTED_CERT" ] || {
+            echo "Release signer SHA-256 does not match ANDROID_EXPECTED_CERT_SHA256." >&2
+            exit 1
+          }
+
+          DEBUG_KEY=""
+          for candidate in \
+            keystore/cts_debug_update_key.jks \
+            app/keystore/cts_debug_update_key.jks; do
+            if [ -s "$candidate" ]; then
+              DEBUG_KEY="$candidate"
+              break
+            fi
+          done
+          if [ -n "$DEBUG_KEY" ]; then
+            DEBUG_CERT="$(
+              keytool -exportcert \
+                -keystore "$DEBUG_KEY" \
+                -storepass ctsdebug \
+                -alias ctsdebug 2>/dev/null \
+                | sha256sum \
+                | awk '{print toupper($1)}'
+            )"
+            [ "$ACTUAL_CERT" != "$DEBUG_CERT" ] || {
+              echo "Production APK is signed with the committed CTS debug update certificate. Refusing release." >&2
+              exit 1
+            }
+          fi
+
+          sha256sum "$APK" | tee release-sha256.txt
+          printf 'verified_release_apk=%s\nsigner_sha256=%s\n' "$APK" "$ACTUAL_CERT" \
+            > release-integrity-summary.txt
+
+      - name: Upload signed release and integrity evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: CryptoTradeStation-signed-release
+          path: |
+            app/build/outputs/apk/release/*.apk
+            release-build.log
+            release-signing-certificate.txt
+            release-sha256.txt
+            release-integrity-summary.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Destroy temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f app/release-keystore.jks signing.properties
