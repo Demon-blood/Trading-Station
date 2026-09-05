@@ -23,6 +23,7 @@ class AdvancedExecutionCoordinator(
     private val liquiditySizer = LiquidityAwareSizer()
     private val orderTypeOptimizer = OrderTypeOptimizer()
     private val tradeEconomics = TradeEconomicsEngine()
+    private val netProfitOptimizer = NetProfitCostOptimizer()
     private val aiValueAttribution = AiValueAttributionEngine(governanceDao)
 
     suspend fun prepareEntry(
@@ -268,12 +269,56 @@ class AdvancedExecutionCoordinator(
             return AdvancedEntryPlan(false, finalQuote, finalOrderType, finalLimitOrTrigger, BigDecimal.ZERO, protection.level, reason)
         }
 
+        val m20ExecutionQuality = runCatching {
+            governanceDao.executionQuality(decision.symbol, "BUY", mode, 100)
+        }.getOrDefault(emptyList())
+        val m20AdvancedExecution = runCatching {
+            governanceDao.recentAdvancedExecution(500)
+        }.getOrDefault(emptyList())
+        val m20GovernanceEvents = runCatching {
+            governanceDao.recentEventsForSymbol(decision.symbol, 100)
+        }.getOrDefault(emptyList())
+        val netProfit = netProfitOptimizer.evaluate(
+            NetProfitCostInput(
+                economics = economics,
+                recentTrades = trades,
+                executionQuality = m20ExecutionQuality,
+                advancedExecution = m20AdvancedExecution,
+                governanceEvents = m20GovernanceEvents,
+                calibration = ExecutionCalibrationRuntime.snapshot(decision.symbol),
+                maxTradesPerDay = settings.maxTradesPerDay,
+                currentMode = mode,
+                explicitInfrastructureCostQuote = BigDecimal.ZERO
+            )
+        )
+        record(
+            "net_profit_optimizer",
+            decision.symbol,
+            settings,
+            mode,
+            requestedQuote,
+            finalQuote,
+            netProfit.adjustedNetExpectedValueRate,
+            finalOrderType.name,
+            if (netProfit.allowed) "positive_adjusted_net_ev" else "insufficient_adjusted_net_ev",
+            sizeBand(requestedQuote),
+            "",
+            if (netProfit.allowed) "normal" else "blocked",
+            !netProfit.allowed,
+            netProfit.reason,
+            if (netProfit.allowed) "INFO" else "WARN"
+        )
+        if (!netProfit.allowed) {
+            val reason = "M20 net-profit optimizer blocked entry: ${netProfit.reason}"
+            return AdvancedEntryPlan(false, finalQuote, finalOrderType, finalLimitOrTrigger, BigDecimal.ZERO, protection.level, reason)
+        }
+
         val combined = finalQuote.divide(requestedQuote, 6, RoundingMode.HALF_UP).coerceIn(BigDecimal.ZERO, BigDecimal.ONE)
         record("order_type", decision.symbol, settings, mode, requestedQuote, finalQuote, combined,
-            finalOrderType.name, if (directive?.preferredOrderType != null) "handoff_source_order" else optimizedOrder.reasonCategory, sizeBand(requestedQuote), "", "normal", false, optimizedOrder.reason + " | " + economics.reason, "INFO")
+            finalOrderType.name, if (directive?.preferredOrderType != null) "handoff_source_order" else optimizedOrder.reasonCategory, sizeBand(requestedQuote), "", "normal", false, optimizedOrder.reason + " | " + economics.reason + " | " + netProfit.reason, "INFO")
         val postOnly = finalPostOnly
         val handoff = directive?.let { " | handoff=${it.strategyId}/${it.fidelity}/truth=${it.liveTruthGate}/fee=${it.feeSource}/postOnly=$postOnly" }.orEmpty()
-        val reason = "advanced entry plan: requested=${requestedQuote.s2()}, researchCap=${researchCappedQuote.s2()}, final=${finalQuote.s2()}, combined×${combined.setScale(3, RoundingMode.HALF_UP)}, protection=${protection.level}, order=$finalOrderType.$handoff ${allocation.reason} | ${liquidity.reason} | ${optimizedOrder.reason} | ${economics.reason}"
+        val reason = "advanced entry plan: requested=${requestedQuote.s2()}, researchCap=${researchCappedQuote.s2()}, final=${finalQuote.s2()}, combined×${combined.setScale(3, RoundingMode.HALF_UP)}, protection=${protection.level}, order=$finalOrderType.$handoff ${allocation.reason} | ${liquidity.reason} | ${optimizedOrder.reason} | ${economics.reason} | ${netProfit.reason}"
         record("entry_plan", decision.symbol, settings, mode, requestedQuote, finalQuote, combined,
             finalOrderType.name, "final_plan", sizeBand(requestedQuote), "", "normal", false, reason, "INFO")
         return AdvancedEntryPlan(true, finalQuote, finalOrderType, finalLimitOrTrigger, combined, protection.level, reason, postOnly = postOnly)
