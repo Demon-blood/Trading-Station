@@ -23,7 +23,7 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def main():
-    print("INFO | M24 applier revision v1")
+    print("INFO | M24 applier revision v2")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     if not (repo / ".git").exists():
         fail("Not a git checkout")
@@ -174,20 +174,22 @@ def main():
         "M24 conservative cross-platform acquisition"
     )
 
-    # All holder snapshots in acquisition/heartbeat scopes now retain platform identity.
-    old_holder = '''                holderEngineId = holder,
+    # Acquisition has two holder-bearing snapshots: HELD and HELD_BY_OTHER/INVALID_FENCE.
+    # Heartbeat snapshots are deeper-indented and are patched separately below.
+    acquisition_holder = '''                holderEngineId = holder,
                 expiresAtEpochMs = expires,
 '''
-    holder_count = t.count(old_holder)
-    if holder_count < 3:
-        fail(f"M24 holder platform snapshots: expected at least 3 matches, got {holder_count}")
+    acquisition_holder_count = t.count(acquisition_holder)
+    if acquisition_holder_count != 2:
+        fail(f"M24 acquisition holder platform snapshots: expected 2 matches, got {acquisition_holder_count}")
     t = t.replace(
-        old_holder,
+        acquisition_holder,
         '''                holderEngineId = holder,
                 localPlatform = LOCAL_PLATFORM,
                 holderPlatform = holderPlatform,
                 expiresAtEpochMs = expires,
-'''
+''',
+        2
     )
 
     t = replace_once(
@@ -237,6 +239,24 @@ def main():
                         )
 ''',
         "M24 conservative heartbeat"
+    )
+
+    # Heartbeat has two holder-bearing snapshots: HELD and LOST. Their indentation
+    # differs from acquisition, so keep this as an independent exact contract.
+    heartbeat_holder = '''                                holderEngineId = holder,
+                                expiresAtEpochMs = expires,
+'''
+    heartbeat_holder_count = t.count(heartbeat_holder)
+    if heartbeat_holder_count != 2:
+        fail(f"M24 heartbeat holder platform snapshots: expected 2 matches, got {heartbeat_holder_count}")
+    t = t.replace(
+        heartbeat_holder,
+        '''                                holderEngineId = holder,
+                                localPlatform = LOCAL_PLATFORM,
+                                holderPlatform = holderPlatform,
+                                expiresAtEpochMs = expires,
+''',
+        2
     )
 
     t = replace_once(
