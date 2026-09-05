@@ -152,6 +152,8 @@ object KrakenPrivateExecutionRegistry {
     private var lastError = ""
     private var lastRestReconciliationMs = 0L
     private var lastRestOpenOrderCount = 0
+    private var recoveryReady = false
+    private var recoveryReason = "Process start requires authoritative reconciliation."
 
     private var connectJob: Job? = null
     private var reconnectJob: Job? = null
@@ -159,6 +161,7 @@ object KrakenPrivateExecutionRegistry {
 
     private val reportsByOrder = linkedMapOf<String, ExecutionReport>()
     private val recentReports = ArrayDeque<ExecutionReport>()
+    private val executionIds = IdempotentExecutionIdFilter()
     private val pending = linkedMapOf<String, PendingSubmission>()
     private val ambiguous = linkedMapOf<String, PendingSubmission>()
 
@@ -205,8 +208,11 @@ object KrakenPrivateExecutionRegistry {
                 subscribed = false
                 snapshotComplete = false
                 lastSequence = 0L
+                recoveryReady = false
+                recoveryReason = "Kraken credentials changed; full authoritative reconciliation required."
                 reportsByOrder.clear()
                 recentReports.clear()
+                executionIds.clear()
             } else if (state == "STOPPED") {
                 state = "IDLE"
             }
@@ -239,8 +245,11 @@ object KrakenPrivateExecutionRegistry {
             socket = null
             reportsByOrder.clear()
             recentReports.clear()
+            executionIds.clear()
             pending.clear()
             ambiguous.clear()
+            recoveryReady = false
+            recoveryReason = "Private execution host stopped; reconciliation required before BUY."
         }
         runCatching { ws?.close(1000, "CTS private execution host stopped") }
     }
@@ -256,6 +265,8 @@ object KrakenPrivateExecutionRegistry {
                 snapshotComplete = false
                 lastSequence = 0L
                 lastMessageMs = 0L
+                recoveryReady = false
+                recoveryReason = "Validated network lost; authoritative reconciliation required."
                 reportsByOrder.clear()
                 wsToCancel = socket
                 socket = null
@@ -277,6 +288,24 @@ object KrakenPrivateExecutionRegistry {
             lastRestOpenOrderCount = openOrders.coerceAtLeast(0)
             if (state == "REST_ONLY" || state == "ERROR") lastError = ""
         }
+    }
+
+    fun markRecoveryUnknown(reason: String) {
+        synchronized(lock) {
+            recoveryReady = false
+            recoveryReason = reason.take(300)
+        }
+    }
+
+    fun markRecoveryReconciled(reason: String) {
+        synchronized(lock) {
+            recoveryReady = true
+            recoveryReason = reason.take(300)
+        }
+    }
+
+    fun recoveryFence(): Pair<Boolean, String> = synchronized(lock) {
+        recoveryReady to recoveryReason
     }
 
     fun markSubmissionPending(clientOrderId: String, symbol: String, side: OrderSide) {
@@ -329,6 +358,10 @@ object KrakenPrivateExecutionRegistry {
 
     fun canSubmitNewEntry(symbol: String, side: OrderSide): Pair<Boolean, String> = synchronized(lock) {
         if (side != OrderSide.BUY) return@synchronized true to "Protective/exit side is not entry-gated."
+
+        if (!recoveryReady) {
+            return@synchronized false to "M21 recovery fence blocks new BUY: $recoveryReason"
+        }
 
         val canonical = normalizeSymbol(symbol)
         if (ambiguous.isNotEmpty()) {
@@ -510,16 +543,24 @@ object KrakenPrivateExecutionRegistry {
         val data = root.optJSONArray("data") ?: JSONArray()
 
         synchronized(lock) {
-            if (type == "update" && sequence > 0L && lastSequence > 0L && sequence != lastSequence + 1L) {
-                state = "SEQUENCE_GAP"
-                snapshotComplete = false
-                subscribed = false
-                lastError = "Kraken executions sequence gap: expected=${lastSequence + 1L}, actual=$sequence"
-                reportsByOrder.clear()
-                socket = null
-                runCatching { webSocket.cancel() }
-                scheduleReconnect(immediate = false)
-                return
+            when (PrivateExecutionSequencePolicy.classify(lastSequence, sequence, type)) {
+                PrivateSequenceDisposition.DUPLICATE -> return
+                PrivateSequenceDisposition.STALE_OR_OUT_OF_ORDER,
+                PrivateSequenceDisposition.GAP -> {
+                    state = "SEQUENCE_GAP"
+                    snapshotComplete = false
+                    subscribed = false
+                    recoveryReady = false
+                    recoveryReason = "Private execution sequence continuity lost; full reconciliation required."
+                    lastError = "Kraken executions sequence discontinuity: previous=$lastSequence actual=$sequence"
+                    reportsByOrder.clear()
+                    socket = null
+                    runCatching { webSocket.cancel() }
+                    scheduleReconnect(immediate = false)
+                    return
+                }
+                PrivateSequenceDisposition.INITIAL,
+                PrivateSequenceDisposition.ACCEPT_NEXT -> Unit
             }
 
             if (type == "snapshot") {
@@ -530,6 +571,7 @@ object KrakenPrivateExecutionRegistry {
             for (i in 0 until data.length()) {
                 val item = data.optJSONObject(i) ?: continue
                 val report = parseReport(item, sequence)
+                if (!executionIds.accept(report.executionId)) continue
                 if (report.orderId.isNotBlank()) reportsByOrder[report.orderId] = report
                 if (report.clientOrderId.isNotBlank()) {
                     pending.remove(report.clientOrderId)
@@ -587,6 +629,8 @@ object KrakenPrivateExecutionRegistry {
             state = if (networkAvailable) "DISCONNECTED" else "NETWORK_DOWN"
             subscribed = false
             snapshotComplete = false
+            recoveryReady = false
+            recoveryReason = "Private execution transport disconnected; reconciliation required."
             lastSequence = 0L
             lastMessageMs = 0L
             reportsByOrder.clear()
@@ -633,6 +677,8 @@ object KrakenPrivateExecutionRegistry {
                         state = "SILENT"
                         subscribed = false
                         snapshotComplete = false
+                        recoveryReady = false
+                        recoveryReason = "Private execution stream became silent; reconciliation required."
                         lastSequence = 0L
                         lastError = "No authenticated Kraken message within ${SILENCE_DEADLINE_MS}ms"
                         reportsByOrder.clear()
