@@ -114,20 +114,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x gradlew
-          ./gradlew :app:compileDebugKotlin --stacktrace | tee m23-kotlin-compile.log
+          gradle --no-daemon :app:compileDebugKotlin --stacktrace | tee m23-kotlin-compile.log
 
       - name: Unit tests
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew :app:testDebugUnitTest --stacktrace | tee m23-unit-tests.log
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace | tee m23-unit-tests.log
 
       - name: Assemble debug APK
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew :app:assembleDebug --stacktrace | tee m23-apk.log
+          gradle --no-daemon :app:assembleDebug --stacktrace | tee m23-apk.log
 
       - name: Verify controlled M23 diff
         shell: bash
