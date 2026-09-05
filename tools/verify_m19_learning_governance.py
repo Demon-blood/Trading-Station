@@ -7,7 +7,7 @@ def read(path):
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 def main():
-    print("INFO | M19 verifier revision v1")
+    print("INFO | M19 verifier revision v1.1")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
     truth = read(repo / "app/src/main/java/com/ksp/cryptobot/strategy/StrategyTruthRegistry.kt")
@@ -123,7 +123,8 @@ def main():
         "online learning is monotonic by action authority":
             "object LearningMonotonicPolicy" in governance and
             "SignalAction.WAIT -> if (score < 45) SignalAction.AVOID else SignalAction.WAIT" in governance and
-            "SignalAction.AVOID -> SignalAction.AVOID" in governance,
+            "SignalAction.AVOID -> SignalAction.AVOID" in governance and
+            "SignalAction.STRONG_AVOID -> SignalAction.STRONG_AVOID" in governance,
 
         "SMALL_BUY cannot become BUY":
             "SignalAction.SMALL_BUY -> when" in governance and
@@ -175,10 +176,11 @@ def main():
             "This is NOT exchange queue position" in micro and
             "L2 is aggregated depth, not exact queue position." in micro,
 
-        "monotonic regression tests cover WAIT WATCH AVOID and SMALL_BUY":
+        "monotonic regression tests cover WAIT WATCH AVOID STRONG_AVOID and SMALL_BUY":
             "waitCanNeverBecomeEntry" in mono_tests and
             "watchCanNeverBecomeEntry" in mono_tests and
             "avoidCanNeverBecomeEntry" in mono_tests and
+            "strongAvoidCanNeverBecomeEntry" in mono_tests and
             "smallBuyCanNeverUpgradeToFullBuy" in mono_tests,
 
         "drift regression tests cover unknown evidence and rollback":

@@ -17,6 +17,13 @@ class LearningMonotonicPolicyM19Test {
         assertEquals(SignalAction.AVOID, LearningMonotonicPolicy.action(SignalAction.AVOID, 100, 72))
     }
 
+    @Test fun strongAvoidCanNeverBecomeEntry() {
+        assertEquals(
+            SignalAction.STRONG_AVOID,
+            LearningMonotonicPolicy.action(SignalAction.STRONG_AVOID, 100, 72)
+        )
+    }
+
     @Test fun smallBuyCanNeverUpgradeToFullBuy() {
         assertEquals(SignalAction.SMALL_BUY, LearningMonotonicPolicy.action(SignalAction.SMALL_BUY, 100, 72))
     }

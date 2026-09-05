@@ -213,6 +213,7 @@ object LearningMonotonicPolicy {
 
         SignalAction.WAIT -> if (score < 45) SignalAction.AVOID else SignalAction.WAIT
         SignalAction.AVOID -> SignalAction.AVOID
+        SignalAction.STRONG_AVOID -> SignalAction.STRONG_AVOID
     }
 }
 
