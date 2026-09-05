@@ -9,6 +9,7 @@ import com.ksp.cryptobot.intelligence.CloudAiRuntime
 import com.ksp.cryptobot.intelligence.AiValueAttributionEngine
 import com.ksp.cryptobot.research.HandoffSideIntent
 import com.ksp.cryptobot.research.ResearchExecutionRuntime
+import com.ksp.cryptobot.observability.M23DecisionLineageRuntime
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
@@ -369,6 +370,19 @@ class AdvancedExecutionCoordinator(
 
     private suspend fun record(eventType: String, symbol: String, settings: BotSettings, mode: String, requested: BigDecimal, final: BigDecimal, multiplier: BigDecimal,
                                orderType: String, category: String, band: String, exitMethod: String, qualityTier: String, blocked: Boolean, reason: String, severity: String) {
+        M23DecisionLineageRuntime.recordAdvancedExecution(
+            eventType = eventType,
+            symbol = symbol,
+            strategy = settings.strategyMode.name,
+            mode = mode,
+            requested = requested,
+            final = final,
+            metric = multiplier,
+            orderType = orderType,
+            category = category,
+            blocked = blocked,
+            reason = reason
+        )
         governanceDao.insertAdvancedExecution(AdvancedExecutionEventEntity(
             eventType = eventType, symbol = symbol, strategy = settings.strategyMode.name, mode = mode, side = if (eventType == "exit_optimization") "SELL" else "BUY",
             severity = severity, requestedQuote = requested.toDouble(), finalQuote = final.toDouble(), multiplier = multiplier.toDouble(), recommendedOrderType = orderType,

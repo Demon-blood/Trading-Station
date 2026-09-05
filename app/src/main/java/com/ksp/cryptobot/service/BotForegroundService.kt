@@ -28,6 +28,8 @@ import com.ksp.cryptobot.exchange.KrakenApiKeySecurityPolicy
 import com.ksp.cryptobot.exchange.KrakenApiKeySecurityRuntime
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
+import com.ksp.cryptobot.observability.M23RemoteOperationsRuntime
+import com.ksp.cryptobot.observability.M23ServiceRuntime
 import kotlinx.coroutines.*
 
 class BotForegroundService : Service() {
@@ -51,6 +53,8 @@ class BotForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        M23RemoteOperationsRuntime.initialize(applicationContext)
+        M23ServiceRuntime.starting("BotForegroundService.onCreate")
         controller = BotController(applicationContext)
         settingsStore = AppSettingsStore(applicationContext)
         statusStore = BotStatusStore(applicationContext)
@@ -199,6 +203,7 @@ class BotForegroundService : Service() {
             }
 
             controller.start()
+            M23ServiceRuntime.running("Controller started after authoritative startup reconciliation.")
 
             var lastNetworkUsable = connectivity.snapshot.usable
             while (isActive && controller.running && hostStore.snapshot().desiredRunning) {
@@ -267,6 +272,38 @@ class BotForegroundService : Service() {
                     }
 
                     controller.processRemoteCommands(current)
+
+                    if (M23RemoteOperationsRuntime.consumeStopRequest()) {
+                        hostStore.requestStop("Authenticated M23 remote STOP_ENGINE")
+                        statusStore.write("Authenticated M23 remote STOP_ENGINE accepted. Shutting down safely.", "WARN")
+                        M23ServiceRuntime.stopped("Authenticated remote STOP_ENGINE")
+                        controller.stop()
+                        break
+                    }
+
+                    if (M23RemoteOperationsRuntime.consumeMarketRefreshRequest()) {
+                        statusStore.write("Authenticated M23 market refresh requested. Execution truth is UNKNOWN until reconciliation completes.", "WARN")
+                        KrakenPrivateExecutionRegistry.markRecoveryUnknown("M23 remote market/private connection refresh requested.")
+                        KrakenRealtimeMarketDataRegistry.stop()
+                        KrakenPrivateExecutionRegistry.stop()
+                        configureRealtimeMarketData(current, network.usable)
+                        configurePrivateExecutionState(current, network.usable)
+                        if (!reconcileAfterRecovery(settingsStore.load(), "m23-remote-market-refresh")) {
+                            updateNotification("M23 market refresh: waiting for safe reconciliation")
+                            delay(RECONCILIATION_RETRY_MS)
+                            continue
+                        }
+                    }
+
+                    if (M23RemoteOperationsRuntime.consumeReconciliationRequest()) {
+                        KrakenPrivateExecutionRegistry.markRecoveryUnknown("M23 authenticated remote reconciliation requested.")
+                        if (!reconcileAfterRecovery(settingsStore.load(), "m23-remote-command")) {
+                            updateNotification("M23 reconciliation request did not reach safe truth")
+                            delay(RECONCILIATION_RETRY_MS)
+                            continue
+                        }
+                    }
+
                     if (!controller.running || !hostStore.snapshot().desiredRunning) break
 
                     val afterCommands = settingsStore.load()
@@ -490,6 +527,7 @@ class BotForegroundService : Service() {
     }
 
     private fun stopBot() {
+        M23ServiceRuntime.stopped("Service stop requested")
         statusStore.write("Stop requested. Trading host shutting down.", "WARN")
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
@@ -582,6 +620,7 @@ class BotForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        M23ServiceRuntime.stopped("BotForegroundService destroyed")
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
         KrakenApiKeySecurityRuntime.markUnknown("Trading host destroyed.")
