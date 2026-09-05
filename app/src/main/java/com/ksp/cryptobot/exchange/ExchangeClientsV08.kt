@@ -93,6 +93,47 @@ class KrakenSpotClient(
     }
 
 
+
+    suspend fun getApiKeySecurityInfo(): KrakenApiKeySecurityInfo = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank() || secretKey.isBlank()) {
+            error("Kraken credentials are required for API-key security inspection.")
+        }
+        val root = privateJson("/0/private/GetApiKeyInfo", emptyMap())
+        val result = root.optJSONObject("result")
+            ?: error("Kraken GetApiKeyInfo returned no result.")
+
+        val permissions = linkedSetOf<String>()
+        val permissionsArray = result.optJSONArray("permissions")
+        if (permissionsArray != null) {
+            for (i in 0 until permissionsArray.length()) {
+                permissionsArray.optString(i, "")
+                    .trim()
+                    .lowercase()
+                    .takeIf { it.isNotBlank() }
+                    ?.let { permissions += it }
+            }
+        }
+
+        val ipAllowlist = mutableListOf<String>()
+        val ipArray = result.optJSONArray("ipAllowlist")
+        if (ipArray != null) {
+            for (i in 0 until ipArray.length()) {
+                ipArray.optString(i, "")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?.let { ipAllowlist += it }
+            }
+        }
+
+        KrakenApiKeySecurityInfo(
+            keyFingerprint = KrakenApiKeySecurityRuntime.fingerprint(apiKey),
+            keyName = result.optString("apiKeyName", "").trim(),
+            permissions = permissions,
+            validUntilEpochSeconds = result.optString("validUntil", "0").toLongOrNull() ?: 0L,
+            ipAllowlist = ipAllowlist
+        )
+    }
+
     suspend fun accountAuthorityIdentity(): KrakenAccountAuthorityIdentity = withContext(Dispatchers.IO) {
         if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken credentials are required for account authority identity.")
         val root = privateJson("/0/private/GetApiKeyInfo", emptyMap())
@@ -664,6 +705,12 @@ class KrakenSpotClient(
 
     override suspend fun placeOrder(request: OrderRequest): OrderResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank() || secretKey.isBlank()) error("Kraken API key and private key are required for live trading.")
+        if (request.side == OrderSide.BUY) {
+            val securityGate = KrakenApiKeySecurityRuntime.gateForNewBuy(apiKey)
+            if (!securityGate.first) {
+                error("M22 Kraken API-key security gate blocks BUY: ${securityGate.second}")
+            }
+        }
         val rule = resolvePairRule(request.symbol)
         if (!rule.tradable) error("Kraken pair is not tradable: ${request.symbol}. ${rule.status}")
         val path = "/0/private/AddOrder"
