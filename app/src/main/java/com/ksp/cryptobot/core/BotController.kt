@@ -60,6 +60,11 @@ import com.ksp.cryptobot.release.V4SystemVerifier
 import com.ksp.cryptobot.execution.AdvancedExecutionCoordinator
 import com.ksp.cryptobot.execution.ProtectiveStopManager
 import com.ksp.cryptobot.execution.SmartOrderLifecycleManager
+import com.ksp.cryptobot.observability.M23DecisionLineageRuntime
+import com.ksp.cryptobot.observability.M23DiagnosticBundleExporter
+import com.ksp.cryptobot.observability.M23HealthSnapshotBuilder
+import com.ksp.cryptobot.observability.M23RemoteOperationsPolicy
+import com.ksp.cryptobot.observability.M23RemoteOperationsRuntime
 import com.ksp.cryptobot.research.ResearchExecutionRuntime
 import com.ksp.cryptobot.research.HandoffPositionPlan
 import com.ksp.cryptobot.research.HandoffPositionPlanCodec
@@ -1259,111 +1264,83 @@ class BotController(
 
     private suspend fun handleRemoteCommand(message: RemoteCommandMessage, settings: BotSettings): String {
         val raw = message.text.trim()
-        if (!raw.startsWith("/cts", ignoreCase = true) && !raw.startsWith("!cts", ignoreCase = true)) return "Ignored. Commands must start with /cts or !cts."
+        if (!raw.startsWith("/cts", ignoreCase = true) && !raw.startsWith("!cts", ignoreCase = true)) {
+            return "Ignored. Commands must start with /cts or !cts."
+        }
         val tokens = raw.split(Regex("\\s+")).filter { it.isNotBlank() }.toMutableList()
         if (tokens.isEmpty()) return remoteHelp()
         tokens.removeAt(0)
+        if (tokens.firstOrNull()?.equals("help", ignoreCase = true) == true || tokens.isEmpty()) return remoteHelp()
 
-        if (tokens.firstOrNull()?.equals("help", ignoreCase = true) == true || tokens.isEmpty()) {
-            return remoteHelp()
-        }
+        val configuredPin = if (settings.remoteCommandRequirePin) settingsStore.remoteCommandPin().orEmpty() else ""
+        val suppliedPin = if (settings.remoteCommandRequirePin) tokens.firstOrNull().orEmpty() else ""
+        if (settings.remoteCommandRequirePin && tokens.isNotEmpty()) tokens.removeAt(0)
 
-        if (settings.remoteCommandRequirePin) {
-            val configuredPin = settingsStore.remoteCommandPin().orEmpty()
-            if (configuredPin.isBlank()) {
-                return "Remote command center is locked: no PIN configured in Settings → Notifications/Remote Alerts."
-            }
-            val suppliedPin = tokens.firstOrNull().orEmpty()
-            if (suppliedPin != configuredPin) {
-                updateStatus("Remote command rejected from ${message.source}: bad PIN.", "WARN")
-                return "Rejected: bad or missing PIN."
-            }
-            tokens.removeAt(0)
+        val auth = M23RemoteOperationsRuntime.authenticateAndReserveMessage(
+            source = message.source,
+            messageId = message.id,
+            sourceIdentity = message.chatId,
+            suppliedPin = suppliedPin,
+            configuredPin = configuredPin,
+            requirePin = settings.remoteCommandRequirePin
+        )
+        if (!auth.accepted) {
+            updateStatus("M23 remote command rejected from ${message.source}: ${auth.reason}", "WARN")
+            return auth.reason
         }
 
         val command = tokens.firstOrNull()?.lowercase().orEmpty()
-        val args = tokens.drop(1)
+        if (command.isBlank()) return remoteHelp()
+        M23RemoteOperationsRuntime.auditCommand(auth.sourceId, command, true, "Authenticated command dispatch", "DISPATCHED")
+
+        if (command in M23RemoteOperationsPolicy.FORBIDDEN_AUTHORITY_COMMANDS) {
+            val result = "Rejected by M23: remote commands cannot create trading authority, execute orders, resume LIVE, change mode/risk settings, or bypass safety gates."
+            M23RemoteOperationsRuntime.auditCommand(auth.sourceId, command, false, "Remote trading authority is forbidden", "REJECTED")
+            return result
+        }
+
         return when (command) {
-            "help" -> remoteHelp()
             "status" -> remoteStatus()
+            "health" -> M23HealthSnapshotBuilder.build(appContext).toRemoteText()
             "settings" -> remoteSettings(settingsStore.load())
             "portfolio" -> remotePortfolio(settingsStore.load())
             "positions" -> remotePositions(settingsStore.load())
             "orders" -> remoteOrders(settingsStore.load())
-            "system_test" -> runSystemFeatureVerification(settingsStore.load()).take(18).joinToString("\n")
-            "scan" -> {
-                val decisions = scanOnce(settingsStore.load(), execute = false)
-                "Scan complete. Decisions=${decisions.size}\n" + decisions.take(8).joinToString("\n") { "${it.symbol}: ${it.finalAction} score=${it.finalScore} allowed=${it.allowedToTrade}" }
+            "diagnostics" -> runCatching {
+                val bundle = M23DiagnosticBundleExporter.export(appContext)
+                "M23 diagnostics created. file=${bundle.filePath}\nsha256=${bundle.archiveSha256}\nmanifestEntries=${bundle.manifestEntries}\nsizeBytes=${bundle.sizeBytes}"
+            }.getOrElse { error ->
+                "M23 diagnostics failed: ${error.message ?: error.javaClass.simpleName}"
             }
-            "execute" -> {
-                val current = settingsStore.load()
-                if (current.mode != BotMode.PAPER && current.mode != BotMode.LIVE_AUTO) {
-                    "Execute skipped: mode=${current.mode}. Use PAPER or LIVE_AUTO."
-                } else if (current.mode == BotMode.LIVE_AUTO && !current.remoteCommandAllowLiveAuto) {
-                    "Execute blocked: remote LIVE_AUTO execution is disabled in settings."
-                } else {
-                    val decisions = scanOnce(current, execute = true)
-                    "Execution pass complete. Decisions=${decisions.size}. Check Live Status for order details."
-                }
+            "pause", "pause_entries" -> M23RemoteOperationsRuntime.pauseEntries(auth.sourceId)
+            "kill", "kill_switch" -> M23RemoteOperationsRuntime.activateKillSwitch(auth.sourceId)
+            "stop" -> M23RemoteOperationsRuntime.requestStop(auth.sourceId)
+            "reconcile" -> M23RemoteOperationsRuntime.requestReconciliation(auth.sourceId)
+            "refresh_market" -> M23RemoteOperationsRuntime.requestMarketRefresh(auth.sourceId)
+            else -> {
+                M23RemoteOperationsRuntime.auditCommand(auth.sourceId, command, false, "Unknown/not allowlisted command", "REJECTED")
+                "Unknown or disallowed command: $command\n${remoteHelp()}"
             }
-            "start" -> {
-                start()
-                "Controller started. The Android foreground service must already be running to keep listening remotely."
-            }
-            "stop" -> {
-                stop()
-                "Controller stopped. Remote listener stops when the foreground service loop stops."
-            }
-            "pause" -> {
-                val current = settingsStore.load()
-                settingsStore.save(current.copy(mode = BotMode.LIVE_CONFIRM, manualExecutionMode = true))
-                "Paused: mode changed to LIVE_CONFIRM and manual/signal-only enabled."
-            }
-            "resume" -> {
-                val current = settingsStore.load()
-                if (!current.remoteCommandAllowLiveAuto) {
-                    "Resume to LIVE_AUTO blocked: enable 'Allow remote LIVE_AUTO commands' in Remote Alerts first."
-                } else {
-                    settingsStore.save(current.copy(mode = BotMode.LIVE_AUTO, manualExecutionMode = false))
-                    "Resume requested: mode changed to LIVE_AUTO. Existing preflight/release safety still applies."
-                }
-            }
-            "mode" -> {
-                val modeName = args.firstOrNull()?.uppercase()
-                val mode = runCatching { BotMode.valueOf(modeName.orEmpty()) }.getOrNull()
-                if (mode == null) {
-                    "Invalid mode. Use PAPER, LIVE_CONFIRM, or LIVE_AUTO."
-                } else if (mode == BotMode.LIVE_AUTO && !settings.remoteCommandAllowLiveAuto) {
-                    "LIVE_AUTO by remote command is disabled. Enable it in Remote Alerts first."
-                } else {
-                    val current = settingsStore.load()
-                    settingsStore.save(current.copy(mode = mode, manualExecutionMode = mode == BotMode.LIVE_CONFIRM))
-                    "Mode changed to $mode."
-                }
-            }
-            "set" -> remoteSet(args)
-            else -> "Unknown command: $command\n${remoteHelp()}"
         }
     }
 
     private fun remoteHelp(): String = """
-Crypto TradeStation remote commands:
+Crypto TradeStation M23 remote operations:
+/cts <PIN> health
+/cts <PIN> diagnostics
 /cts <PIN> status
 /cts <PIN> settings
 /cts <PIN> portfolio
 /cts <PIN> positions
 /cts <PIN> orders
-/cts <PIN> scan
-/cts <PIN> execute
-/cts <PIN> start
+/cts <PIN> pause_entries
+/cts <PIN> kill_switch
 /cts <PIN> stop
-/cts <PIN> pause
-/cts <PIN> resume
-/cts <PIN> mode PAPER|LIVE_CONFIRM|LIVE_AUTO
-/cts <PIN> set max_position 10
-/cts <PIN> set max_buy BTCEUR 95000
-/cts <PIN> set score 75
+/cts <PIN> reconcile
+/cts <PIN> refresh_market
 /cts help
+
+Remote BUY/SELL/execute/resume/mode/risk/security/authority override commands are intentionally unavailable.
 """.trimIndent()
 
     private fun remoteStatus(): String {
@@ -2226,6 +2203,14 @@ Crypto TradeStation remote commands:
             updateStatus("Trade blocked: calculated quantity is zero.", "ERROR")
             return ExecutionAttemptResult(false)
         }
+        M23DecisionLineageRuntime.recordCandidate(
+            symbol = ticker.symbol,
+            strategy = settings.strategyMode.name,
+            mode = settings.mode.name,
+            action = decision.finalAction.name,
+            confidencePercent = decision.confidencePercent,
+            marketPrice = ticker.lastPrice
+        )
         val request = OrderRequest(
             symbol = ticker.symbol,
             side = side,
@@ -2251,6 +2236,11 @@ Crypto TradeStation remote commands:
                 updateStatus("LIVE entry blocked by Kraken DMS safety gate: ${dms.second}", "ERROR")
                 return ExecutionAttemptResult(false)
             }
+            val m23RemoteSafety = M23RemoteOperationsRuntime.canSubmitNewEntry()
+            if (!m23RemoteSafety.first) {
+                updateStatus("LIVE entry blocked by M23 remote-operations safety gate: ${m23RemoteSafety.second}", "ERROR")
+                return ExecutionAttemptResult(false)
+            }
         }
 
         if (settings.mode == BotMode.LIVE_AUTO &&
@@ -2264,6 +2254,14 @@ Crypto TradeStation remote commands:
             }
         }
 
+        M23DecisionLineageRuntime.recordOrderSubmission(
+            symbol = request.symbol,
+            strategy = settings.strategyMode.name,
+            mode = settings.mode.name,
+            action = request.side.name,
+            orderType = request.orderType.name,
+            clientOrderId = request.clientOrderId
+        )
         updateStatus("Submitting ${settings.exchangeProvider} ${request.side} $orderModeLabel order: ${request.symbol}, notional≈${submittedNotionalEstimate.setScale(2, RoundingMode.DOWN)} $quoteAsset, qty=${request.quantity}, price=${request.limitPrice ?: "market"}, id=${request.clientOrderId}", "LIVE")
         val result = runCatching { exchange.placeOrder(request) }.getOrElse { error ->
             KrakenPrivateExecutionRegistry.markFailureIfPending(
@@ -2311,6 +2309,14 @@ Crypto TradeStation remote commands:
                 if (entry > BigDecimal.ZERO) averagePriceForRecord.subtract(entry).multiply(executedQtyForRecord).subtract(feeForRecord) else BigDecimal.ZERO
             }
         } else result.realizedPnlQuote
+        M23DecisionLineageRuntime.recordOrderResult(
+            symbol = result.symbol,
+            clientOrderId = request.clientOrderId,
+            exchangeOrderId = result.exchangeOrderId,
+            side = result.side.name,
+            fillConfirmed = fillConfirmed,
+            realizedPnlQuote = realizedPnlForRecord
+        )
         if (fillConfirmed) {
             dao.insertTrade(
                 TradeEntity(
