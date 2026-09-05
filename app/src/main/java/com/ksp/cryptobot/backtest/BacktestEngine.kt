@@ -1,135 +1,269 @@
 package com.ksp.cryptobot.backtest
 
 import com.ksp.cryptobot.core.*
-import com.ksp.cryptobot.strategy.TechnicalIndicators
+import com.ksp.cryptobot.strategy.MarketRegimeDetector
+import com.ksp.cryptobot.strategy.StrategyTruthRegistry
+import com.ksp.cryptobot.strategy.StrategyTruthRules
 import java.math.BigDecimal
 import java.math.RoundingMode
 
-class BacktestEngine {
-    fun run(symbol: String, timeframe: Timeframe, strategy: StrategyMode, candles: List<Candle>, settings: BotSettings): BacktestReport {
-        if (candles.size < 80) {
-            return BacktestReport(symbol, strategy, timeframe, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false, "Not enough candles for meaningful backtest.")
+/**
+ * M18 truth-aligned historical validator.
+ *
+ * Critical invariants:
+ * 1. Unsupported named strategies cannot pass a proxy backtest.
+ * 2. Entry logic is the same StrategyTruthRules used by live selection.
+ * 3. A close-generated signal enters on the NEXT bar open (no same-close look-ahead).
+ * 4. If stop and target are both touched inside one OHLC bar, stop is assumed first.
+ * 5. Baseline maker fees are charged on both entry and exit so raw gross returns
+ *    cannot masquerade as strategy edge. M5/M20 remain the production economics gate.
+ */
+class BacktestEngine(
+    private val regimeDetector: MarketRegimeDetector = MarketRegimeDetector()
+) {
+    companion object {
+        // Current Kraken Tier-1 maker baseline used only for strategy validation.
+        // Production economics still query/use the execution economics stack.
+        private val BASELINE_MAKER_FEE_PER_SIDE_PERCENT = BigDecimal("0.40")
+    }
+
+    fun run(
+        symbol: String,
+        timeframe: Timeframe,
+        strategy: StrategyMode,
+        candles: List<Candle>,
+        settings: BotSettings
+    ): BacktestReport {
+        if (strategy == StrategyMode.AUTO) {
+            return truthBlocked(
+                symbol, strategy, timeframe,
+                "AUTO is a selector. A single-strategy backtest cannot truthfully backtest AUTO."
+            )
         }
+
+        val spec = StrategyTruthRegistry.spec(strategy)
+            ?: return truthBlocked(symbol, strategy, timeframe, "No M18 strategy truth specification exists.")
+
+        if (!spec.liveSelectable) {
+            return truthBlocked(symbol, strategy, timeframe, StrategyTruthRegistry.truthBlockedReason(strategy))
+        }
+        if (!spec.singleTimeframeBacktestable) {
+            return truthBlocked(
+                symbol, strategy, timeframe,
+                "TRUTH_BLOCKED ${strategy.name}: live implementation requires ${spec.requiredInputs.joinToString(", ")}; the existing run() API supplies one timeframe only."
+            )
+        }
+        if (spec.primaryTimeframe != null && timeframe != spec.primaryTimeframe) {
+            return truthBlocked(
+                symbol, strategy, timeframe,
+                "TRUTH_BLOCKED ${strategy.name}: canonical M18 implementation requires ${spec.primaryTimeframe}, but backtest requested $timeframe."
+            )
+        }
+        if (candles.size < 90) {
+            return BacktestReport(
+                symbol, strategy, timeframe, 0,
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                false,
+                "M18 truth backtest: not enough candles (${candles.size}/90)."
+            )
+        }
+
         val trades = mutableListOf<BacktestTrade>()
-        var inTrade = false
-        var entry = BigDecimal.ZERO
-        var entryTime = 0L
-        var peakEquity = BigDecimal("1000.00")
+        var position: OpenBacktestPosition? = null
         var equity = BigDecimal("1000.00")
+        var peakEquity = equity
         var maxDd = BigDecimal.ZERO
 
-        for (i in 60 until candles.size) {
-            val window = candles.subList(0, i + 1)
-            val close = window.last().close
-            val closes = window.map { it.close }
-            val atr = TechnicalIndicators.atr(window, settings.atrPeriod)
-            val atrPct = if (close > BigDecimal.ZERO) atr.divide(close, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")) else BigDecimal("1.0")
+        // Keep one bar after every signal for next-open execution.
+        for (i in 60 until candles.lastIndex) {
+            val signalWindow = candles.subList(0, i + 1)
+            val current = candles[i]
+            val next = candles[i + 1]
 
-            if (!inTrade && shouldEnter(strategy, window, settings)) {
-                inTrade = true
-                entry = close
-                entryTime = window.last().openTimeEpochMs
-            } else if (inTrade) {
-                val change = close.subtract(entry).divide(entry, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100"))
-                val tp = strategyTakeProfit(strategy, atrPct, settings)
-                val sl = strategyStopLoss(strategy, atrPct, settings).negate()
-                if (change >= tp || change <= sl || shouldExit(strategy, window, entry, settings)) {
-                    trades += BacktestTrade(
-                        symbol,
-                        strategy,
-                        entryTime,
-                        window.last().openTimeEpochMs,
-                        entry,
-                        close,
-                        OrderSide.BUY,
-                        change.setScale(2, RoundingMode.HALF_UP),
-                        if (change >= tp) "TP" else if (change <= sl) "SL" else "Strategy exit"
+            val open = position
+            if (open == null) {
+                val rule = StrategyTruthRules.evaluate(strategy, signalWindow, settings)
+                if (!rule.enoughData || !rule.entry) continue
+
+                val regime = regimeDetector.detect(
+                    symbol,
+                    mapOf(timeframe to signalWindow)
+                )
+                val regimeBlocked = regime.regime in spec.unsuitableRegimes
+                val regimePreferred =
+                    spec.suitableRegimes.isEmpty() || regime.regime in spec.suitableRegimes
+                if (regimeBlocked || !regimePreferred) continue
+
+                val entryPrice = next.open.takeIf { it > BigDecimal.ZERO } ?: next.close
+                if (entryPrice <= BigDecimal.ZERO) continue
+
+                position = OpenBacktestPosition(
+                    entryEpochMs = next.openTimeEpochMs,
+                    entryPrice = entryPrice,
+                    takeProfitPercent = rule.takeProfitPercent,
+                    stopLossPercent = rule.stopLossPercent,
+                    entrySignalReason = rule.reason
+                )
+                continue
+            }
+
+            // The current loop bar may be the entry bar or any later completed bar.
+            val stopPrice = open.entryPrice.multiply(
+                BigDecimal.ONE.subtract(
+                    open.stopLossPercent.divide(BigDecimal("100"), 12, RoundingMode.HALF_UP)
+                )
+            )
+            val targetPrice = open.entryPrice.multiply(
+                BigDecimal.ONE.add(
+                    open.takeProfitPercent.divide(BigDecimal("100"), 12, RoundingMode.HALF_UP)
+                )
+            )
+
+            val stopTouched = current.low <= stopPrice
+            val targetTouched = current.high >= targetPrice
+
+            val exit: ExitDecision? = when {
+                stopTouched && targetTouched ->
+                    ExitDecision(
+                        stopPrice,
+                        "SL (same-bar TP+SL ambiguity resolved conservatively to stop)",
+                        current.openTimeEpochMs
                     )
-                    equity = equity.multiply(BigDecimal.ONE.add(change.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP))).setScale(2, RoundingMode.HALF_UP)
-                    if (equity > peakEquity) peakEquity = equity
-                    val dd = peakEquity.subtract(equity).divide(peakEquity, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100"))
-                    if (dd > maxDd) maxDd = dd
-                    inTrade = false
+                stopTouched ->
+                    ExitDecision(stopPrice, "SL", current.openTimeEpochMs)
+                targetTouched ->
+                    ExitDecision(targetPrice, "TP", current.openTimeEpochMs)
+                StrategyTruthRules.shouldExit(strategy, signalWindow, open.entryPrice, settings) -> {
+                    val exitAtNextOpen = next.open.takeIf { it > BigDecimal.ZERO } ?: next.close
+                    ExitDecision(
+                        exitAtNextOpen,
+                        "Strategy invalidation at next open",
+                        next.openTimeEpochMs
+                    )
                 }
+                else -> null
+            }
+
+            if (exit != null) {
+                val grossPct = percentChange(open.entryPrice, exit.price)
+                val feePct = BASELINE_MAKER_FEE_PER_SIDE_PERCENT.multiply(BigDecimal("2"))
+                val netPct = grossPct.subtract(feePct).setScale(4, RoundingMode.HALF_UP)
+
+                trades += BacktestTrade(
+                    symbol = symbol,
+                    strategy = strategy,
+                    entryEpochMs = open.entryEpochMs,
+                    exitEpochMs = exit.epochMs,
+                    entryPrice = open.entryPrice,
+                    exitPrice = exit.price,
+                    side = OrderSide.BUY,
+                    pnlPercent = netPct,
+                    exitReason = "${exit.reason}; gross=${grossPct.setScale(3, RoundingMode.HALF_UP)}%; baselineFees=${feePct.setScale(2, RoundingMode.HALF_UP)}%"
+                )
+
+                equity = equity.multiply(
+                    BigDecimal.ONE.add(netPct.divide(BigDecimal("100"), 12, RoundingMode.HALF_UP))
+                ).max(BigDecimal.ZERO).setScale(4, RoundingMode.HALF_UP)
+
+                if (equity > peakEquity) peakEquity = equity
+                if (peakEquity > BigDecimal.ZERO) {
+                    val dd = peakEquity.subtract(equity)
+                        .divide(peakEquity, 12, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal("100"))
+                    if (dd > maxDd) maxDd = dd
+                }
+                position = null
             }
         }
 
         val wins = trades.filter { it.pnlPercent > BigDecimal.ZERO }
         val losses = trades.filter { it.pnlPercent < BigDecimal.ZERO }
-        val winRate = if (trades.isNotEmpty()) BigDecimal(wins.size).multiply(BigDecimal("100")).divide(BigDecimal(trades.size), 2, RoundingMode.HALF_UP) else BigDecimal.ZERO
-        val grossProfit = wins.fold(BigDecimal.ZERO) { a, t -> a + t.pnlPercent }
-        val grossLoss = losses.fold(BigDecimal.ZERO) { a, t -> a + t.pnlPercent.abs() }
-        val pf = if (grossLoss > BigDecimal.ZERO) grossProfit.divide(grossLoss, 2, RoundingMode.HALF_UP) else if (grossProfit > BigDecimal.ZERO) BigDecimal("9.99") else BigDecimal.ZERO
-        val net = equity.subtract(BigDecimal("1000.00")).divide(BigDecimal("1000.00"), 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")).setScale(2, RoundingMode.HALF_UP)
-        val passed = trades.size >= settings.requiredPaperTrades && winRate >= BigDecimal(settings.requiredPaperWinRatePercent) && pf >= settings.requiredProfitFactor && maxDd <= settings.maxDrawdownPercent
-        return BacktestReport(symbol, strategy, timeframe, trades.size, winRate, pf, maxDd.setScale(2, RoundingMode.HALF_UP), net, passed, "Strategy=${strategy.name}, trades=${trades.size}, winRate=$winRate%, PF=$pf, maxDD=${maxDd.setScale(2, RoundingMode.HALF_UP)}%, net=$net%.")
-    }
+        val winRate = if (trades.isNotEmpty()) {
+            BigDecimal(wins.size)
+                .multiply(BigDecimal("100"))
+                .divide(BigDecimal(trades.size), 2, RoundingMode.HALF_UP)
+        } else BigDecimal.ZERO
 
-    private fun shouldEnter(strategy: StrategyMode, candles: List<Candle>, settings: BotSettings): Boolean {
-        val closes = candles.map { it.close }
-        val last = candles.last()
-        val emaFast = TechnicalIndicators.ema(closes, settings.emaFastPeriod)
-        val emaSlow = TechnicalIndicators.ema(closes, settings.emaSlowPeriod)
-        val rsi = TechnicalIndicators.rsi(closes, 14)
-        val vwap = TechnicalIndicators.vwap(candles, 30)
-        val high20 = TechnicalIndicators.highestHigh(candles.dropLast(1), 20)
-        val high40 = TechnicalIndicators.highestHigh(candles.dropLast(1), 40)
-        val low40 = TechnicalIndicators.lowestLow(candles, 40)
-        val avgVol = avgVolume(candles.takeLast(30).dropLast(1))
-        val shortMove = TechnicalIndicators.percentChange(closes.takeLast(6).first(), closes.last())
-        val dayMove = TechnicalIndicators.percentChange(closes.takeLast(24).first(), closes.last())
-        val basis = TechnicalIndicators.sma(closes, 20)
-        val lower = basis.subtract(TechnicalIndicators.standardDeviation(closes, 20).multiply(BigDecimal("2")))
-
-        return when (strategy) {
-            StrategyMode.AUTO, StrategyMode.SCALPING, StrategyMode.TREND -> emaFast > emaSlow
-            StrategyMode.BREAKOUT -> last.close > high20 && last.volume > avgVol.multiply(BigDecimal("1.20"))
-            StrategyMode.REVERSAL -> dayMove < BigDecimal("-2.0") && rsi < BigDecimal("38")
-            StrategyMode.NEWS_MOMENTUM -> dayMove > BigDecimal("0.8") && emaFast > emaSlow
-            StrategyMode.MEAN_REVERSION_RSI_BOLLINGER -> last.close <= lower || rsi < BigDecimal("32")
-            StrategyMode.VWAP_PULLBACK -> last.close <= vwap.multiply(BigDecimal("1.002")) && last.close >= vwap.multiply(BigDecimal("0.990")) && emaFast >= emaSlow
-            StrategyMode.DONCHIAN_BREAKOUT -> last.close > high40 && last.volume > avgVol.multiply(BigDecimal("1.20"))
-            StrategyMode.RANGE_GRID -> last.close <= low40.add(TechnicalIndicators.highestHigh(candles, 40).subtract(low40).multiply(BigDecimal("0.35")))
-            StrategyMode.MARKET_MAKING_IMBALANCE -> emaFast >= emaSlow && avgVol > BigDecimal.ZERO
-            StrategyMode.FUNDING_NEWS_RISK_OFF -> dayMove > BigDecimal("-2.0") && emaFast >= emaSlow
-            StrategyMode.PAIRS_RELATIVE_STRENGTH -> dayMove > BigDecimal("0.75")
-            StrategyMode.DCA_CRASH_PROTECTION -> dayMove < BigDecimal("-2.0") && dayMove > BigDecimal("-8.0")
-            StrategyMode.MOMENTUM_SPIKE_CONTINUATION -> shortMove > BigDecimal("1.0") && last.volume > avgVol.multiply(BigDecimal("1.6"))
-            StrategyMode.VOLUME_ANOMALY_WHALE_MOVE -> last.volume > avgVol.multiply(BigDecimal("2.0")) && last.close > last.open
+        val grossProfit = wins.fold(BigDecimal.ZERO) { a, t -> a.add(t.pnlPercent) }
+        val grossLoss = losses.fold(BigDecimal.ZERO) { a, t -> a.add(t.pnlPercent.abs()) }
+        val profitFactor = when {
+            grossLoss > BigDecimal.ZERO ->
+                grossProfit.divide(grossLoss, 3, RoundingMode.HALF_UP)
+            grossProfit > BigDecimal.ZERO ->
+                BigDecimal("9.999")
+            else -> BigDecimal.ZERO
         }
+
+        val net = equity.subtract(BigDecimal("1000.00"))
+            .divide(BigDecimal("1000.00"), 12, RoundingMode.HALF_UP)
+            .multiply(BigDecimal("100"))
+            .setScale(3, RoundingMode.HALF_UP)
+
+        val passed =
+            trades.size >= settings.requiredPaperTrades &&
+            winRate >= BigDecimal(settings.requiredPaperWinRatePercent) &&
+            profitFactor >= settings.requiredProfitFactor &&
+            maxDd <= settings.maxDrawdownPercent &&
+            net > BigDecimal.ZERO
+
+        return BacktestReport(
+            symbol = symbol,
+            strategy = strategy,
+            timeframe = timeframe,
+            trades = trades.size,
+            winRatePercent = winRate,
+            profitFactor = profitFactor,
+            maxDrawdownPercent = maxDd.setScale(2, RoundingMode.HALF_UP),
+            netReturnPercent = net,
+            passedLiveGate = passed,
+            summary = buildString {
+                append("M18 TRUTH_BACKTEST ${spec.canonicalName}; ")
+                append("signals use shared live StrategyTruthRules; entries execute next-bar open; ")
+                append("same-bar TP/SL resolves to SL; baseline maker fees=")
+                append(BASELINE_MAKER_FEE_PER_SIDE_PERCENT)
+                append("%/side. trades=${trades.size}, winRate=$winRate%, PF=$profitFactor, ")
+                append("maxDD=${maxDd.setScale(2, RoundingMode.HALF_UP)}%, net=$net%, passed=$passed. ")
+                append("M5/M20 production economics remain final.")
+            }
+        )
     }
 
-    private fun shouldExit(strategy: StrategyMode, candles: List<Candle>, entry: BigDecimal, settings: BotSettings): Boolean {
-        val closes = candles.map { it.close }
-        val last = closes.last()
-        val emaFast = TechnicalIndicators.ema(closes, settings.emaFastPeriod)
-        val emaSlow = TechnicalIndicators.ema(closes, settings.emaSlowPeriod)
-        val rsi = TechnicalIndicators.rsi(closes, 14)
-        val change = if (entry > BigDecimal.ZERO) last.subtract(entry).divide(entry, 8, RoundingMode.HALF_UP).multiply(BigDecimal("100")) else BigDecimal.ZERO
-        return when (strategy) {
-            StrategyMode.AUTO, StrategyMode.SCALPING, StrategyMode.TREND, StrategyMode.NEWS_MOMENTUM -> emaFast < emaSlow
-            StrategyMode.MEAN_REVERSION_RSI_BOLLINGER, StrategyMode.REVERSAL -> rsi > BigDecimal("55") || change > BigDecimal("1.0")
-            StrategyMode.RANGE_GRID, StrategyMode.MARKET_MAKING_IMBALANCE -> change > BigDecimal("0.55")
-            StrategyMode.FUNDING_NEWS_RISK_OFF -> change < BigDecimal("-1.5") || emaFast < emaSlow
-            StrategyMode.DCA_CRASH_PROTECTION -> change > BigDecimal("0.8") || change < BigDecimal("-1.2")
-            else -> change > BigDecimal("1.2") || emaFast < emaSlow
-        }
+    private data class ExitDecision(
+        val price: BigDecimal,
+        val reason: String,
+        val epochMs: Long
+    )
+
+    private data class OpenBacktestPosition(
+        val entryEpochMs: Long,
+        val entryPrice: BigDecimal,
+        val takeProfitPercent: BigDecimal,
+        val stopLossPercent: BigDecimal,
+        val entrySignalReason: String
+    )
+
+    private fun truthBlocked(
+        symbol: String,
+        strategy: StrategyMode,
+        timeframe: Timeframe,
+        reason: String
+    ) = BacktestReport(
+        symbol = symbol,
+        strategy = strategy,
+        timeframe = timeframe,
+        trades = 0,
+        winRatePercent = BigDecimal.ZERO,
+        profitFactor = BigDecimal.ZERO,
+        maxDrawdownPercent = BigDecimal.ZERO,
+        netReturnPercent = BigDecimal.ZERO,
+        passedLiveGate = false,
+        summary = "M18 $reason"
+    )
+
+    private fun percentChange(first: BigDecimal, last: BigDecimal): BigDecimal {
+        if (first <= BigDecimal.ZERO) return BigDecimal.ZERO
+        return last.subtract(first)
+            .divide(first, 12, RoundingMode.HALF_UP)
+            .multiply(BigDecimal("100"))
     }
-
-    private fun strategyTakeProfit(strategy: StrategyMode, atrPct: BigDecimal, settings: BotSettings): BigDecimal = when (strategy) {
-        StrategyMode.RANGE_GRID, StrategyMode.MARKET_MAKING_IMBALANCE -> BigDecimal("0.55")
-        StrategyMode.MOMENTUM_SPIKE_CONTINUATION, StrategyMode.DONCHIAN_BREAKOUT -> atrPct.multiply(BigDecimal("1.8"))
-        StrategyMode.DCA_CRASH_PROTECTION -> BigDecimal("0.85")
-        else -> atrPct.multiply(settings.takeProfitAtrMultiplier)
-    }.max(BigDecimal("0.25"))
-
-    private fun strategyStopLoss(strategy: StrategyMode, atrPct: BigDecimal, settings: BotSettings): BigDecimal = when (strategy) {
-        StrategyMode.RANGE_GRID, StrategyMode.MARKET_MAKING_IMBALANCE -> BigDecimal("0.40")
-        StrategyMode.DCA_CRASH_PROTECTION -> BigDecimal("0.75")
-        StrategyMode.MOMENTUM_SPIKE_CONTINUATION -> BigDecimal("0.90")
-        else -> atrPct.multiply(settings.stopLossAtrMultiplier)
-    }.max(BigDecimal("0.25"))
-
-    private fun avgVolume(candles: List<Candle>): BigDecimal =
-        if (candles.isEmpty()) BigDecimal.ZERO else candles.fold(BigDecimal.ZERO) { acc, c -> acc.add(c.volume) }.divide(BigDecimal(candles.size), 8, RoundingMode.HALF_UP)
 }

@@ -31,18 +31,27 @@ class AiDecisionEngine(
             finalScore >= 50 -> 55
             else -> 40
         }
+        val strategyEntryAllowed =
+            recommendation.action == SignalAction.BUY ||
+                recommendation.action == SignalAction.SMALL_BUY
         val action = when {
+            recommendation.action == SignalAction.SELL -> SignalAction.SELL
+            !strategyEntryAllowed -> recommendation.action
             newsScore <= -25 -> SignalAction.WAIT
             recommendation.riskPercent.toDouble() >= 15.0 -> SignalAction.WAIT
-            finalScore >= 78 -> SignalAction.BUY
-            finalScore >= 68 -> SignalAction.SMALL_BUY
+            recommendation.action == SignalAction.SMALL_BUY && finalScore >= 68 ->
+                SignalAction.SMALL_BUY
+            recommendation.action == SignalAction.BUY && finalScore >= 78 ->
+                SignalAction.BUY
+            recommendation.action == SignalAction.BUY && finalScore >= 68 ->
+                SignalAction.SMALL_BUY
             finalScore >= 55 -> SignalAction.WATCH
             finalScore >= 45 -> SignalAction.WAIT
             else -> SignalAction.AVOID
         }
         val allowed = action == SignalAction.BUY || action == SignalAction.SMALL_BUY
         val explanation = buildString {
-            append("Technical=${technicalScore}, news=${newsScore}, newsArticles=${news.size}, memory=${memoryScore}, collective=${collective.adjustment}, final=${finalScore}. ")
+            append("Technical=${technicalScore}, news=${newsScore}, newsArticles=${news.size}, memory=${memoryScore}, collective=${collective.adjustment}, final=${finalScore}, strategyGate=${recommendation.action}. ")
             append(newsSentimentEngine.explain(newsScore)).append(' ')
             append(tradeMemoryEngine.explain(memoryScore)).append(' ')
             if (CloudShareCollectiveCache.snapshot().enabled) append(collective.reason).append(' ')
