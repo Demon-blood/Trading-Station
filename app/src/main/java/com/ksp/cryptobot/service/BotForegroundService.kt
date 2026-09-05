@@ -191,6 +191,9 @@ class BotForegroundService : Service() {
                 KrakenPrivateExecutionRegistry.onNetworkAvailable(network.usable)
                 if (!network.usable) {
                     lastNetworkUsable = false
+                    KrakenPrivateExecutionRegistry.markRecoveryUnknown(
+                        "Validated network unavailable during service cycle."
+                    )
                     hostStore.recovery("PAUSED_NETWORK")
                     val message = "Network not validated (${network.summary()}). New scans/orders paused."
                     statusStore.write(message, "WARN")
@@ -363,6 +366,11 @@ class BotForegroundService : Service() {
         }
 
         hostStore.recovery("RECONCILING:$reason")
+        if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
+            KrakenPrivateExecutionRegistry.markRecoveryUnknown(
+                "Authoritative reconciliation in progress: $reason"
+            )
+        }
         return runCatching {
             val health = controller.runKrakenDataHealth(settings)
             val hardFailures = health.filter { it.startsWith("FAIL") }
@@ -379,6 +387,9 @@ class BotForegroundService : Service() {
             val portfolio = controller.loadPortfolioSnapshot(settings)
             if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
                 KrakenPrivateExecutionRegistry.markRestReconciled(openOrders.size)
+                KrakenPrivateExecutionRegistry.markRecoveryReconciled(
+                    "Full service reconciliation passed after $reason: orders=${openOrders.size}, positions=${lifecycle.positions.size}, assets=${portfolio.assets.size}"
+                )
             }
 
             hostStore.reconciliationSucceeded(
@@ -390,6 +401,11 @@ class BotForegroundService : Service() {
             )
             true
         }.getOrElse { error ->
+            if (settings.exchangeProvider == ExchangeProvider.KRAKEN) {
+                KrakenPrivateExecutionRegistry.markRecoveryUnknown(
+                    "Reconciliation failed after $reason: ${error.message ?: error.javaClass.simpleName}"
+                )
+            }
             val failures = hostStore.failure("Reconciliation failed after $reason: ${error.message}")
             hostStore.recovery("RECONCILIATION_FAILED:$reason")
             statusStore.write(
