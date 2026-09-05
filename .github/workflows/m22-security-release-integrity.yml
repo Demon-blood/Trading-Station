@@ -95,7 +95,123 @@ jobs:
           test -s gradle/verification-metadata.xml
           grep -q '<sha256 value=' gradle/verification-metadata.xml
 
-      - name: Scan dependency manifests with OSV
+      - name: Export release runtime dependency coordinates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/m22-runtime-dependencies.init.gradle" <<'EOF'
+          gradle.afterProject { project, state ->
+              if (project.path == ":app") {
+                  project.tasks.register("exportM22ReleaseRuntimeCoordinates") {
+                      doLast {
+                          def configuration = project.configurations.getByName("releaseRuntimeClasspath")
+                          def coordinates = configuration.incoming.resolutionResult.allComponents
+                              .collect { component ->
+                                  def mv = component.moduleVersion
+                                  if (mv == null) return null
+                                  if (!mv.group || !mv.name || !mv.version) return null
+                                  return "${mv.group}:${mv.name}:${mv.version}"
+                              }
+                              .findAll { it != null }
+                              .toSet()
+                              .toList()
+                              .sort()
+
+                          def output = new File(
+                              project.rootProject.projectDir,
+                              "build/m22-release-runtime-coordinates.txt"
+                          )
+                          output.parentFile.mkdirs()
+                          output.text = coordinates.join(System.lineSeparator()) + System.lineSeparator()
+
+                          if (coordinates.isEmpty()) {
+                              throw new GradleException(
+                                  "M22 releaseRuntimeClasspath produced no external module coordinates."
+                              )
+                          }
+
+                          println("M22 release runtime dependency count=" + coordinates.size())
+                          coordinates.each { println("M22_RUNTIME " + it) }
+                      }
+                  }
+              }
+          }
+          EOF
+
+          gradle --no-daemon \
+            -I "$RUNNER_TEMP/m22-runtime-dependencies.init.gradle" \
+            :app:exportM22ReleaseRuntimeCoordinates \
+            2>&1 | tee m22-runtime-dependencies.log
+
+          test -s build/m22-release-runtime-coordinates.txt
+
+      - name: Build OSV custom lockfile for APK runtime only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          source = Path("build/m22-release-runtime-coordinates.txt")
+          packages = []
+          seen = set()
+
+          for raw in source.read_text(encoding="utf-8").splitlines():
+              line = raw.strip()
+              if not line:
+                  continue
+              parts = line.split(":", 2)
+              if len(parts) != 3:
+                  raise SystemExit(f"Invalid M22 runtime coordinate: {line!r}")
+              group, artifact, version = parts
+              key = (group, artifact, version)
+              if key in seen:
+                  continue
+              seen.add(key)
+              packages.append({
+                  "package": {
+                      "name": f"{group}:{artifact}",
+                      "version": version,
+                      "ecosystem": "Maven",
+                  }
+              })
+
+          if not packages:
+              raise SystemExit("M22 runtime OSV lockfile would be empty.")
+
+          output = {
+              "results": [
+                  {
+                      "source": {
+                          "path": str(source),
+                          "type": "lockfile"
+                      },
+                      "packages": packages
+                  }
+              ]
+          }
+
+          target = Path("build/m22-runtime-osv-scanner.json")
+          target.write_text(
+              json.dumps(output, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8"
+          )
+          print(f"M22 runtime OSV package count={len(packages)}")
+          PY
+
+          test -s build/m22-runtime-osv-scanner.json
+
+      - name: Scan APK runtime dependencies with OSV
+        uses: google/osv-scanner-action/osv-scanner-action@06b2ab4348248b456ee06c9e953637f55e03504f
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          scan-args: |-
+            --lockfile=osv-scanner:build/m22-runtime-osv-scanner.json
+
+      - name: Audit full Gradle build-tool dependency inventory with OSV
+        continue-on-error: true
         uses: google/osv-scanner-action/osv-scanner-action@06b2ab4348248b456ee06c9e953637f55e03504f
         env:
           GOTOOLCHAIN: auto
@@ -232,6 +348,9 @@ jobs:
             m21-prerequisite.log
             m22-apply.log
             dependency-verification-bootstrap.log
+            m22-runtime-dependencies.log
+            build/m22-release-runtime-coordinates.txt
+            build/m22-runtime-osv-scanner.json
             m22-verify.log
             m21-verify.log
             m20-verify.log

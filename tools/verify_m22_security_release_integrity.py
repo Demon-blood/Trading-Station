@@ -8,7 +8,7 @@ def read(path):
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 def main():
-    print("INFO | M22 verifier revision v1")
+    print("INFO | M22 verifier revision v1.1")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
     policy = read(repo / "app/src/main/java/com/ksp/cryptobot/exchange/KrakenApiKeySecurity.kt")
@@ -176,10 +176,19 @@ def main():
             "<verification-metadata" in verification_metadata and
             "<sha256 value=" in verification_metadata,
 
-        "OSV workflow is pinned to immutable v2.5.0 commit":
-            "0c58c542420dfd23fcac08dd9c8ca3cca9c36f1a" in osv_wf and
-            "osv-scanner-reusable-pr.yml" in osv_wf and
-            "osv-scanner-reusable.yml" in osv_wf,
+        "OSV runtime scan is pinned to immutable v2.5.0 action commit":
+            "06b2ab4348248b456ee06c9e953637f55e03504f" in osv_wf,
+
+        "OSV production gate scans releaseRuntimeClasspath only":
+            "releaseRuntimeClasspath" in osv_wf and
+            "m22-release-runtime-coordinates.txt" in osv_wf and
+            "m22-runtime-osv-scanner.json" in osv_wf and
+            "--lockfile=osv-scanner:build/m22-runtime-osv-scanner.json" in osv_wf,
+
+        "full Gradle tooling inventory remains separately audited":
+            "Audit full Gradle build-tool dependency inventory with OSV" in osv_wf and
+            "continue-on-error: true" in osv_wf and
+            "--lockfile=gradle/verification-metadata.xml" in osv_wf,
 
         "OSV is configured for PR main and scheduled scans":
             "pull_request:" in osv_wf and
