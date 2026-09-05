@@ -18,6 +18,8 @@ data class EngineAuthoritySnapshot(
     val accountKey: String = "",
     val engineId: String = "",
     val holderEngineId: String = "",
+    val localPlatform: String = "",
+    val holderPlatform: String = "",
     val expiresAtEpochMs: Long = 0L,
     val fencingToken: Long = 0L,
     val leaseSchemaVersion: Int = 0,
@@ -87,6 +89,13 @@ object EngineAuthorityRuntime {
         snapshot = value
     }
 
+    @Volatile
+    private var remoteSubmissionValidator: (suspend () -> Pair<Boolean, String>)? = null
+
+    fun installRemoteSubmissionValidator(validator: suspend () -> Pair<Boolean, String>) {
+        remoteSubmissionValidator = validator
+    }
+
     fun canSubmitNewEntry(mode: BotMode): Pair<Boolean, String> {
         if (mode == BotMode.PAPER) return true to "PAPER does not require a distributed LIVE authority lease."
         val s = snapshot
@@ -105,6 +114,14 @@ object EngineAuthorityRuntime {
         }
         return true to "Distributed LIVE authority lease is active for engine=${s.engineId}, fence=${s.fencingToken}, remainingMs=${(s.localDeadlineElapsedMs - nowElapsed).coerceAtLeast(0L)}."
     }
+
+    suspend fun canSubmitNewLiveEntryAuthoritative(): Pair<Boolean, String> {
+        val local = canSubmitNewEntry(BotMode.LIVE_AUTO)
+        if (!local.first) return local
+        val validator = remoteSubmissionValidator
+            ?: return false to "M24 remote authority validator is unavailable; LIVE BUY is fail-closed."
+        return validator()
+    }
 }
 
 /**
@@ -120,6 +137,7 @@ class EngineAuthorityLeaseManager(context: Context) {
     companion object {
         const val LEASE_TTL_SECONDS = 75
         const val HEARTBEAT_SECONDS = 20L
+        const val LOCAL_PLATFORM = "ANDROID"
     }
 
     private val appContext = context.applicationContext
@@ -139,10 +157,15 @@ class EngineAuthorityLeaseManager(context: Context) {
         }
     }
 
+    init {
+        EngineAuthorityRuntime.installRemoteSubmissionValidator { validateRemoteSubmission() }
+    }
+
     suspend fun acquire(settings: BotSettings): EngineAuthoritySnapshot {
         if (settings.mode == BotMode.PAPER || settings.exchangeProvider == ExchangeProvider.PAPER) {
             val paper = EngineAuthoritySnapshot(true, "PAPER",
                 engineId = engineId,
+                localPlatform = LOCAL_PLATFORM,
                 reason = "PAPER has no live execution authority."
             )
             EngineAuthorityRuntime.publish(paper)
@@ -180,19 +203,25 @@ class EngineAuthorityLeaseManager(context: Context) {
             )
         }
 
+        val acquireStartedElapsedMs = SystemClock.elapsedRealtime()
         val response = client.acquireEngineLease(
             accountKey = identity.accountKey,
             engineId = engineId,
-            platform = "ANDROID",
+            platform = LOCAL_PLATFORM,
             ttlSeconds = LEASE_TTL_SECONDS
         )
+        val acquireRoundTripMs = (SystemClock.elapsedRealtime() - acquireStartedElapsedMs).coerceAtLeast(0L)
 
         val acquired = response.bool("acquired")
         val holder = response.text("holder_engine_id")
+        val holderPlatform = response.text("holder_platform")
         val expires = response.long("expires_at_epoch_ms")
         val fence = response.long("fence_token")
         val schema = response.int("lease_schema_version")
-        val remaining = response.long("lease_remaining_ms")
+        val remaining = M24CrossPlatformAuthorityPolicy.conservativeRemainingMs(
+            response.long("lease_remaining_ms"),
+            acquireRoundTripMs
+        )
         val valid = EngineAuthorityFencePolicy.acquisitionValid(
             acquired = acquired,
             holderMatches = holder == engineId,
@@ -208,6 +237,8 @@ class EngineAuthorityLeaseManager(context: Context) {
                 accountKey = identity.accountKey,
                 engineId = engineId,
                 holderEngineId = holder,
+                localPlatform = LOCAL_PLATFORM,
+                holderPlatform = holderPlatform,
                 expiresAtEpochMs = expires,
                 fencingToken = fence,
                 leaseSchemaVersion = schema,
@@ -222,6 +253,8 @@ class EngineAuthorityLeaseManager(context: Context) {
                 accountKey = identity.accountKey,
                 engineId = engineId,
                 holderEngineId = holder,
+                localPlatform = LOCAL_PLATFORM,
+                holderPlatform = holderPlatform,
                 expiresAtEpochMs = expires,
                 fencingToken = fence,
                 leaseSchemaVersion = schema,
@@ -254,21 +287,28 @@ class EngineAuthorityLeaseManager(context: Context) {
                 val expectedFence = activeFenceToken
                 if (accountKey.isBlank() || expectedFence <= 0L) break
 
+                val heartbeatStartedElapsedMs = SystemClock.elapsedRealtime()
                 val next = runCatching {
                     client.heartbeatEngineLease(
                         accountKey = accountKey,
                         engineId = engineId,
+                        platform = LOCAL_PLATFORM,
                         fenceToken = expectedFence,
                         ttlSeconds = LEASE_TTL_SECONDS
                     )
                 }.fold(
                     onSuccess = { response ->
+                        val heartbeatRoundTripMs = (SystemClock.elapsedRealtime() - heartbeatStartedElapsedMs).coerceAtLeast(0L)
                         val renewed = response.bool("renewed")
                         val holder = response.text("holder_engine_id")
+                        val holderPlatform = response.text("holder_platform")
                         val expires = response.long("expires_at_epoch_ms")
                         val responseFence = response.long("fence_token")
                         val schema = response.int("lease_schema_version")
-                        val remaining = response.long("lease_remaining_ms")
+                        val remaining = M24CrossPlatformAuthorityPolicy.conservativeRemainingMs(
+                            response.long("lease_remaining_ms"),
+                            heartbeatRoundTripMs
+                        )
                         val valid = EngineAuthorityFencePolicy.heartbeatValid(
                             renewed = renewed,
                             holderMatches = holder == engineId,
@@ -285,6 +325,8 @@ class EngineAuthorityLeaseManager(context: Context) {
                                 accountKey = accountKey,
                                 engineId = engineId,
                                 holderEngineId = holder,
+                                localPlatform = LOCAL_PLATFORM,
+                                holderPlatform = holderPlatform,
                                 expiresAtEpochMs = expires,
                                 fencingToken = responseFence,
                                 leaseSchemaVersion = schema,
@@ -297,6 +339,8 @@ class EngineAuthorityLeaseManager(context: Context) {
                                 accountKey = accountKey,
                                 engineId = engineId,
                                 holderEngineId = holder,
+                                localPlatform = LOCAL_PLATFORM,
+                                holderPlatform = holderPlatform,
                                 expiresAtEpochMs = expires,
                                 fencingToken = responseFence,
                                 leaseSchemaVersion = schema,
@@ -327,6 +371,184 @@ class EngineAuthorityLeaseManager(context: Context) {
         }
     }
 
+    private suspend fun validateRemoteSubmission(): Pair<Boolean, String> {
+        val client = activeClient
+            ?: return false to "M24 CloudShare authority client is unavailable; LIVE BUY is fail-closed."
+        val accountKey = activeAccountKey
+        val expectedFence = activeFenceToken
+        if (accountKey.isBlank() || expectedFence <= 0L) {
+            return false to "M24 active account/fence is unavailable; LIVE BUY is fail-closed."
+        }
+
+        val startedElapsedMs = SystemClock.elapsedRealtime()
+        val response = runCatching {
+            client.engineLeaseStatus(
+                accountKey = accountKey,
+                engineId = engineId,
+                fenceToken = expectedFence
+            )
+        }.getOrElse { error ->
+            val current = EngineAuthorityRuntime.snapshot()
+            EngineAuthorityRuntime.publish(
+                current.copy(
+                    authorized = false,
+                    state = "PARTITION_UNKNOWN",
+                    reason = "M24 authoritative pre-submit status failed: ${error.message ?: error.javaClass.simpleName}"
+                )
+            )
+            return false to "M24 authoritative CloudShare status unavailable; network partition/uncertainty blocks LIVE BUY."
+        }
+
+        val roundTripMs = (SystemClock.elapsedRealtime() - startedElapsedMs).coerceAtLeast(0L)
+        val holder = response.text("holder_engine_id")
+        val holderPlatform = response.text("holder_platform")
+        val responseFence = response.long("fence_token")
+        val schema = response.int("lease_schema_version")
+        val expires = response.long("expires_at_epoch_ms")
+        val remaining = M24CrossPlatformAuthorityPolicy.conservativeRemainingMs(
+            response.long("lease_remaining_ms"),
+            roundTripMs
+        )
+        val valid = M24CrossPlatformAuthorityPolicy.remoteSubmissionValid(
+            remoteReachable = true,
+            owned = response.bool("owned"),
+            holderMatches = holder == engineId,
+            holderPlatform = holderPlatform,
+            expectedPlatform = M24AuthorityPlatform.ANDROID,
+            schemaVersion = schema,
+            expectedFence = expectedFence,
+            responseFence = responseFence,
+            conservativeRemainingMs = remaining
+        )
+
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val current = EngineAuthorityRuntime.snapshot()
+        if (!valid) {
+            EngineAuthorityRuntime.publish(
+                current.copy(
+                    authorized = false,
+                    state = "FENCED_OR_TRANSFERRED",
+                    holderEngineId = holder,
+                    localPlatform = LOCAL_PLATFORM,
+                    holderPlatform = holderPlatform,
+                    expiresAtEpochMs = expires,
+                    fencingToken = responseFence,
+                    leaseSchemaVersion = schema,
+                    leaseRemainingMs = remaining,
+                    localDeadlineElapsedMs = nowElapsed + remaining,
+                    reason = "M24 authoritative pre-submit status rejected local owner/platform/fence."
+                )
+            )
+            return false to "M24 authoritative owner/fence check rejected LIVE BUY. holder=$holder platform=$holderPlatform fence=$responseFence expectedFence=$expectedFence."
+        }
+
+        EngineAuthorityRuntime.publish(
+            current.copy(
+                authorized = true,
+                state = "HELD",
+                holderEngineId = holder,
+                localPlatform = LOCAL_PLATFORM,
+                holderPlatform = holderPlatform,
+                expiresAtEpochMs = expires,
+                fencingToken = responseFence,
+                leaseSchemaVersion = schema,
+                leaseRemainingMs = remaining,
+                localDeadlineElapsedMs = nowElapsed + remaining,
+                reason = "M24 authoritative pre-submit validation confirmed ANDROID owner and fence=$responseFence."
+            )
+        )
+        return true to "M24 authoritative CloudShare status confirmed engine=$engineId platform=$holderPlatform fence=$responseFence."
+    }
+
+    suspend fun transferAuthority(target: M24AuthorityTransferTarget): EngineAuthoritySnapshot {
+        val client = activeClient
+        val accountKey = activeAccountKey
+        val oldFence = activeFenceToken
+        val current = EngineAuthorityRuntime.snapshot()
+        if (client == null || accountKey.isBlank() || oldFence <= 0L || !current.authorized) {
+            val denied = current.copy(
+                authorized = false,
+                state = "TRANSFER_BLOCKED",
+                reason = "M24 transfer requires the currently authorized local LIVE owner."
+            )
+            EngineAuthorityRuntime.publish(denied)
+            return denied
+        }
+
+        val startedElapsedMs = SystemClock.elapsedRealtime()
+        val response = runCatching {
+            client.transferEngineLease(
+                accountKey = accountKey,
+                engineId = engineId,
+                fenceToken = oldFence,
+                targetClientId = target.clientId,
+                targetEngineId = target.engineId,
+                targetPlatform = target.platform.wireName,
+                ttlSeconds = LEASE_TTL_SECONDS
+            )
+        }.getOrElse { error ->
+            val denied = current.copy(
+                authorized = false,
+                state = "TRANSFER_UNKNOWN",
+                reason = "M24 authority transfer failed/unknown: ${error.message ?: error.javaClass.simpleName}"
+            )
+            EngineAuthorityRuntime.publish(denied)
+            return denied
+        }
+
+        val roundTripMs = (SystemClock.elapsedRealtime() - startedElapsedMs).coerceAtLeast(0L)
+        val newFence = response.long("fence_token")
+        val holder = response.text("holder_engine_id")
+        val holderPlatform = response.text("holder_platform")
+        val remaining = M24CrossPlatformAuthorityPolicy.conservativeRemainingMs(
+            response.long("lease_remaining_ms"),
+            roundTripMs
+        )
+        val accepted = M24CrossPlatformAuthorityPolicy.transferAccepted(
+            transferred = response.bool("transferred"),
+            oldFence = oldFence,
+            newFence = newFence,
+            targetEngineId = target.engineId,
+            responseHolderEngineId = holder,
+            targetPlatform = target.platform,
+            responseHolderPlatform = holderPlatform,
+            conservativeRemainingMs = remaining
+        )
+
+        if (!accepted) {
+            val denied = current.copy(
+                authorized = false,
+                state = "TRANSFER_REJECTED",
+                holderEngineId = holder,
+                holderPlatform = holderPlatform,
+                fencingToken = newFence,
+                leaseRemainingMs = remaining,
+                reason = "M24 transfer response did not prove an atomic newer fencing epoch."
+            )
+            EngineAuthorityRuntime.publish(denied)
+            return denied
+        }
+
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        activeClient = null
+        activeAccountKey = ""
+        activeFenceToken = 0L
+        val transferred = current.copy(
+            authorized = false,
+            state = "TRANSFERRED",
+            holderEngineId = holder,
+            localPlatform = LOCAL_PLATFORM,
+            holderPlatform = holderPlatform,
+            fencingToken = newFence,
+            leaseRemainingMs = remaining,
+            localDeadlineElapsedMs = 0L,
+            reason = "M24 LIVE authority atomically transferred to ${target.platform.wireName} engine=${target.engineId}; local Android is dashboard-only."
+        )
+        EngineAuthorityRuntime.publish(transferred)
+        return transferred
+    }
+
     fun stop() {
         heartbeatJob?.cancel()
         heartbeatJob = null
@@ -342,6 +564,7 @@ class EngineAuthorityLeaseManager(context: Context) {
                 authorized = false,
                 state = "STOPPED",
                 engineId = engineId,
+                localPlatform = LOCAL_PLATFORM,
                 reason = "Trading host stopped; LIVE entry authority released/expiring."
             )
         )
@@ -367,6 +590,7 @@ class EngineAuthorityLeaseManager(context: Context) {
             authorized = false,
             state = state,
             engineId = engineId,
+            localPlatform = LOCAL_PLATFORM,
             reason = reason
         )
         EngineAuthorityRuntime.publish(snapshot)

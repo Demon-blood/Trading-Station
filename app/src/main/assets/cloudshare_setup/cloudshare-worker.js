@@ -1,5 +1,6 @@
 const PROTOCOL_VERSION = "2026-07-26";
 const ENGINE_LEASE_SCHEMA_VERSION = 2;
+const ENGINE_AUTHORITY_PLATFORMS = new Set(["ANDROID", "WINDOWS"]);
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -207,7 +208,7 @@ async function handleEngineLease(request, env, client, path) {
   const body = await request.json().catch(() => ({}));
   const accountKey = String(body.account_key || "").trim().toLowerCase();
   const engineId = String(body.engine_id || "").trim().slice(0, 120);
-  const platform = String(body.platform || "").trim().slice(0, 40);
+  const platform = String(body.platform || "").trim().toUpperCase().slice(0, 40);
   const fenceToken = Math.max(0, Number(body.fence_token || 0));
   const ttlSeconds = Math.min(300, Math.max(30, Number(body.ttl_seconds || 75)));
   if (!/^[a-f0-9]{64}$/.test(accountKey) || !engineId) {
@@ -239,6 +240,9 @@ async function handleEngineLease(request, env, client, path) {
   };
 
   if (path === "/v1/engine-lease/acquire") {
+    if (!ENGINE_AUTHORITY_PLATFORMS.has(platform)) {
+      return json({ error: "platform must be ANDROID or WINDOWS" }, 400);
+    }
     await env.DB.prepare(
       `INSERT INTO engine_leases
        (account_key, holder_client_id, holder_engine_id, platform,
@@ -276,6 +280,9 @@ async function handleEngineLease(request, env, client, path) {
 
   if (path === "/v1/engine-lease/heartbeat") {
     if (fenceToken <= 0) return json({ error: "positive fence_token required" }, 400);
+    if (!ENGINE_AUTHORITY_PLATFORMS.has(platform)) {
+      return json({ error: "platform must be ANDROID or WINDOWS" }, 400);
+    }
 
     const result = await env.DB.prepare(
       `UPDATE engine_leases
@@ -303,16 +310,21 @@ async function handleEngineLease(request, env, client, path) {
 
   if (path === "/v1/engine-lease/release") {
     if (fenceToken <= 0) return json({ error: "positive fence_token required" }, 400);
+    // M24 never deletes the row: preserving fence_token prevents a later owner
+    // from restarting at fencing epoch 1 after a clean release.
     const result = await env.DB.prepare(
-      `DELETE FROM engine_leases
+      `UPDATE engine_leases
+          SET expires_at_epoch_ms=?, updated_at=?
         WHERE account_key=?
           AND holder_client_id=?
           AND holder_engine_id=?
           AND fence_token=?
-          AND schema_version=?`
+          AND schema_version=?
+          AND expires_at_epoch_ms > ?`
     ).bind(
+      now, updated,
       accountKey, client.client_id, engineId, fenceToken,
-      ENGINE_LEASE_SCHEMA_VERSION
+      ENGINE_LEASE_SCHEMA_VERSION, now
     ).run();
     return json({
       released: Number(result?.meta?.changes || 0) > 0,
@@ -320,6 +332,44 @@ async function handleEngineLease(request, env, client, path) {
       lease_schema_version: ENGINE_LEASE_SCHEMA_VERSION,
       server_now_epoch_ms: now
     });
+  }
+
+  if (path === "/v1/engine-lease/transfer") {
+    if (fenceToken <= 0) return json({ error: "positive fence_token required" }, 400);
+    const targetClientId = String(body.target_client_id || "").trim().slice(0, 120);
+    const targetEngineId = String(body.target_engine_id || "").trim().slice(0, 120);
+    const targetPlatform = String(body.target_platform || "").trim().toUpperCase().slice(0, 40);
+    if (!targetClientId || !targetEngineId || !ENGINE_AUTHORITY_PLATFORMS.has(targetPlatform)) {
+      return json({ error: "valid target_client_id, target_engine_id and target_platform required" }, 400);
+    }
+
+    const result = await env.DB.prepare(
+      `UPDATE engine_leases
+          SET holder_client_id=?, holder_engine_id=?, platform=?,
+              expires_at_epoch_ms=?, updated_at=?, fence_token=fence_token + 1
+        WHERE account_key=?
+          AND holder_client_id=?
+          AND holder_engine_id=?
+          AND fence_token=?
+          AND schema_version=?
+          AND expires_at_epoch_ms > ?
+          AND EXISTS (SELECT 1 FROM clients WHERE client_id=? AND enabled=1)`
+    ).bind(
+      targetClientId, targetEngineId, targetPlatform,
+      expires, updated,
+      accountKey, client.client_id, engineId, fenceToken,
+      ENGINE_LEASE_SCHEMA_VERSION, now,
+      targetClientId
+    ).run();
+
+    const row = await readLease();
+    const transferred = Number(result?.meta?.changes || 0) > 0 &&
+      row?.holder_client_id === targetClientId &&
+      row?.holder_engine_id === targetEngineId &&
+      row?.platform === targetPlatform &&
+      Number(row?.fence_token || 0) > fenceToken &&
+      Number(row?.expires_at_epoch_ms || 0) > now;
+    return json(wire(row, { transferred }));
   }
 
   if (path === "/v1/engine-lease/status") {
