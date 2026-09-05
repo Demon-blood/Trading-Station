@@ -537,27 +537,14 @@ class AppSettingsStore(context: Context) {
 
     fun discordChannelId(): String? = secure.readEncryptedString("discord_channel_id")?.takeIf { it.isNotBlank() }
 
-    fun secureBackupMap(): Map<String, String> {
-        val out = linkedMapOf<String, String>()
-        ExchangeProvider.values().forEach { provider ->
-            exchangeApiKey(provider)?.let { out["${provider.name.lowercase()}_api_key"] = it }
-            exchangeSecretKey(provider)?.let { out["${provider.name.lowercase()}_secret_key"] = it }
-        }
-        newsApiKey()?.let { out["news_api_key"] = it }
-        cryptoPanicApiKey()?.let { out["cryptopanic_api_key"] = it }
-        marketauxApiKey()?.let { out["marketaux_api_key"] = it }
-        newsDataApiKey()?.let { out["newsdata_api_key"] = it }
-        gNewsApiKey()?.let { out["gnews_api_key"] = it }
-        guardianApiKey()?.let { out["guardian_api_key"] = it }
-        openAiApiKey()?.let { out["openai_api_key"] = it }
-        telegramBotToken()?.let { out["telegram_bot_token"] = it }
-        telegramChatId()?.let { out["telegram_chat_id"] = it }
-        discordWebhookUrl()?.let { out["discord_webhook_url"] = it }
-        remoteCommandPin()?.let { out["remote_command_pin"] = it }
-        discordBotToken()?.let { out["discord_bot_token"] = it }
-        discordChannelId()?.let { out["discord_channel_id"] = it }
-        return out
-    }
+    /**
+     * M22: ordinary backup/export intentionally excludes every secret.
+     *
+     * Credentials must be re-entered after a normal restore. The legacy restore method
+     * remains below only for an explicit, user-supplied migration payload; this method
+     * will no longer generate such plaintext payloads.
+     */
+    fun secureBackupMap(): Map<String, String> = emptyMap()
 
     fun restoreSecureBackupMap(values: Map<String, String>) {
         ExchangeProvider.values().forEach { provider ->

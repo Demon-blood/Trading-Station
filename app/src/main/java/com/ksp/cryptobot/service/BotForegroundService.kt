@@ -23,6 +23,9 @@ import com.ksp.cryptobot.execution.KrakenDmsSafetyManager
 import com.ksp.cryptobot.execution.KrakenDmsSafetyRuntime
 import com.ksp.cryptobot.exchange.KrakenRealtimeMarketDataRegistry
 import com.ksp.cryptobot.exchange.KrakenPrivateExecutionRegistry
+import com.ksp.cryptobot.exchange.KrakenSpotClient
+import com.ksp.cryptobot.exchange.KrakenApiKeySecurityPolicy
+import com.ksp.cryptobot.exchange.KrakenApiKeySecurityRuntime
 import com.ksp.cryptobot.settings.AppSettingsStore
 import com.ksp.cryptobot.status.BotStatusStore
 import kotlinx.coroutines.*
@@ -42,6 +45,9 @@ class BotForegroundService : Service() {
 
     @Volatile
     private var loopJob: Job? = null
+
+    @Volatile
+    private var lastKrakenApiKeySecurityCheckMs: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -120,6 +126,19 @@ class BotForegroundService : Service() {
             configureRealtimeMarketData(startSettings, connectivity.snapshot.usable)
             configurePrivateExecutionState(startSettings, connectivity.snapshot.usable)
 
+            if (startSettings.mode != BotMode.PAPER &&
+                startSettings.exchangeProvider == ExchangeProvider.KRAKEN
+            ) {
+                updateNotification("Inspecting Kraken API-key permissions…")
+                if (!refreshKrakenApiKeySecurity(startSettings, "startup:$recoveryReason")) {
+                    hostStore.failure("LIVE blocked: Kraken API-key permission security check failed.")
+                    updateNotification("LIVE blocked: unsafe Kraken API key")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@launch
+                }
+            }
+
             if (startSettings.mode != BotMode.PAPER && startSettings.exchangeProvider != ExchangeProvider.PAPER) {
                 updateNotification("Acquiring distributed LIVE engine authority…")
                 val authority = runCatching { authorityLease.acquire(startSettings) }.getOrElse { error ->
@@ -194,6 +213,10 @@ class BotForegroundService : Service() {
                     KrakenPrivateExecutionRegistry.markRecoveryUnknown(
                         "Validated network unavailable during service cycle."
                     )
+                    KrakenApiKeySecurityRuntime.markUnknown(
+                        "Validated network unavailable; server-side API-key permissions cannot be considered current."
+                    )
+                    lastKrakenApiKeySecurityCheckMs = 0L
                     hostStore.recovery("PAUSED_NETWORK")
                     val message = "Network not validated (${network.summary()}). New scans/orders paused."
                     statusStore.write(message, "WARN")
@@ -217,6 +240,17 @@ class BotForegroundService : Service() {
                 configureRealtimeMarketData(current, network.usable)
                 configurePrivateExecutionState(current, network.usable)
                 if (current.mode != BotMode.PAPER && current.exchangeProvider == ExchangeProvider.KRAKEN) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastKrakenApiKeySecurityCheckMs >= KRAKEN_KEY_SECURITY_RECHECK_MS) {
+                        val keySafe = refreshKrakenApiKeySecurity(current, "service-cycle")
+                        if (!keySafe) {
+                            statusStore.write(
+                                "Kraken API-key security is unsafe/unknown. New BUYs remain blocked; protective SELLs and risk reduction remain available.",
+                                "ERROR"
+                            )
+                        }
+                    }
+
                     val dms = dmsSafety.ensureDisarmed(current, "service-cycle")
                     if (!dms.safeForNewEntries) {
                         statusStore.write(
@@ -289,6 +323,45 @@ class BotForegroundService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+        }
+    }
+
+    private suspend fun refreshKrakenApiKeySecurity(
+        settings: com.ksp.cryptobot.core.BotSettings,
+        reason: String
+    ): Boolean {
+        if (settings.mode == BotMode.PAPER || settings.exchangeProvider != ExchangeProvider.KRAKEN) {
+            KrakenApiKeySecurityRuntime.markUnknown("Kraken LIVE permission inspection is not active in this mode.")
+            return true
+        }
+
+        val key = settingsStore.exchangeApiKey(ExchangeProvider.KRAKEN).orEmpty()
+        val secret = settingsStore.exchangeSecretKey(ExchangeProvider.KRAKEN).orEmpty()
+        if (key.isBlank() || secret.isBlank()) {
+            KrakenApiKeySecurityRuntime.markUnknown("Kraken credentials are missing.")
+            statusStore.write("Kraken API-key security check blocked: credentials are missing.", "ERROR")
+            return false
+        }
+
+        return runCatching {
+            val info = KrakenSpotClient(key, secret).getApiKeySecurityInfo()
+            val assessment = KrakenApiKeySecurityPolicy.assess(info)
+            KrakenApiKeySecurityRuntime.publish(assessment)
+            lastKrakenApiKeySecurityCheckMs = assessment.checkedAtEpochMs
+            statusStore.write(
+                "Kraken API-key security [$reason]: ${assessment.reason}",
+                if (assessment.safeForLive) "INFO" else "ERROR"
+            )
+            assessment.safeForLive
+        }.getOrElse { error ->
+            KrakenApiKeySecurityRuntime.markUnknown(
+                "Permission inspection failed after $reason: ${error.message ?: error.javaClass.simpleName}"
+            )
+            statusStore.write(
+                "Kraken API-key security inspection failed after $reason: ${error.message ?: error.javaClass.simpleName}. New BUYs remain fail-closed.",
+                "ERROR"
+            )
+            false
         }
     }
 
@@ -420,6 +493,7 @@ class BotForegroundService : Service() {
         statusStore.write("Stop requested. Trading host shutting down.", "WARN")
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
+        KrakenApiKeySecurityRuntime.markUnknown("Trading host stopped.")
         authorityLease.stop()
         dmsSafety.stop()
         controller.stop()
@@ -510,6 +584,7 @@ class BotForegroundService : Service() {
     override fun onDestroy() {
         KrakenRealtimeMarketDataRegistry.stop()
         KrakenPrivateExecutionRegistry.stop()
+        KrakenApiKeySecurityRuntime.markUnknown("Trading host destroyed.")
         authorityLease.stop()
         dmsSafety.stop()
         connectivity.stop()
@@ -537,5 +612,6 @@ class BotForegroundService : Service() {
         private const val NETWORK_RETRY_MS = 5_000L
         private const val RECONCILIATION_RETRY_MS = 15_000L
         private const val FAILURE_RECONCILE_THRESHOLD = 3
+        private const val KRAKEN_KEY_SECURITY_RECHECK_MS = 10L * 60L * 1000L
     }
 }
