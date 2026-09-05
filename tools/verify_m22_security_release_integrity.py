@@ -8,7 +8,7 @@ def read(path):
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 def main():
-    print("INFO | M22 verifier revision v1.1")
+    print("INFO | M22 verifier revision v1.2")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
     policy = read(repo / "app/src/main/java/com/ksp/cryptobot/exchange/KrakenApiKeySecurity.kt")
@@ -153,6 +153,10 @@ def main():
 
         "no production signing material is tracked":
             not forbidden_tracked,
+
+        "root protected workflows are bootstrapped on main":
+            (repo / ".github/workflows/android-release-apk.yml").exists() and
+            (repo / ".github/workflows/osv-scanner.yml").exists(),
 
         "release workflow requires pinned certificate secret":
             "ANDROID_EXPECTED_CERT_SHA256" in release_wf,

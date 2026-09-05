@@ -78,6 +78,23 @@ jobs:
           }
           python3 tools/verify_m21_chaos_recovery.py "$GITHUB_WORKSPACE" | tee m21-prerequisite.log
 
+      - name: Require protected workflow bootstrap on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .github/workflows/android-release-apk.yml || {
+            echo "Missing bootstrapped .github/workflows/android-release-apk.yml" >&2
+            exit 1
+          }
+          test -s .github/workflows/osv-scanner.yml || {
+            echo "Missing bootstrapped .github/workflows/osv-scanner.yml" >&2
+            exit 1
+          }
+          grep -q 'ANDROID_EXPECTED_CERT_SHA256' .github/workflows/android-release-apk.yml
+          grep -q 'verify --verbose --print-certs' .github/workflows/android-release-apk.yml
+          grep -q 'releaseRuntimeClasspath' .github/workflows/osv-scanner.yml
+          grep -q -- '--lockfile=osv-scanner:build/m22-runtime-osv-scanner.json' .github/workflows/osv-scanner.yml
+
       - name: Apply M22
         shell: bash
         run: |
@@ -292,9 +309,15 @@ jobs:
           set -euo pipefail
           git status --short
           {
-            git diff --name-only -- app .github/workflows/android-release-apk.yml .github/workflows/osv-scanner.yml gradle/verification-metadata.xml
-            git ls-files --others --exclude-standard -- app .github/workflows/android-release-apk.yml .github/workflows/osv-scanner.yml gradle/verification-metadata.xml
+            git diff --name-only -- app gradle/verification-metadata.xml
+            git ls-files --others --exclude-standard -- app gradle/verification-metadata.xml
           } | sort -u | tee m22-files.txt
+
+          if git status --porcelain -- .github/workflows | grep -q .; then
+            echo "M22 must not modify protected workflow files inside the generated milestone branch." >&2
+            git status --short -- .github/workflows >&2
+            exit 1
+          fi
 
       - name: Create M22 branch
         id: branch
@@ -308,8 +331,6 @@ jobs:
           git checkout -b "$BRANCH"
           git add \
             app \
-            .github/workflows/android-release-apk.yml \
-            .github/workflows/osv-scanner.yml \
             gradle/verification-metadata.xml
           git diff --cached --quiet && {
             echo "No M22 changes to commit" >&2
@@ -330,7 +351,7 @@ jobs:
             --base main \
             --head "$BRANCH_NAME" \
             --title "M22: security, API-key permissions and release integrity" \
-            --body "Adds server-side Kraken API-key permission inspection and hard-blocks withdrawal/address-management permissions or missing LIVE permissions. New BUYs require a fresh matching permission assessment; SELL risk reduction remains available. Hardens Android Keystore ciphertext with AES-GCM AAD and synchronous persistence, removes plaintext secret export from normal backups, adds Gradle SHA-256 dependency verification, pinned OSV dependency scanning, and production release signer pinning/apksigner/APK-hash evidence."
+            --body "Adds server-side Kraken API-key permission inspection and hard-blocks withdrawal/address-management permissions or missing LIVE permissions. New BUYs require a fresh matching permission assessment; SELL risk reduction remains available. Hardens Android Keystore ciphertext with AES-GCM AAD and synchronous persistence, removes plaintext secret export from normal backups, adds Gradle SHA-256 dependency verification. Protected root workflows are pre-bootstrapped on main and are intentionally not written by the milestone branch."
 
       - name: PR fallback
         if: steps.pr.outcome != 'success'

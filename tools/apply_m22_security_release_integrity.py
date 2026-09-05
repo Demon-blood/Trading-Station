@@ -9,8 +9,6 @@ PAYLOAD_FILES = [
     "app/src/test/java/com/ksp/cryptobot/exchange/KrakenApiKeySecurityPolicyM22Test.kt",
     "app/src/test/java/com/ksp/cryptobot/exchange/KrakenApiKeySecurityRuntimeM22Test.kt",
     "app/src/test/java/com/ksp/cryptobot/security/SecureSettingsContractM22Test.kt",
-    ".github/workflows/android-release-apk.yml",
-    ".github/workflows/osv-scanner.yml",
 ]
 
 def fail(msg):
@@ -23,15 +21,29 @@ def replace_once(text, old, new, label):
     return text.replace(old, new, 1)
 
 def main():
-    print("INFO | M22 applier revision v1")
+    print("INFO | M22 applier revision v1.2")
     repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     if not (repo / ".git").exists():
         fail("Not a git checkout")
     if not (repo / "tools/verify_m21_chaos_recovery.py").exists():
         fail("M21 prerequisite missing from main")
 
+    release_workflow = repo / ".github/workflows/android-release-apk.yml"
+    osv_workflow = repo / ".github/workflows/osv-scanner.yml"
+    if not release_workflow.exists():
+        fail("M22 protected workflow bootstrap missing: .github/workflows/android-release-apk.yml")
+    if not osv_workflow.exists():
+        fail("M22 protected workflow bootstrap missing: .github/workflows/osv-scanner.yml")
+
+    release_text = release_workflow.read_text(encoding="utf-8")
+    osv_text = osv_workflow.read_text(encoding="utf-8")
+    if "ANDROID_EXPECTED_CERT_SHA256" not in release_text or "verify --verbose --print-certs" not in release_text:
+        fail("M22 signed-release workflow on main is not the hardened bootstrap revision.")
+    if "releaseRuntimeClasspath" not in osv_text or "--lockfile=osv-scanner:build/m22-runtime-osv-scanner.json" not in osv_text:
+        fail("M22 OSV workflow on main is not the runtime-scoped bootstrap revision.")
+
     dirty = os.popen(
-        f'cd "{repo}" && git status --porcelain -- app .github/workflows/android-release-apk.yml .github/workflows/osv-scanner.yml gradle'
+        f'cd "{repo}" && git status --porcelain -- app gradle'
     ).read().strip()
     if dirty:
         fail("Refusing to patch dirty M22 target tree:\n" + dirty)
@@ -339,10 +351,10 @@ import com.ksp.cryptobot.exchange.KrakenApiKeySecurityRuntime
     print("PATCH |", p.relative_to(repo))
 
     changed = set(os.popen(
-        f'cd "{repo}" && git diff --name-only -- app .github/workflows/android-release-apk.yml .github/workflows/osv-scanner.yml'
+        f'cd "{repo}" && git diff --name-only -- app'
     ).read().splitlines())
     untracked = set(os.popen(
-        f'cd "{repo}" && git ls-files --others --exclude-standard -- app .github/workflows/android-release-apk.yml .github/workflows/osv-scanner.yml'
+        f'cd "{repo}" && git ls-files --others --exclude-standard -- app'
     ).read().splitlines())
     actual = changed | untracked
 
