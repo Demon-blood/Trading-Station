@@ -98,7 +98,9 @@ object KrakenDurableExecutionQuarantine {
                 status = "PENDING",
                 reason = "Persisted before Kraken AddOrder transport boundary."
             )
-            persistLocked()
+            check(persistLocked()) {
+                "Refusing Kraken AddOrder boundary because unresolved intent could not be durably committed."
+            }
         }
     }
 
@@ -109,13 +111,21 @@ object KrakenDurableExecutionQuarantine {
                 status = "AMBIGUOUS",
                 reason = reason.take(500)
             )
-            persistLocked()
+            check(persistLocked()) {
+                "Unable to durably persist ambiguous Kraken AddOrder state."
+            }
         }
     }
 
     fun clear(clientOrderId: String) {
         synchronized(lock) {
-            if (rows.remove(clientOrderId) != null) persistLocked()
+            val removed = rows.remove(clientOrderId) ?: return
+            if (!persistLocked()) {
+                rows[clientOrderId] = removed
+                throw IllegalStateException(
+                    "Unable to durably clear Kraken execution quarantine; keeping entry fail-closed."
+                )
+            }
         }
     }
 
@@ -127,11 +137,11 @@ object KrakenDurableExecutionQuarantine {
         }
     }
 
-    private fun persistLocked() {
+    private fun persistLocked(): Boolean {
         // commit(), not apply(): the unresolved intent must reach durable storage before
         // the network AddOrder call can cross the process-crash boundary.
-        prefs?.edit()
+        return prefs?.edit()
             ?.putString(KEY_ROWS, KrakenDurableSubmissionCodec.encode(rows.values))
-            ?.commit()
+            ?.commit() == true
     }
 }
