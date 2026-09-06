@@ -16,7 +16,7 @@ enum class M25ReadinessStage {
 data class M25ReleaseEvidence(
     val ciRegression: M25GateState = M25GateState.PENDING,
     val dependencySecurityScan: M25GateState = M25GateState.PENDING,
-    val canonicalIdentitySchema12: M25GateState = M25GateState.PENDING,
+    val roomSchema12Verified: M25GateState = M25GateState.PENDING,
     val restartRecovery: M25GateState = M25GateState.PENDING,
     val networkRecovery: M25GateState = M25GateState.PENDING,
     val partialFillLifecycle: M25GateState = M25GateState.PENDING,
@@ -55,7 +55,7 @@ object M25ReleaseReadinessPolicy {
         val allGates = listOf(
             Gate("CI regression", evidence.ciRegression),
             Gate("dependency security scan", evidence.dependencySecurityScan),
-            Gate("canonical Room schema 12 identity", evidence.canonicalIdentitySchema12),
+            Gate("Room schema 12 source", evidence.roomSchema12Verified),
             Gate("restart recovery", evidence.restartRecovery),
             Gate("network recovery", evidence.networkRecovery),
             Gate("partial-fill lifecycle", evidence.partialFillLifecycle),
@@ -86,7 +86,7 @@ object M25ReleaseReadinessPolicy {
         val codeGates = listOf(
             Gate("CI regression", evidence.ciRegression),
             Gate("dependency security scan", evidence.dependencySecurityScan),
-            Gate("canonical Room schema 12 identity", evidence.canonicalIdentitySchema12),
+            Gate("Room schema 12 source", evidence.roomSchema12Verified),
             Gate("restart recovery", evidence.restartRecovery),
             Gate("network recovery", evidence.networkRecovery),
             Gate("partial-fill lifecycle", evidence.partialFillLifecycle),

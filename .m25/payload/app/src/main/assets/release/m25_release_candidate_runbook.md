@@ -9,15 +9,22 @@ probe CloudShare read-only, verify signing, and evaluate operator evidence. A ti
 LIVE order is an explicit operator action performed in the app only after the
 pre-LIVE gate reports `CONTROLLED_LIVE_ELIGIBLE`.
 
+## Source-of-truth rule
+
+M25 verifies the real Room source schema from `AppDatabase` and its migrations.
+A stale informational `INSTALL_IDENTITY.txt` metadata string is not allowed to block
+or falsify the code release-candidate state. Install identity metadata can be cleaned
+up separately without changing database behavior.
+
 ## Readiness stages
 
 ### BLOCKED
 Code/internal evidence is missing or any explicit M25 gate failed.
 
 ### CODE_RC
-The source compiles, tests, passes the historical milestone verifier chain, preserves
-restart/network/partial-fill safety contracts, and produces a canonical debug APK.
-External production evidence is still incomplete.
+The source compiles, tests, passes the historical milestone verifier chain, verifies
+Room schema 12 from source, preserves restart/network/partial-fill safety contracts,
+and produces a canonical debug APK.
 
 ### CONTROLLED_LIVE_ELIGIBLE
 Requires all of the following in addition to CODE_RC:
@@ -64,7 +71,7 @@ satisfy a checklist.
 
 Repository source proves what the Worker is supposed to implement. It does not prove
 that the production Worker/D1 deployment has been updated. M25 therefore performs a
-real read-only `/v1/health` probe against the production URL supplied at dispatch.
+real read-only `/v1/health` probe against the production URL supplied at validation.
 
 No production deployment is claimed until that probe passes on the hosted endpoint.
 

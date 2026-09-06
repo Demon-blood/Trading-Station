@@ -1,10 +1,9 @@
 {
   "m25": 25,
-  "baseline": "490d44ff4aafa2b97496774882e5bf91a2020d58",
   "machine": {
     "ci_regression": "PENDING",
     "dependency_security_scan": "PENDING_POST_MERGE_OSV",
-    "canonical_identity_schema12": "PENDING",
+    "room_schema12_source_verified": "PENDING",
     "restart_recovery_contract": "PENDING",
     "network_recovery_contract": "PENDING",
     "partial_fill_lifecycle_contract": "PENDING",

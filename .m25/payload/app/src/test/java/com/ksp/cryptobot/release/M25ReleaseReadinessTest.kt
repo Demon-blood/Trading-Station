@@ -8,7 +8,7 @@ class M25ReleaseReadinessTest {
     private fun codePass() = M25ReleaseEvidence(
         ciRegression = M25GateState.PASS,
         dependencySecurityScan = M25GateState.PASS,
-        canonicalIdentitySchema12 = M25GateState.PASS,
+        roomSchema12Verified = M25GateState.PASS,
         restartRecovery = M25GateState.PASS,
         networkRecovery = M25GateState.PASS,
         partialFillLifecycle = M25GateState.PASS,
@@ -33,6 +33,15 @@ class M25ReleaseReadinessTest {
         assertFalse(result.controlledLiveEligible)
         assertFalse(result.releaseReady)
         assertTrue(result.blockers.any { it.contains("CloudShare production") })
+    }
+
+    @Test
+    fun roomSchemaSourceTruthIsRequiredForCodeRc() {
+        val result = M25ReleaseReadinessPolicy.evaluate(
+            codePass().copy(roomSchema12Verified = M25GateState.PENDING)
+        )
+        assertEquals(M25ReadinessStage.BLOCKED, result.stage)
+        assertTrue(result.blockers.any { it.contains("Room schema 12 source") })
     }
 
     @Test
