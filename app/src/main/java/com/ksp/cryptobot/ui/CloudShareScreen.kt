@@ -53,6 +53,7 @@ fun CloudShareScreen() {
     var adminToken by remember { mutableStateOf(store.adminToken()) }
     var inviteLabel by remember { mutableStateOf("Android invitation") }
     var adminOutput by remember { mutableStateOf("") }
+    var diagnosticsSnapshot by remember { mutableStateOf<CloudShareDiagnosticsSnapshot?>(null) }
 
     fun runAction(block: suspend () -> Unit) {
         if (busy) return
@@ -486,6 +487,18 @@ fun CloudShareScreen() {
             CloudShareFlow.REPAIR -> {
                 Text("Repair & Test CloudShare", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 SetupStateCard(store)
+                OutlinedButton(
+                    onClick = {
+                        runAction {
+                            diagnosticsSnapshot = engine.diagnostics()
+                            val snapshot = diagnosticsSnapshot!!
+                            status = "Data=${snapshot.dataState}; indexed=${snapshot.indexedEvidenceSamples}; resolved outcomes=${snapshot.outcomeSamples}/${store.collectiveMinSamples}."
+                        }
+                    },
+                    enabled = !busy && store.enabled,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Inspect Learning Readiness") }
+                diagnosticsSnapshot?.let { CloudShareReadinessCard(it, store.collectiveMinSamples) }
                 Button(
                     onClick = {
                         checkRows = emptyList()
@@ -501,6 +514,7 @@ fun CloudShareScreen() {
                     onClick = {
                         runAction {
                             val result = engine.syncIfDue(force = true)
+                            if (result.error.isBlank()) diagnosticsSnapshot = engine.diagnostics()
                             status = "Sync: uploaded=${result.uploaded}, downloaded=${result.downloaded}, backfill=${result.backfilled}" +
                                 if (result.error.isBlank()) "" else ", error=${result.error}"
                         }
@@ -587,6 +601,27 @@ fun CloudShareScreen() {
         Text(status, style = MaterialTheme.typography.bodySmall)
         if (busy && createStep != CreateStep.PROVISIONING) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun CloudShareReadinessCard(snapshot: CloudShareDiagnosticsSnapshot, requiredOutcomes: Int) {
+    OutlinedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("Learning Readiness", fontWeight = FontWeight.Bold)
+            Text("Data readiness: ${snapshot.dataState}", style = MaterialTheme.typography.bodySmall)
+            Text("Indexed evidence: ${snapshot.indexedEvidenceSamples} samples / ${snapshot.indexedEvidenceRows} rows", style = MaterialTheme.typography.bodySmall)
+            Text("Observational samples: ${snapshot.observationSamples}", style = MaterialTheme.typography.bodySmall)
+            Text("Resolved outcome samples: ${snapshot.outcomeSamples}/$requiredOutcomes", style = MaterialTheme.typography.bodySmall)
+            Text("Outcome learning: ${snapshot.outcomeState}", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Signals and decisions can make data READY, but they never count as profit/win-rate outcomes. Collective score adjustment stays neutral until enough matching resolved outcomes exist.",
+                style = MaterialTheme.typography.labelSmall
+            )
+            if (snapshot.newestDataTimestamp.isNotBlank()) {
+                Text("Newest data: ${snapshot.newestDataTimestamp}", style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }

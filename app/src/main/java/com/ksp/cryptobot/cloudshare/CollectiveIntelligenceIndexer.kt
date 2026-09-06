@@ -14,13 +14,17 @@ object CollectiveIntelligenceIndexer {
         var isOutcome = false
 
         if (source == "shared_learning_daily") {
+            // Decisions/signals are observational evidence even when they do not yet have
+            // realized PnL. Preserve sample_count so data readiness can progress without
+            // pretending these rows are resolved trade outcomes.
+            samples = payload.int("sample_count").coerceAtLeast(0)
             val positive = payload.int("positive_pnl_count").coerceAtLeast(0)
             val negative = payload.int("negative_pnl_count").coerceAtLeast(0)
             val zero = payload.int("zero_pnl_count").coerceAtLeast(0)
             val outcomeLike = eventType.contains("outcome") || eventType == "trade" || eventType.endsWith("_trade")
             if (outcomeLike) {
-                samples = positive + negative + zero
-                if (samples <= 0) samples = payload.int("sample_count").coerceAtLeast(0)
+                val resolvedSamples = positive + negative + zero
+                if (resolvedSamples > 0) samples = resolvedSamples
                 if (samples > 0) {
                     isOutcome = true
                     wins = positive
@@ -28,6 +32,10 @@ object CollectiveIntelligenceIndexer {
                     edgeSum = payload.double("pnl_sum")
                 }
             }
+        } else if (source == "shared_signal_daily") {
+            // Signal aggregates prove that fresh collective data is flowing. They are not
+            // outcomes and therefore must never influence win rate / edge adjustments.
+            samples = payload.int("sample_count").coerceAtLeast(0)
         } else if (source == "shared_trade_daily") {
             val side = payload.string("side").uppercase()
             samples = payload.int("sample_count").coerceAtLeast(0)
