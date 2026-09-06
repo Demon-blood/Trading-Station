@@ -13,7 +13,19 @@ data class CloudShareDiagnosticsSnapshot(
     val contributors: Int,
     val newestCollectiveTimestamp: String,
     val backfill: Map<String, String>,
-    val recentAudit: List<String>
+    val recentAudit: List<String>,
+    val indexedEvidenceRows: Int = 0,
+    val indexedEvidenceSamples: Int = 0,
+    val indexedEvidenceContributors: Int = 0,
+    val observationRows: Int = 0,
+    val observationSamples: Int = 0,
+    val outcomeSamples: Int = 0,
+    val dataReady: Boolean = false,
+    val dataState: String = "DISABLED",
+    val dataRequiredSamples: Int = 0,
+    val outcomeState: String = "COLLECTING_OUTCOMES",
+    val newestDataTimestamp: String = "",
+    val newestOutcomeTimestamp: String = ""
 )
 
 class CloudShareDiagnostics(context: Context) {
@@ -34,7 +46,19 @@ class CloudShareDiagnostics(context: Context) {
             contributors = cache.contributors,
             newestCollectiveTimestamp = cache.newestEventTimestamp,
             backfill = backfill.status(),
-            recentAudit = dao.recentAudit(20).map { "${it.status} ${it.operation}: ${it.detail}" }
+            recentAudit = dao.recentAudit(20).map { "${it.status} ${it.operation}: ${it.detail}" },
+            indexedEvidenceRows = cache.indexedRows,
+            indexedEvidenceSamples = cache.indexedSamples,
+            indexedEvidenceContributors = cache.indexedContributors,
+            observationRows = cache.observationRows,
+            observationSamples = cache.observationSamples,
+            outcomeSamples = cache.outcomeSamples,
+            dataReady = cache.dataReady,
+            dataState = cache.dataState,
+            dataRequiredSamples = cache.dataRequiredSamples,
+            outcomeState = cache.outcomeState,
+            newestDataTimestamp = cache.newestDataTimestamp,
+            newestOutcomeTimestamp = cache.newestOutcomeTimestamp
         )
     }
 }

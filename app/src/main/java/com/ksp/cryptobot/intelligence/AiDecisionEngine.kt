@@ -23,6 +23,7 @@ class AiDecisionEngine(
             regime = "",
             timeframe = ""
         )
+        val collectiveSnapshot = CloudShareCollectiveCache.snapshot()
         val finalScore = (technicalScore + newsScore + memoryScore + collective.adjustment).coerceIn(0, 100)
         val confidence = when {
             finalScore >= 80 -> 85
@@ -54,7 +55,10 @@ class AiDecisionEngine(
             append("Technical=${technicalScore}, news=${newsScore}, newsArticles=${news.size}, memory=${memoryScore}, collective=${collective.adjustment}, final=${finalScore}, strategyGate=${recommendation.action}. ")
             append(newsSentimentEngine.explain(newsScore)).append(' ')
             append(tradeMemoryEngine.explain(memoryScore)).append(' ')
-            if (CloudShareCollectiveCache.snapshot().enabled) append(collective.reason).append(' ')
+            if (collectiveSnapshot.enabled) {
+                append(collective.reason).append(' ')
+                append("CloudShare data=${collectiveSnapshot.dataState}, indexed=${collectiveSnapshot.indexedSamples}, observations=${collectiveSnapshot.observationSamples}, resolvedOutcomes=${collectiveSnapshot.outcomeSamples}. ")
+            }
             append("Base reason: ${recommendation.reason}")
         }
         return AiDecision(
