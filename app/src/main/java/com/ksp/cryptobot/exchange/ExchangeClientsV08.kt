@@ -13,6 +13,7 @@ import java.security.MessageDigest
 import com.ksp.cryptobot.core.BalanceInfo
 import com.ksp.cryptobot.core.SymbolDiscoveryCandidate
 import com.ksp.cryptobot.observability.M23RemoteOperationsRuntime
+import com.ksp.cryptobot.execution.EngineAuthorityRuntime
 
 /**
  * v1.3 Kraken-live exchange layer.
@@ -775,6 +776,12 @@ class KrakenSpotClient(
         val signature = krakenSignature(path, nonce, encoded, secretKey)
         val body = encoded.toRequestBody("application/x-www-form-urlencoded; charset=utf-8".toMediaType())
         val req = Request.Builder().url("https://api.kraken.com$path").addHeader("API-Key", apiKey).addHeader("API-Sign", signature).post(body).build()
+        if (request.side == OrderSide.BUY) {
+            val m24Authority = EngineAuthorityRuntime.canSubmitNewLiveEntryAuthoritative()
+            if (!m24Authority.first) {
+                error("M24 cross-platform authority gate blocks BUY at Kraken AddOrder boundary: ${m24Authority.second}")
+            }
+        }
         KrakenPrivateExecutionRegistry.markSubmissionPending(
             clientOrderId = krakenClientOrderId,
             symbol = rule.canonicalSymbol,

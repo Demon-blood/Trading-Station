@@ -193,6 +193,8 @@ object M23HealthSnapshotBuilder {
             "state" to authority.state,
             "engine_id_fingerprint" to M23Redaction.fingerprint(authority.engineId),
             "holder_id_fingerprint" to M23Redaction.fingerprint(authority.holderEngineId),
+            "local_platform" to authority.localPlatform.ifBlank { "UNKNOWN" },
+            "holder_platform" to authority.holderPlatform.ifBlank { "UNKNOWN" },
             "fencing_token" to authority.fencingToken,
             "lease_schema_version" to authority.leaseSchemaVersion,
             "lease_remaining_ms" to authority.leaseRemainingMs,
