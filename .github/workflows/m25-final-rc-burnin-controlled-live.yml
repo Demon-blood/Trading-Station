@@ -61,6 +61,19 @@ jobs:
           set -euo pipefail
           python tools/verify_m24_1_warmup_evidence_hotfix.py . | tee m25-prerequisite-m24-1.log
 
+      - name: Verify bootstrap workflow metadata fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'roomSchema=12' .github/workflows/android-canonical-build.yml || {
+            echo "M25 bootstrap prerequisite missing: android-canonical-build.yml must contain roomSchema=12." >&2
+            exit 1
+          }
+          if grep -q 'roomSchema=11' .github/workflows/android-canonical-build.yml; then
+            echo "Stale roomSchema=11 is still present in canonical workflow." >&2
+            exit 1
+          fi
+
       - name: Apply controlled M25 changes
         shell: bash
         run: |
@@ -128,17 +141,16 @@ jobs:
           set -euo pipefail
           gradle --no-daemon :app:assembleDebug --stacktrace | tee m25-debug-apk.log
 
-      - name: Verify controlled M25 diff
+      - name: Verify controlled M25 app-only diff
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t files < <({
-            git diff --name-only -- app .github/workflows/android-canonical-build.yml
+            git diff --name-only -- app
             git ls-files --others --exclude-standard -- app
           } | sort -u)
           printf '%s\n' "${files[@]}" | tee m25-files.txt
           expected=(
-            .github/workflows/android-canonical-build.yml
             app/src/main/assets/release/m25_evidence_template.json
             app/src/main/assets/release/m25_release_candidate_runbook.md
             app/src/main/java/com/ksp/cryptobot/release/M25ReleaseReadiness.kt
@@ -147,6 +159,13 @@ jobs:
           printf '%s\n' "${expected[@]}" | sort > /tmp/m25-expected.txt
           printf '%s\n' "${files[@]}" | sort > /tmp/m25-actual.txt
           diff -u /tmp/m25-expected.txt /tmp/m25-actual.txt
+
+          if [[ -n "$(git status --porcelain -- .github/workflows)" ]]; then
+            echo "Generated M25 branch must not contain workflow changes." >&2
+            git status --short -- .github/workflows
+            exit 1
+          fi
+
           git diff --check
 
       - name: Create milestone branch and commit
@@ -159,7 +178,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "${BRANCH_NAME}"
-          git add app .github/workflows/android-canonical-build.yml
+          git add app
           git diff --cached --check
           git commit -m "M25 final release candidate readiness gate"
           git push origin "${BRANCH_NAME}"
@@ -175,14 +194,16 @@ jobs:
           body=$(cat <<'BODY'
           Implements M25 — Final Release Candidate / Burn-In / Controlled LIVE readiness.
 
+          Bootstrap prerequisite already corrected canonical INSTALL_IDENTITY from stale Room schema 11 to actual schema 12 on main.
+
           This PR:
-          - corrects canonical install identity from stale Room schema 11 to actual schema 12;
           - adds a fail-closed M25 readiness state machine;
           - requires 24h PAPER + 24h shadow burn-in before controlled LIVE eligibility;
           - keeps hosted CloudShare production verification external/read-only;
           - preserves M22/M23/M24 security, diagnostics, recovery and authority contracts;
           - does not place any Kraken order from CI;
-          - separates CODE_RC, CONTROLLED_LIVE_ELIGIBLE and RELEASE_READY truthfully.
+          - separates CODE_RC, CONTROLLED_LIVE_ELIGIBLE and RELEASE_READY truthfully;
+          - contains app files only, so the GitHub App does not need workflow-write permission.
 
           Final M25 closure still requires the post-merge M25 RC Validation workflow plus the normal post-merge OSV and canonical checks.
           BODY

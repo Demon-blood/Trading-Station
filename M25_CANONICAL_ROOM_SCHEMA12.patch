@@ -1,0 +1,5 @@
+--- a/.github/workflows/android-canonical-build.yml
++++ b/.github/workflows/android-canonical-build.yml
+@@
+-            echo "roomSchema=11"
++            echo "roomSchema=12"
