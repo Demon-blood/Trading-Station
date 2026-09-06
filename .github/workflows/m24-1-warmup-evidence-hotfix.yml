@@ -1,0 +1,217 @@
+name: M24.1 Warmup Evidence Starvation Hotfix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: read
+
+concurrency:
+  group: m24-1-warmup-evidence-hotfix
+  cancel-in-progress: false
+
+jobs:
+  m241:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Require main dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "M24.1 must be dispatched from main. Current ref=${GITHUB_REF}" >&2
+            exit 1
+          fi
+
+      - name: Checkout merged main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verify M24 prerequisite on merged main
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/verify_m24_cross_platform_authority.py . | tee m24-1-prerequisite-m24.log
+
+      - name: Apply M24.1 controlled hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/apply_m24_1_warmup_evidence_hotfix.py . | tee m24-1-apply.log
+
+      - name: Verify M24.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/verify_m24_1_warmup_evidence_hotfix.py . | tee m24-1-verifier.log
+
+      - name: Verify M24 through M3 and canonical contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          verifiers=(
+            tools/verify_m24_cross_platform_authority.py
+            tools/verify_m23_observability_diagnostics.py
+            tools/verify_m22_security_release_integrity.py
+            tools/verify_m21_chaos_recovery.py
+            tools/verify_m20_net_profit_optimizer.py
+            tools/verify_m19_learning_governance.py
+            tools/verify_m18_strategy_truth.py
+            tools/verify_m17_portfolio_correlation.py
+            tools/verify_m16_market_microstructure.py
+            tools/verify_m15_atomic_amend_lifecycle.py
+            tools/verify_m14_dms_authority_fencing.py
+            tools/verify_m13_private_execution_ledger.py
+            tools/verify_m12_order_truth_authority.py
+            tools/verify_m11_execution_fail_closed.py
+            tools/verify_m10_champion_degradation.py
+            tools/verify_m9_champion_challenger.py
+            tools/verify_m8_ai_adaptive_governance.py
+            tools/verify_m7_ai_value_attribution.py
+            tools/verify_m6_selective_ai.py
+            tools/verify_m5_trade_economics.py
+            tools/verify_m4_execution_hardening.py
+            tools/verify_m32_kraken_websocket.py
+            tools/verify_m3_runtime_host.py
+            tools/verify_canonical_v407.py
+          )
+          : > m24-1-regression-verifiers.log
+          for verifier in "${verifiers[@]}"; do
+            echo "===== ${verifier} =====" | tee -a m24-1-regression-verifiers.log
+            python "${verifier}" . 2>&1 | tee -a m24-1-regression-verifiers.log
+          done
+
+      - name: Kotlin compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:compileDebugKotlin --stacktrace | tee m24-1-kotlin-compile.log
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace | tee m24-1-unit-tests.log
+
+      - name: Assemble debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace | tee m24-1-apk.log
+
+      - name: Verify controlled M24.1 diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <({ git diff --name-only -- app; git ls-files --others --exclude-standard -- app; } | sort -u)
+          printf '%s\n' "${files[@]}" | tee m24-1-files.txt
+          expected=(
+            app/src/main/assets/cloudshare_setup/m24_1_warmup_evidence_semantics.md
+            app/src/main/java/com/ksp/cryptobot/cloudshare/CloudShareDiagnostics.kt
+            app/src/main/java/com/ksp/cryptobot/cloudshare/CloudShareSyncEngine.kt
+            app/src/main/java/com/ksp/cryptobot/cloudshare/CollectiveIntelligenceIndexer.kt
+            app/src/main/java/com/ksp/cryptobot/cloudshare/CollectiveLearningModels.kt
+            app/src/main/java/com/ksp/cryptobot/intelligence/AiDecisionEngine.kt
+            app/src/main/java/com/ksp/cryptobot/ui/CloudShareScreen.kt
+            app/src/test/java/com/ksp/cryptobot/cloudshare/M241WarmupEvidenceTest.kt
+          )
+          printf '%s\n' "${expected[@]}" | sort > /tmp/m24-1-expected.txt
+          printf '%s\n' "${files[@]}" | sort > /tmp/m24-1-actual.txt
+          diff -u /tmp/m24-1-expected.txt /tmp/m24-1-actual.txt
+          if [[ -n "$(git status --porcelain -- .github/workflows)" ]]; then
+            echo "Generated hotfix branch must not contain workflow changes." >&2
+            git status --short -- .github/workflows
+            exit 1
+          fi
+
+      - name: Create hotfix branch and commit
+        id: branch
+        shell: bash
+        env:
+          BRANCH_NAME: hotfix/m24-1-warmup-evidence-${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${BRANCH_NAME}"
+          git add app
+          git diff --cached --check
+          git commit -m "M24.1 fix CloudShare warmup evidence starvation"
+          git push origin "${BRANCH_NAME}"
+          echo "name=${BRANCH_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create M24.1 pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          body=$(cat <<'BODY'
+          Implements M24.1 — Warmup / Evidence Starvation Hotfix.
+
+          Root cause fixed:
+          - Android emitted decision and signal aggregate sample_count values, but the collective indexer discarded them unless they represented realized outcomes.
+          - The cache loaded only isOutcome=1 rows, so healthy scanning/sync could remain visually indistinguishable from an uninitialized warmup.
+          - Existing installs had already marked the old V8 index rebuild complete, so corrected indexing also requires a new one-time reindex generation.
+
+          New semantics:
+          - fresh signals/decisions/trades can establish DATA readiness;
+          - only resolved outcome rows can influence collective win-rate, edge, or score adjustment;
+          - the configured resolved-outcome threshold (25 by default) is unchanged;
+          - local strategy remains active while outcome learning is collecting;
+          - stale (>24h) evidence cannot falsely satisfy data readiness;
+          - existing downloaded intelligence is reindexed once under the M24.1 marker;
+          - CloudShare Repair now exposes indexed observations and resolved outcomes separately;
+          - no Room schema bump and no M24 execution/authority surface changes.
+
+          CI verifies M24.1, every M24→M3 regression verifier, canonical verifier, Kotlin compile, unit tests, and APK assembly.
+          BODY
+          )
+          if ! gh pr create --base main --head "${BRANCH_NAME}" --title "M24.1 — Warmup / Evidence Starvation Hotfix" --body "${body}"; then
+            echo "WARNING: Branch pushed, but automatic PR creation was denied by repository/App permissions." >&2
+            echo "Create a PR from ${BRANCH_NAME} to main manually." >&2
+          fi
+
+      - name: Upload M24.1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m24-1-warmup-evidence-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            m24-1-*.log
+            m24-1-files.txt
+            app/build/outputs/apk/debug/*.apk
+            app/build/reports/tests/testDebugUnitTest/**
