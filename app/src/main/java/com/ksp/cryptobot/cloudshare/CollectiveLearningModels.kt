@@ -4,6 +4,7 @@ import kotlin.math.abs
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Locale
+import java.time.Instant
 
 data class CollectiveOutcomeRow(
     val eventId: String,
@@ -19,7 +20,10 @@ data class CollectiveOutcomeRow(
     val wins: Int,
     val losses: Int,
     val edgeSum: Double,
-    val eventTimestamp: String
+    val eventTimestamp: String,
+    // Default true preserves historical constructor/source compatibility. New index rows
+    // explicitly carry the database isOutcome flag.
+    val isOutcome: Boolean = true
 )
 
 data class CollectiveScoreResult(
@@ -38,7 +42,7 @@ data class CollectiveScoreResult(
     companion object {
         fun neutral(requiredSamples: Int, samples: Int = 0, tier: String = "none") = CollectiveScoreResult(
             adjustment = 0,
-            reason = "CloudShare evidence neutral: $samples/$requiredSamples matching outcome samples; local strategy remains active.",
+            reason = "CloudShare outcome learning collecting: $samples/$requiredSamples matching resolved outcomes; data/sync readiness is tracked separately and the local strategy remains active.",
             ready = false,
             matchTier = tier,
             samples = samples,
@@ -54,13 +58,29 @@ data class CollectiveScoreResult(
 
 data class CollectiveCacheSnapshot(
     val enabled: Boolean,
+    // Backward-compatible outcome-only fields.
     val rowCount: Int,
     val totalSamples: Int,
     val contributors: Int,
     val newestEventTimestamp: String,
     val minSamples: Int,
     val maxAdjustment: Int,
-    val weight: Double
+    val weight: Double,
+    // M24.1 truthful readiness fields. Observations prove data flow; only outcomes can
+    // affect collective edge / win-rate scoring.
+    val indexedRows: Int = 0,
+    val indexedSamples: Int = 0,
+    val indexedContributors: Int = 0,
+    val observationRows: Int = 0,
+    val observationSamples: Int = 0,
+    val outcomeRows: Int = 0,
+    val outcomeSamples: Int = 0,
+    val dataReady: Boolean = false,
+    val dataState: String = "DISABLED",
+    val dataRequiredSamples: Int = 0,
+    val outcomeState: String = "COLLECTING_OUTCOMES",
+    val newestDataTimestamp: String = "",
+    val newestOutcomeTimestamp: String = ""
 )
 
 object CollectiveScoreMath {
@@ -86,6 +106,9 @@ object CollectiveScoreMath {
         val regimeU = regime.trim().uppercase()
         val timeframeL = timeframe.trim().lowercase()
         val required = minSamples.coerceAtLeast(1)
+        // Safety invariant: observational signals/decisions can establish DATA_READY but
+        // can never contribute to profit/edge/win-rate adjustments.
+        val outcomeRows = rows.filter { it.isOutcome }
 
         val tiers = listOf(
             Tier("symbol+strategy+regime+timeframe", 1.00,
@@ -115,7 +138,7 @@ object CollectiveScoreMath {
         var chosen: Pair<Tier, List<CollectiveOutcomeRow>>? = null
         for (tier in tiers) {
             if (!tier.usable) continue
-            val matches = rows.filter(tier.matches)
+            val matches = outcomeRows.filter(tier.matches)
             val samples = matches.sumOf { it.sampleCount.coerceAtLeast(0) }
             val currentBest = bestPartial?.second?.sumOf { it.sampleCount.coerceAtLeast(0) } ?: -1
             if (samples > currentBest) bestPartial = tier to matches
@@ -173,6 +196,11 @@ object CloudShareCollectiveCache {
     @Volatile private var maxAdjustment: Int = 6
     @Volatile private var weight: Double = 1.0
 
+    private const val DATA_READINESS_MAX_REQUIRED_SAMPLES = 10
+    private const val DATA_FRESHNESS_MS = 24L * 60L * 60L * 1000L
+    private const val CLOCK_SKEW_TOLERANCE_MS = 5L * 60L * 1000L
+    private val READINESS_SOURCES = setOf("shared_signal_daily", "shared_learning_daily", "shared_trade_daily")
+
     fun install(
         outcomeRows: List<CollectiveOutcomeRow>,
         enabled: Boolean,
@@ -198,15 +226,57 @@ object CloudShareCollectiveCache {
 
     fun snapshot(): CollectiveCacheSnapshot {
         val local = rows
+        val indexed = local.filter { row ->
+            row.sampleCount > 0 && row.sourceTable in READINESS_SOURCES
+        }
+        val outcomes = indexed.filter { it.isOutcome }
+        val observations = indexed.filterNot { it.isOutcome }
+        val indexedSamples = indexed.sumOf { it.sampleCount.coerceAtLeast(0) }
+        val observationSamples = observations.sumOf { it.sampleCount.coerceAtLeast(0) }
+        val outcomeSamples = outcomes.sumOf { it.sampleCount.coerceAtLeast(0) }
+        val newestDataTimestamp = indexed.maxOfOrNull { it.eventTimestamp }.orEmpty()
+        val newestOutcomeTimestamp = outcomes.maxOfOrNull { it.eventTimestamp }.orEmpty()
+        val newestDataEpochMs = runCatching { Instant.parse(newestDataTimestamp).toEpochMilli() }.getOrDefault(0L)
+        val ageMs = if (newestDataEpochMs > 0L) System.currentTimeMillis() - newestDataEpochMs else Long.MAX_VALUE
+        val freshData = newestDataEpochMs > 0L && ageMs in -CLOCK_SKEW_TOLERANCE_MS..DATA_FRESHNESS_MS
+        val dataRequiredSamples = minOf(minSamples, DATA_READINESS_MAX_REQUIRED_SAMPLES).coerceAtLeast(1)
+        val dataReady = enabled && indexedSamples >= dataRequiredSamples && freshData
+        val dataState = when {
+            !enabled -> "DISABLED"
+            indexedSamples <= 0 -> "NO_DATA"
+            !freshData -> "STALE_DATA"
+            indexedSamples < dataRequiredSamples -> "COLLECTING_DATA"
+            else -> "READY"
+        }
+        val outcomeState = when {
+            !enabled -> "DISABLED"
+            outcomeSamples >= minSamples -> "OUTCOME_THRESHOLD_REACHED"
+            else -> "COLLECTING_OUTCOMES"
+        }
         return CollectiveCacheSnapshot(
             enabled = enabled,
-            rowCount = local.size,
-            totalSamples = local.sumOf { it.sampleCount.coerceAtLeast(0) },
-            contributors = local.map { it.contributorId }.filter { it.isNotBlank() }.distinct().size,
-            newestEventTimestamp = local.maxOfOrNull { it.eventTimestamp }.orEmpty(),
+            // Preserve old snapshot semantics for any existing callers: these remain
+            // resolved-outcome-only values.
+            rowCount = outcomes.size,
+            totalSamples = outcomeSamples,
+            contributors = outcomes.map { it.contributorId }.filter { it.isNotBlank() }.distinct().size,
+            newestEventTimestamp = newestOutcomeTimestamp,
             minSamples = minSamples,
             maxAdjustment = maxAdjustment,
-            weight = weight
+            weight = weight,
+            indexedRows = indexed.size,
+            indexedSamples = indexedSamples,
+            indexedContributors = indexed.map { it.contributorId }.filter { it.isNotBlank() }.distinct().size,
+            observationRows = observations.size,
+            observationSamples = observationSamples,
+            outcomeRows = outcomes.size,
+            outcomeSamples = outcomeSamples,
+            dataReady = dataReady,
+            dataState = dataState,
+            dataRequiredSamples = dataRequiredSamples,
+            outcomeState = outcomeState,
+            newestDataTimestamp = newestDataTimestamp,
+            newestOutcomeTimestamp = newestOutcomeTimestamp
         )
     }
 }

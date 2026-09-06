@@ -98,7 +98,7 @@ class CloudShareSyncEngine(context: Context) {
     }
 
     suspend fun refreshCollectiveCache(): Int {
-        val indexed = dao.collectiveOutcomeRows(25_000)
+        val indexed = dao.collectiveIndexForBootstrap(25_000)
         val rows = indexed.map { row ->
             CollectiveOutcomeRow(
                 eventId = row.eventId,
@@ -114,7 +114,8 @@ class CloudShareSyncEngine(context: Context) {
                 wins = row.wins,
                 losses = row.losses,
                 edgeSum = row.edgeSum,
-                eventTimestamp = row.eventTimestamp
+                eventTimestamp = row.eventTimestamp,
+                isOutcome = row.isOutcome
             )
         }
         CloudShareCollectiveCache.install(
@@ -124,7 +125,7 @@ class CloudShareSyncEngine(context: Context) {
             maxAdjustment = settings.collectiveMaxAdjustment,
             weight = settings.collectiveWeight
         )
-        return rows.size
+        return rows.count { it.isOutcome }
     }
 
     suspend fun resetBackfill() = backfill.reset()
@@ -168,7 +169,7 @@ class CloudShareSyncEngine(context: Context) {
 
 
     private suspend fun reindexExistingIntelligenceIfNeeded() {
-        if (dao.stateValue(KEY_REINDEX_V8) == "1") return
+        if (dao.stateValue(KEY_REINDEX_M24_1) == "1") return
         val existing = dao.intelligenceForReindex(25_000)
         if (existing.isNotEmpty()) {
             val indexes = mutableListOf<CloudShareCollectiveIndexEntity>()
@@ -185,7 +186,10 @@ class CloudShareSyncEngine(context: Context) {
             }
             if (indexes.isNotEmpty()) dao.upsertCollectiveIndex(indexes)
         }
+        // Keep the historical marker and add a new marker so previously completed V8
+        // installs still rerun exactly once with the corrected observational indexer.
         dao.putState(CloudShareStateEntity(KEY_REINDEX_V8, "1"))
+        dao.putState(CloudShareStateEntity(KEY_REINDEX_M24_1, "1"))
     }
 
     private suspend fun uploadPending(client: CloudShareClient, creds: CloudShareCredentials): Triple<Int, Int, Int> {
@@ -270,6 +274,7 @@ class CloudShareSyncEngine(context: Context) {
         private const val KEY_LAST_SYNC_MS = "last_sync_ms"
         private const val KEY_DOWNLOAD_CURSOR = "download_cursor"
         private const val KEY_REINDEX_V8 = "collective_index_rebuilt_v8"
+        private const val KEY_REINDEX_M24_1 = "collective_index_rebuilt_m24_1"
         private const val KEY_FULL_AGGREGATE_SNAPSHOT = "full_aggregate_snapshot_v8"
         private const val MAX_UPLOAD_BATCHES_PER_SYNC = 4
         private const val MAX_DOWNLOAD_PAGES_PER_SYNC = 4
