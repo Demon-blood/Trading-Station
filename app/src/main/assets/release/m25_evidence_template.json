@@ -1,0 +1,27 @@
+{
+  "m25": 25,
+  "machine": {
+    "ci_regression": "PENDING",
+    "dependency_security_scan": "PENDING_POST_MERGE_OSV",
+    "room_schema12_source_verified": "PENDING",
+    "restart_recovery_contract": "PENDING",
+    "network_recovery_contract": "PENDING",
+    "partial_fill_lifecycle_contract": "PENDING",
+    "diagnostics_contract": "PENDING",
+    "release_signed": "PENDING",
+    "cloudshare_production": "PENDING"
+  },
+  "operator_attestations": {
+    "install_upgrade_verified": false,
+    "kraken_permissions_verified": false,
+    "distributed_authority_verified": false,
+    "paper_burnin_hours": 0,
+    "shadow_burnin_hours": 0,
+    "tiny_live_completed": false,
+    "protective_exit_verified": false,
+    "network_failure_lifecycle_verified": false,
+    "fee_pnl_reconciled": false,
+    "final_diagnostics_exported": false
+  },
+  "result": "NOT_EVALUATED"
+}
