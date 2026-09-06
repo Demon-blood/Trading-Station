@@ -1,0 +1,216 @@
+name: M25 RC Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      validation_stage:
+        description: prelive = prove controlled-LIVE eligibility; postlive = final M25 closure evidence
+        required: true
+        type: choice
+        options:
+          - prelive
+          - postlive
+        default: prelive
+      cloudshare_base_url:
+        description: Production CloudShare base URL (HTTPS, no trailing /v1/health)
+        required: true
+        type: string
+      paper_burnin_hours:
+        description: Completed PAPER burn-in hours (operator evidence)
+        required: true
+        type: string
+        default: '0'
+      shadow_burnin_hours:
+        description: Completed shadow burn-in hours (operator evidence)
+        required: true
+        type: string
+        default: '0'
+      install_upgrade_verified:
+        description: Operator verified install/upgrade preservation on target Android device
+        required: true
+        type: boolean
+        default: false
+      kraken_permissions_verified:
+        description: Current in-app Kraken permission assessment is SAFE
+        required: true
+        type: boolean
+        default: false
+      distributed_authority_verified:
+        description: M24 authority/fencing status verified for the production account
+        required: true
+        type: boolean
+        default: false
+      tiny_live_completed:
+        description: Postlive only - tiny operator-controlled LIVE lifecycle completed
+        required: true
+        type: boolean
+        default: false
+      protective_exit_verified:
+        description: Postlive only - protective/exit SELL verified
+        required: true
+        type: boolean
+        default: false
+      network_failure_lifecycle_verified:
+        description: Postlive only - network failure/recovery lifecycle verified
+        required: true
+        type: boolean
+        default: false
+      fee_pnl_reconciled:
+        description: Postlive only - fees and realized PnL reconciled to Kraken truth
+        required: true
+        type: boolean
+        default: false
+      final_diagnostics_exported:
+        description: Postlive only - final diagnostics bundle exported
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  security-events: read
+
+concurrency:
+  group: m25-rc-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CTS_RELEASE_KEYSTORE_B64: ${{ secrets.CTS_RELEASE_KEYSTORE_B64 }}
+      CTS_RELEASE_STORE_PASSWORD: ${{ secrets.CTS_RELEASE_STORE_PASSWORD }}
+      CTS_RELEASE_KEY_ALIAS: ${{ secrets.CTS_RELEASE_KEY_ALIAS }}
+      CTS_RELEASE_KEY_PASSWORD: ${{ secrets.CTS_RELEASE_KEY_PASSWORD }}
+
+    steps:
+      - name: Require main dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || { echo "M25 RC validation must run from main." >&2; exit 1; }
+
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verify merged M25 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/verify_m25_final_rc.py . | tee m25-validation-source.log
+
+      - name: Full regression compile and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/verify_m24_1_warmup_evidence_hotfix.py .
+          python tools/verify_m24_cross_platform_authority.py .
+          python tools/verify_m23_observability_diagnostics.py .
+          python tools/verify_m22_security_release_integrity.py .
+          python tools/verify_m21_chaos_recovery.py .
+          python tools/verify_canonical_v407.py .
+          gradle --no-daemon :app:compileDebugKotlin --stacktrace | tee m25-validation-compile.log
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace | tee m25-validation-tests.log
+
+      - name: Read-only production CloudShare probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/m25_cloudshare_probe.py \
+            "${{ inputs.cloudshare_base_url }}" \
+            --output m25-cloudshare-production.json | tee m25-cloudshare-probe.log
+
+      - name: Require release signing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CTS_RELEASE_KEYSTORE_B64 CTS_RELEASE_STORE_PASSWORD CTS_RELEASE_KEY_ALIAS CTS_RELEASE_KEY_PASSWORD; do
+            [[ -n "${!name}" ]] || { echo "Missing required release signing secret: ${name}" >&2; exit 1; }
+          done
+
+      - name: Prepare release signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github-ci
+          printf '%s' "${CTS_RELEASE_KEYSTORE_B64}" | base64 --decode > .github-ci/release.jks
+          chmod 600 .github-ci/release.jks
+          cat > signing.properties <<EOF
+          storeFile=.github-ci/release.jks
+          storePassword=${CTS_RELEASE_STORE_PASSWORD}
+          keyAlias=${CTS_RELEASE_KEY_ALIAS}
+          keyPassword=${CTS_RELEASE_KEY_PASSWORD}
+          EOF
+          chmod 600 signing.properties
+
+      - name: Build signed release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:assembleRelease --stacktrace | tee m25-release-build.log
+          APK="$(find app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)"
+          [[ -n "${APK}" && -s "${APK}" ]] || { echo "Release APK not found." >&2; exit 1; }
+          echo "RELEASE_APK=${APK}" >> "${GITHUB_ENV}"
+          "${ANDROID_HOME}/build-tools/35.0.0/apksigner" verify --verbose --print-certs "${APK}" | tee m25-release-signature.txt
+          sha256sum "${APK}" | tee m25-release-sha256.txt
+
+      - name: Evaluate M25 external evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/evaluate_m25_rc.py \
+            --stage "${{ inputs.validation_stage }}" \
+            --paper-hours "${{ inputs.paper_burnin_hours }}" \
+            --shadow-hours "${{ inputs.shadow_burnin_hours }}" \
+            --install-upgrade "${{ inputs.install_upgrade_verified }}" \
+            --kraken-permissions "${{ inputs.kraken_permissions_verified }}" \
+            --distributed-authority "${{ inputs.distributed_authority_verified }}" \
+            --tiny-live "${{ inputs.tiny_live_completed }}" \
+            --protective-exit "${{ inputs.protective_exit_verified }}" \
+            --network-failure "${{ inputs.network_failure_lifecycle_verified }}" \
+            --fee-pnl "${{ inputs.fee_pnl_reconciled }}" \
+            --final-diagnostics "${{ inputs.final_diagnostics_exported }}" \
+            --cloudshare-json m25-cloudshare-production.json \
+            --release-apk "${RELEASE_APK}" \
+            --output m25-release-evidence.json | tee m25-evaluation.log
+
+      - name: Upload M25 release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m25-rc-validation-${{ inputs.validation_stage }}-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            m25-*.log
+            m25-*.json
+            m25-release-signature.txt
+            m25-release-sha256.txt
+            app/build/outputs/apk/release/*.apk
+            app/build/reports/tests/testDebugUnitTest/**

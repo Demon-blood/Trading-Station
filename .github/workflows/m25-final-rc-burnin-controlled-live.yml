@@ -1,0 +1,205 @@
+name: M25 Final RC Burn-In Controlled LIVE
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: read
+
+concurrency:
+  group: m25-final-rc
+  cancel-in-progress: false
+
+jobs:
+  m25:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Require main dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || { echo "M25 must be dispatched from main." >&2; exit 1; }
+
+      - name: Checkout merged main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verify merged M24.1 prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/verify_m24_1_warmup_evidence_hotfix.py . | tee m25-prerequisite-m24-1.log
+
+      - name: Apply controlled M25 changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/apply_m25_final_rc.py . | tee m25-apply.log
+
+      - name: Verify M25
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/verify_m25_final_rc.py . | tee m25-verifier.log
+
+      - name: Verify M24.1 through M3 and canonical contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          verifiers=(
+            tools/verify_m24_1_warmup_evidence_hotfix.py
+            tools/verify_m24_cross_platform_authority.py
+            tools/verify_m23_observability_diagnostics.py
+            tools/verify_m22_security_release_integrity.py
+            tools/verify_m21_chaos_recovery.py
+            tools/verify_m20_net_profit_optimizer.py
+            tools/verify_m19_learning_governance.py
+            tools/verify_m18_strategy_truth.py
+            tools/verify_m17_portfolio_correlation.py
+            tools/verify_m16_market_microstructure.py
+            tools/verify_m15_atomic_amend_lifecycle.py
+            tools/verify_m14_dms_authority_fencing.py
+            tools/verify_m13_private_execution_ledger.py
+            tools/verify_m12_order_truth_authority.py
+            tools/verify_m11_execution_fail_closed.py
+            tools/verify_m10_champion_degradation.py
+            tools/verify_m9_champion_challenger.py
+            tools/verify_m8_ai_adaptive_governance.py
+            tools/verify_m7_ai_value_attribution.py
+            tools/verify_m6_selective_ai.py
+            tools/verify_m5_trade_economics.py
+            tools/verify_m4_execution_hardening.py
+            tools/verify_m32_kraken_websocket.py
+            tools/verify_m3_runtime_host.py
+            tools/verify_canonical_v407.py
+          )
+          : > m25-regression-verifiers.log
+          for verifier in "${verifiers[@]}"; do
+            echo "===== ${verifier} =====" | tee -a m25-regression-verifiers.log
+            python "${verifier}" . 2>&1 | tee -a m25-regression-verifiers.log
+          done
+
+      - name: Kotlin compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:compileDebugKotlin --stacktrace | tee m25-kotlin-compile.log
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace | tee m25-unit-tests.log
+
+      - name: Assemble debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace | tee m25-debug-apk.log
+
+      - name: Verify controlled M25 diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <({
+            git diff --name-only -- app .github/workflows/android-canonical-build.yml
+            git ls-files --others --exclude-standard -- app
+          } | sort -u)
+          printf '%s\n' "${files[@]}" | tee m25-files.txt
+          expected=(
+            .github/workflows/android-canonical-build.yml
+            app/src/main/assets/release/m25_evidence_template.json
+            app/src/main/assets/release/m25_release_candidate_runbook.md
+            app/src/main/java/com/ksp/cryptobot/release/M25ReleaseReadiness.kt
+            app/src/test/java/com/ksp/cryptobot/release/M25ReleaseReadinessTest.kt
+          )
+          printf '%s\n' "${expected[@]}" | sort > /tmp/m25-expected.txt
+          printf '%s\n' "${files[@]}" | sort > /tmp/m25-actual.txt
+          diff -u /tmp/m25-expected.txt /tmp/m25-actual.txt
+          git diff --check
+
+      - name: Create milestone branch and commit
+        id: branch
+        shell: bash
+        env:
+          BRANCH_NAME: milestone/m25-final-rc-${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${BRANCH_NAME}"
+          git add app .github/workflows/android-canonical-build.yml
+          git diff --cached --check
+          git commit -m "M25 final release candidate readiness gate"
+          git push origin "${BRANCH_NAME}"
+          echo "name=${BRANCH_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create M25 pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          body=$(cat <<'BODY'
+          Implements M25 — Final Release Candidate / Burn-In / Controlled LIVE readiness.
+
+          This PR:
+          - corrects canonical install identity from stale Room schema 11 to actual schema 12;
+          - adds a fail-closed M25 readiness state machine;
+          - requires 24h PAPER + 24h shadow burn-in before controlled LIVE eligibility;
+          - keeps hosted CloudShare production verification external/read-only;
+          - preserves M22/M23/M24 security, diagnostics, recovery and authority contracts;
+          - does not place any Kraken order from CI;
+          - separates CODE_RC, CONTROLLED_LIVE_ELIGIBLE and RELEASE_READY truthfully.
+
+          Final M25 closure still requires the post-merge M25 RC Validation workflow plus the normal post-merge OSV and canonical checks.
+          BODY
+          )
+          if ! gh pr create --base main --head "${BRANCH_NAME}" --title "M25 — Final RC / Burn-In / Controlled LIVE" --body "${body}"; then
+            echo "WARNING: Branch pushed but automatic PR creation was denied." >&2
+            echo "Create a PR manually from ${BRANCH_NAME} to main." >&2
+          fi
+
+      - name: Upload M25 implementation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m25-final-rc-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            m25-*.log
+            m25-files.txt
+            app/build/outputs/apk/debug/*.apk
+            app/build/reports/tests/testDebugUnitTest/**
